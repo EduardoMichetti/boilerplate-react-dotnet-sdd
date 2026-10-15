@@ -53,7 +53,7 @@
         "operationId": "login",
         "tags": ["Authentication"],
         "summary": "Autenticar identidade previamente preparada pelo operador",
-        "description": "Exige X-Tenant-Id. Resolve catálogo técnico, estado e identidade do banco antes de verificar somente suas credenciais; nunca busca email em outros bancos. Tenant desconhecido/inativo, usuário bloqueado/desabilitado e senha incorreta têm AUTH_INVALID genérico, sem enumeração. Valida CSRF. Não retorna token de autenticação ou conexão. Login na conta de B estabelece nova sessão de B, sem converter sessão de A. Limite inicial: cinco requisições por minuto por par IP confiável/tenant e lockout Identity tenant-local.",
+        "description": "Exige X-Tenant-Id coincidente com o TenantId configurado na instalação. Valida estado ativo da instalação e identidade do seu banco (TenantDatabaseIdentity) antes de verificar somente as credenciais locais; não existe catálogo central nem busca em outros bancos. Tenant divergente/inativo, usuário bloqueado/desabilitado e senha incorreta têm AUTH_INVALID genérico, sem enumeração. Valida CSRF. Não retorna token de autenticação ou conexão. Limite inicial: cinco requisições por minuto por IP confiável na instalação e lockout Identity local.",
         "security": [],
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" },
@@ -186,7 +186,7 @@
         "operationId": "getReadiness",
         "tags": ["Health"],
         "summary": "Verificar disponibilidade da fundação",
-        "description": "Valida configuração, catálogo técnico, sua identidade/versão e key ring de I2. Isolado do middleware de sessão; não consulta todos os tenants ou contas e ignora cookies recebidos. Tenant B indisponível não torna A indisponível.",
+        "description": "Valida configuração da instalação, identidade/versão do banco configurado (TenantDatabaseIdentity) e key ring de I2. Isolado do middleware de sessão; não consulta contas e ignora cookies recebidos.",
         "security": [],
         "responses": {
           "200": {

@@ -11,68 +11,38 @@ ampliada e publicação são posteriores. Não confundir tabelas previstas com c
 
 | Local | I1 | Evolução | Proibido |
 |-------|----|----------|----------|
-| Catálogo, schema `platform` | CatalogIdentity, Tenant e StorageBinding técnicos. | Estado operacional técnico. | Contas, credenciais, concessões, sessões ou dados de negócio de tenants. |
-| Banco exclusivo do tenant | Marcador em `foundation`; Identity e concessões em `access`. | AuthSession I2 e schemas de módulos futuros. | Identidade global, registros de outro tenant ou dados compartilhados automaticamente. |
-| Testes | Dados sintéticos e credenciais de teste descartáveis. | Fixtures opcionais I3. | Distribuição na API/imagem de produção. |
-| Arquivos/configuração privados | Aliases confiáveis e referências permitidas de secrets. | Certificado/key ring e backup externo. | Secrets no catálogo, Git, bundle, imagem ou logs. |
+| Configuração da instalação (Dokploy / `.env` / secrets) | `ApplicationId`, `EnvironmentId`, `TenantId`, `TenantDisplayName` e conexão do banco da instalação. | Key ring/certificado e destino de backup externo. | Banco apartado de catálogo central (`platform_catalog`), secrets no Git, bundle, imagem ou logs. |
+| Banco exclusivo da instalação do cliente | Marcador em `foundation`; Identity e concessões em `access`. | AuthSession I2 e schemas de módulos futuros. | Identidade global, registros de outro cliente ou dados compartilhados entre instalações. |
+| Testes | Dois bancos PostgreSQL reais descartáveis simulando duas instalações de clientes + dados sintéticos. | Fixtures opcionais I3. | Distribuição na API/imagem de produção. |
 
-Schema não substitui banco por tenant. Email/CPF igual em A e B não vincula registros.
-O par `(TenantId, UserId)` identifica a conta entre contextos; um UUID local pode
-coincidir em bancos distintos sem representar a mesma conta.
+Schema não substitui banco exclusivo por instalação de cliente. Email/CPF igual nas instalações A e B não vincula registros.
+O par `(TenantId, UserId)` identifica a conta; um UUID local pode coincidir em bancos de instalações distintas sem representar a mesma conta.
 
 Usar UUID não vazio, instantes UTC `timestamptz`, índices/FKs e Version explícito
 onde há concorrência. Identity/EF pertencem a Infrastructure; Domain e Application
 usam conceitos/portas próprias, sem herdar classes de persistência.
 
-## 2. Catálogo técnico — I1
+## 2. Configuração da instalação (sem banco de catálogo central)
 
-### CatalogIdentity
+Não existe banco `platform_catalog`, `CatalogDbContext`, `CatalogIdentity`, tabela `Tenant`
+central ou `TenantStorageBinding`. Cada instalação de cliente recebe sua identidade e sua
+conexão pelas variáveis de ambiente/secrets da própria aplicação (ex.: na aba Environment
+do serviço daquele cliente no Dokploy/VPS ou em `.env.local` no desenvolvimento):
 
-| Campo | Tipo | Regra |
-|-------|------|-------|
-| SingletonId | inteiro | 1; uma linha. |
-| ApplicationId | string, 1 a 100 | Identidade confiável do produto. |
-| EnvironmentId | UUID | Ambiente imutável; não vazio. |
-| CreatedAt | instante UTC | Obrigatório. |
+| Parâmetro de configuração | Tipo | Regra |
+|---------------------------|------|-------|
+| `ApplicationId` | string, 1 a 100 | Identidade confiável do produto derivado. |
+| `EnvironmentId` | UUID | Identificador imutável do ambiente daquela instalação; não vazio. |
+| `TenantId` | UUID | Identificador imutável do cliente/empresa daquela instalação; não vazio. |
+| `TenantDisplayName` | string, 1 a 120 | Nome de apresentação da empresa naquela instalação. |
+| `TenantState` | enum (`Inactive` / `Active`) | Estado operacional configurado para a instalação. |
+| `ConnectionStrings:AppDb` (runtime) / credencial de migration (tooling) | secret / arquivo privado | Conexão exclusiva ao banco PostgreSQL daquela instalação; separada entre runtime (sem DDL) e tooling (owner de migration). |
 
-Verificar contra configuração antes de resolver bancos. Inicialização explícita
-por tooling em banco novo aprovado; não criar/corrigir automaticamente no startup.
+A API valida na inicialização e no readiness que a configuração da instalação coincide
+com o marcador `TenantDatabaseIdentity` gravado no banco configurado, impedindo que uma
+instalação seja apontada por engano para o banco de outro cliente.
 
-### Tenant
-
-| Campo | Tipo | Regra |
-|-------|------|-------|
-| Id | UUID | PK imutável. |
-| DisplayName | string, 1 a 120 | Nome de apresentação, não conexão. |
-| State | enum | I1: Inactive ou Active. Operação futura acrescenta Maintenance. |
-| CreatedAt / UpdatedAt | instantes UTC | Obrigatórios. |
-| Version | inteiro 64 bits | Concorrência; incrementa ao alterar. |
-
-Instalação de teste registra alvos Inactive para migrations. Active só atende
-operações de uso após identidade, versão e configuração confirmadas.
-I1 não cria workflow de contratação, cobrança, provisioning ou painel.
-
-### TenantStorageBinding
-
-| Campo | Tipo | Regra |
-|-------|------|-------|
-| TenantId | UUID | PK/FK Tenant; relacionamento 1:1. |
-| ServerAlias | string, até 64 | Alias existente em configuração confiável. |
-| DatabaseName | string, até 63 | Nome aprovado; instalação usa `tenant_` + UUID sem hífens. |
-| RuntimeSecretRef | string, até 128 | Referência opaca do papel runtime, não senha/conexão. |
-| MigrationSecretRef | string, até 128 | Referência do owner, acessível somente ao tooling. |
-| Version | inteiro 64 bits | Concorrência do binding. |
-
-Índice único `(ServerAlias, DatabaseName)` impede dois tenants no mesmo alvo.
-Referências aceitam alfanuméricos, `_` e `-`; não são URI, path, `..` ou conexão.
-O mapeamento privado resolve referências para arquivos confiáveis.
-Runtime não recebe o arquivo de migration; não abrir path vindo do cliente ou catálogo.
-
-Registro técnico inicial vem de configuração de instalação restrita, não endpoint
-anônimo. Reaplicação verifica registros existentes, sem upsert que troque seus bancos
-ou reative tenant. Alterar binding demanda target inativo e procedimento autorizado.
-
-## 3. Banco do tenant — I1
+## 3. Banco da instalação do cliente — I1
 
 ### TenantDatabaseIdentity
 
@@ -132,10 +102,10 @@ Revogação remove a concessão no banco local e não modifica A/B simultaneamen
 
 ### Histórico de migrations
 
-`CatalogDbContext` mantém histórico no schema `platform`;
-`TenantAccessDbContext` mantém histórico no schema `foundation`.
-Um conjunto único de migrations de acesso é aplicado separadamente a A e B;
-TenantId/EnvironmentId não alteram EF model ou snapshots.
+`TenantAccessDbContext` mantém histórico no schema `foundation` do banco da instalação.
+Um conjunto único de migrations de acesso é aplicado separadamente ao banco de cada
+instalação de cliente (validado em I1 contra dois bancos independentes A e B);
+`TenantId`/`EnvironmentId` não alteram o EF model ou snapshots.
 
 I1 valida banco vazio, reaplicação sem duplicação/perda e falhas explícitas.
 Atualização de versão anterior suportada ganha teste quando esse estado existir.
@@ -182,21 +152,20 @@ ou seus dados não migram para o catálogo por conveniência de auditoria.
 | Active -> Maintenance -> Inactive | Operação futura aprovada, tráfego drenado e versão/dados verificados. |
 | Restore de tenant | Reconciliar alvo, renovar AccessEpoch, revogar sessões e revisar concessões antes de ativar. |
 
-Backup por tenant inclui acesso e dados de negócio futuros. Restore de A não
-restaura contas de B. Restore de catálogo exige revisar bindings/estados técnicos,
-não recuperar sessões globais inexistentes. Nenhuma transação distribuída é presumida.
+Backup por instalação de cliente inclui acesso e dados de negócio futuros. Restore de A não
+restaura contas de B. Não existe banco de catálogo central para restaurar ou reconciliar.
 
 ## 6. Contextos e validação
 
-- **ResolvedTenantTarget**: TenantId/EnvironmentId/binding vindos de catálogo
-  confiável; não é identidade autenticada nem autorização de negócio.
-- **AuthenticatedTenantContext**, I2: conta e sessão verificadas no banco de origem,
-  tenant coincidente e permissões locais; scoped e imutável.
+- **InstallationTenantOptions**: `ApplicationId`, `EnvironmentId`, `TenantId`, `TenantDisplayName`
+  e estado vindos da configuração segura da instalação; confirmados contra `TenantDatabaseIdentity`.
+- **AuthenticatedTenantContext**, I2: conta e sessão verificadas no banco da própria instalação,
+  `TenantId` coincidente e permissões locais; scoped e imutável.
 - **ModuleDefinition**, I3: contratos e dependências, sem acesso às entidades internas
   de outro módulo. Fixtures comerciais existem somente nos testes.
 
-SC-009 é validado com dois bancos reais, contas de email igual, hashes independentes,
+SC-009 é validado com dois bancos reais (simulando duas instalações de clientes), contas de email igual, hashes independentes,
 consulta/alteração separadas, FK/uniqueness, commit/rollback e reaplicação sem perda.
-Reapontar binding de A para banco B ou usar role de A em B deve falhar.
+Apontar a configuração da instalação A para o banco B ou usar a credencial de A em B deve falhar.
 SC-002/SC-003 acrescentam sessão, matriz de acesso e 200 operações/20 simultâneas
 quando seus incrementos forem implementados; não são testes executados neste documento.

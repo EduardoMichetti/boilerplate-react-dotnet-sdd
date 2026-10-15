@@ -158,73 +158,71 @@ complexidade não necessária.
 [antiforgery](https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0),
 [cookie API behavior](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie?view=aspnetcore-10.0).
 
-## D05 — Catálogo e banco por tenant
+## D05 — Implantação dedicada por cliente (sem banco de catálogo central)
 
-**Decision**: um banco `platform_catalog` por ambiente para dados de controle;
-um banco exclusivo por tenant para sua persistência. O catálogo contém somente
-Tenant, binding e identidade técnica de produto/ambiente; não contém contas,
-credenciais, concessões ou sessões dos usuários. Contas e permissões são I1;
-sessões tenant-locais são I2.
+**Decision**: adotar o modelo **single-tenant por deploy (1 backend + 1 banco PostgreSQL
+exclusivo da própria aplicação por cliente)**. Não existe banco apartado `platform_catalog`
+nem `CatalogDbContext`. A identidade do cliente (`TenantId`), o ambiente (`EnvironmentId`),
+o estado operacional e a conexão/secret do banco são fornecidos à instalação por variáveis
+de ambiente/secrets (na aplicação correspondente do Dokploy na VPS ou em cofre de segredos).
+Contas e permissões são I1; sessões persistidas no banco da instalação são I2.
 
-Cada banco de tenant contém marcador de `TenantId` e `EnvironmentId`, além do histórico
-de migrations da fundação. A conexão só é liberada após correspondência do marcador
-e compatibilidade da versão. Dados sintéticos de negócio existem somente em testes.
+O banco de cada instalação contém o marcador imutável `TenantDatabaseIdentity` (`TenantId`,
+`EnvironmentId`, `AccessEpoch`), além do histórico de migrations da fundação. A conexão só é
+liberada após correspondência do marcador com a configuração da instalação e compatibilidade
+da versão. Dados sintéticos de negócio existem somente em testes.
 
-**Rationale**: o catálogo resolve a empresa e mantém referências seguras. Banco por
-tenant é exigência constitucional. Conferir o marcador também evita que uma referência
-operacional equivocada conecte o tenant A ao banco B.
-Email/CPF igual em tenants diferentes não causa deduplicação ou concessão automática.
+**Rationale**: eliminar o catálogo central remove um ponto único de falha/configuração e
+garante isolamento de processo e de banco entre clientes. Conferir o marcador `TenantDatabaseIdentity`
+impede que um erro operacional de variáveis de ambiente conecte a instalação do cliente A ao banco B.
+Email/CPF igual em clientes diferentes não causa deduplicação ou concessão automática.
 
-**Alternatives considered**: coluna de discriminação em banco compartilhado, schema
-por tenant ou confiar somente no nome do secret. Rejeitadas pela Constituição ou
-por não detectar conexão dirigida ao banco errado.
+**Alternatives considered**: backend compartilhado com banco `platform_catalog`, coluna de
+discriminação em banco compartilhado, schema por tenant ou confiar somente na string de conexão
+sem marcador no banco. Rejeitadas por preferência explícita por isolamento completo por deploy
+e proteção contra configuração cruzada.
 
 **Source**:
 [EF Core multi-tenancy](https://learn.microsoft.com/en-us/ef/core/miscellaneous/multitenancy).
 
-## D06 — Header, contexto imutável e recursos scoped
+## D06 — Identidade da instalação, validação de header e recursos scoped
 
-**Decision**: I1 tooling exige TenantId/EnvironmentId explícitos e target confiável.
-Em I2, exigir um único `X-Tenant-Id` UUID no login e nos endpoints autenticados.
-No login, resolver catálogo, estado e identidade do banco antes da verificação
-limitada às credenciais desse tenant. Em operação autenticada, o tenant da referência
-de sessão protegida prevalece; header divergente é negado sem lookup em outro banco.
-O contexto autorizado só existe após validar usuário, sessão e permissão.
+**Decision**: I1 tooling exige `TenantId`/`EnvironmentId` explícitos e conexão da instalação.
+Em I2, a instância conhece seu próprio `TenantId` pela configuração segura do ambiente; o header
+`X-Tenant-Id` (quando enviado) deve coincidir exatamente com o `TenantId` da instalação e com o
+marcador do banco antes de qualquer verificação de credenciais ou sessão. Qualquer divergência é
+negada imediatamente (403/401 conforme a operação), sem tentar selecionar outro banco.
+O contexto autorizado só existe após validar usuário, sessão e permissão no banco da instalação.
 
-DbContexts e fábricas com configuração variável são scoped; sem DbContext pooling.
-Npgsql pode reutilizar conexões apenas dentro do pool da mesma configuração exata.
-Nenhum singleton armazena conexão ou tenant atual. Troca de tenant exige novo login
-da conta daquele banco, com cancelamento de requisições e descarte do contexto anterior.
-Não existe listagem global de tenants por conta nem busca de email em múltiplos bancos.
+DbContexts são scoped. Nenhum componente aceita conexão enviada pelo frontend ou tenta resolver
+múltiplos bancos em tempo de execução. Acesso ao cliente B ocorre na instalação publicada de B,
+autenticando a conta de B. Não existe listagem global de tenants por conta.
 
-**Rationale**: o header é uma indicação, não autorização. Lifetime incorreto pode
-reutilizar configuração de outro tenant. A fundação prioriza isolamento verificável
-antes de otimizações de pooling de contextos.
+**Rationale**: com 1 backend + 1 banco por cliente, o processo não precisa nem deve conhecer
+bancos de outros clientes; validar o `TenantId` da instalação e o marcador do banco garante
+que requisições ou configurações destinadas a outro cliente falhem imediatamente.
 
-**Alternatives considered**: subdomínio, conexão enviada pelo frontend, tenant padrão,
-tenant guardado globalmente ou factory singleton com conexão variável. Subdomínio
-foi preterido pelo usuário; as demais opções violam isolamento ou confiança do servidor.
+**Alternatives considered**: roteamento dinâmico para vários bancos no mesmo processo, conexão
+enviada pelo frontend ou ausência de validação do `TenantId` da instalação. Rejeitadas por
+aumentar superfície de risco de acesso cruzado.
 
 **Source**:
 [EF Core lifetimes for multi-tenancy](https://learn.microsoft.com/en-us/ef/core/miscellaneous/multitenancy).
 
 ## D07 — Papéis operacionais e migrations fora da API
 
-**Decision**: I1 separa leitura runtime do catálogo, runtime de cada tenant e owner
-de migrations. EF CLI usa factories que validam alvo, role efetivo e configuração
-privada; API não recebe os secrets elevados e não aplica migrations no startup.
-Criação inicial de bancos/papéis é procedimento restrito do operador.
-Provisionamento amplo e ferramentas de gestão são posteriores, não parte de I1.
+**Decision**: I1 separa a credencial runtime da instalação (usada pela API, sem DDL) e o
+owner de migrations (usado apenas no processo EF CLI). As factories validam a identidade
+da instalação (`TenantId`/`EnvironmentId`), o role efetivo e o marcador do banco; a API
+não recebe os secrets elevados e não aplica migrations no startup. Criação inicial de
+banco e papéis é procedimento restrito do operador por instalação.
 
-Nomes de bancos são gerados a partir de UUIDs e identificadores são tratados com
-quoting seguro; nenhum SQL recebe nome arbitrário do consumidor. Revogar `CONNECT`
-de `PUBLIC` nos bancos da aplicação e conceder acesso apenas aos papéis correspondentes.
-Runtime não tem DDL, CREATEDB, CREATEROLE ou superuser.
+Identificadores são tratados com quoting seguro; nenhum SQL recebe nome arbitrário do
+consumidor. Revogar `CONNECT` de `PUBLIC` no banco da aplicação e conceder acesso apenas
+aos papéis da própria instalação. Runtime não tem DDL, CREATEDB, CREATEROLE ou superuser.
 
-Aplicar migrations somente no processo de tooling, com lock EF, preflight e
-diagnóstico de falha explícito. Criação de banco não é transação junto ao catálogo;
-não adotar banco desconhecido nem excluir alvo automaticamente ao falhar.
-Atualização incompatível exige janela de manutenção sem tráfego/writers.
+Aplicar migrations somente no processo de tooling, com lock EF, preflight e diagnóstico
+de falha explícito. Atualização incompatível exige janela de manutenção sem tráfego/writers.
 
 **Rationale**: ter nomes de conexão diferentes não basta se papéis podem acessar
 outros bancos. DDL e bootstrap exigem privilégios que o servidor web não deve possuir.
@@ -314,14 +312,13 @@ Rejeitadas por perda de estado e exposição.
 
 ## D11 — Recuperação e políticas por produto
 
-**Decision**: requisito de I4/pré-produção: backup lógico por catálogo e tenant,
-cópia externa criptografada,
-manifesto de tenant/ambiente/versão/ponto de recuperação e restauração em destino
-de validação antes de substituir dados. Backup de tenant inclui suas contas,
-permissões e sessões; restaurá-lo revoga sessões, renova epoch e revisa concessões
-antes de reabrir acesso. Não depende de restaurar contas de outros tenants.
-Catálogo restaurado contém apenas metadados técnicos: reconciliar bindings/estados
-antes de reabrir uso, sem recuperar identidade global inexistente.
+**Decision**: requisito de I4/pré-produção: backup lógico por banco de cada instalação
+de cliente, cópia externa criptografada, manifesto de `TenantId`/`EnvironmentId`/versão/ponto
+de recuperação e restauração em destino de validação antes de substituir dados. Backup do
+cliente inclui suas contas, permissões, sessões e dados de negócio; restaurá-lo valida o
+marcador do banco contra a identidade da instalação, revoga sessões, renova `AccessEpoch`
+e revisa concessões antes de reabrir acesso. Não depende de restaurar outros clientes nem
+existe banco de catálogo central.
 
 Cada produto define frequência, retenção, RPO, RTO e responsáveis antes de produção.
 Downgrade de aplicação não executa downgrade de dados automaticamente.

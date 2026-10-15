@@ -23,19 +23,17 @@ sem iniciar web host nem aplicar DDL no startup.
 
 | Contexto | Argumentos extras após `--` | Target e finalidade |
 |----------|----------------------------|---------------------|
-| `CatalogDbContext` | `--environment-id UUID` | Banco técnico previamente aprovado; identity/tenant/binding, nunca usuários. |
-| `TenantAccessDbContext` | `--tenant-id UUID --environment-id UUID` | Banco exclusivo encontrado no catálogo confiável, para esse tenant/ambiente. |
+| `TenantAccessDbContext` | `--tenant-id UUID --environment-id UUID` | Banco exclusivo configurado para a instalação daquele cliente/ambiente (sem `CatalogDbContext`). |
 
-Gerar migrations independentes de catálogo/acesso, com diretórios próprios e
-histórico separado. Aplicar via EF CLI no profile Compose `migrations`, com
-credenciais desse processo, não com o role usado pela API.
+Gerar migrations de acesso em `TenantAccessDbContext`. Aplicar via EF CLI no profile
+Compose `migrations`, com credenciais owner daquele banco, não com o role usado pela API.
 Nenhum argumento aceita senha, conexão livre, path enviado por HTTP ou tenant padrão.
 
 ### Preflight e inicialização
 
-1. Validar configuração de tooling, EnvironmentId e catálogo esperado.
-2. Resolver um único tenant/binding permitido; exigir estado Inactive.
-3. Conectar com owner do alvo, verificar banco/role e marcador **antes** de DDL.
+1. Validar configuração de tooling (`ApplicationId`, `EnvironmentId`, `TenantId`) e conexão do banco-alvo.
+2. Exigir janela de manutenção/instância inativa para aplicar DDL.
+3. Conectar com owner do alvo, verificar banco/role e marcador (`TenantDatabaseIdentity`) **antes** de DDL.
 4. Marcador errado, ambiente divergente ou estrutura existente sem marcador:
    falhar sem aplicar migration, corrigir identidade ou selecionar outro banco.
 5. Inicialização somente com banco vazio conhecido e aprovação explícita por
@@ -48,8 +46,6 @@ O callback ocorre depois da migration; preflight é obrigatório para não alter
 estrutura errada antes de detectar divergência. EF lock não autentica operador
 nem torna atômicas alterações concorrentes feitas fora desse processo.
 
-Configuração restrita de bootstrap prepara CatalogIdentity e bindings iniciais
-Inactive. Reaplicação verifica o existente, sem sobrescrever refs ou ativar targets.
 Migrations não criam bancos/papéis automaticamente: o operador fornece esses
 pré-requisitos em procedimento documentado. Testcontainers faz isso em testes,
 sem exigir suíte de provisionamento de produção.
@@ -62,30 +58,29 @@ Não fabricar relatório JSON ou exit codes de uma CLI administrativa que não e
 
 | Identidade | Permissão | Onde é usada |
 |------------|-----------|--------------|
-| Runtime catálogo | CONNECT/SELECT nos metadados técnicos. | API e resolução confiável. |
-| Runtime do tenant | CONNECT ao próprio banco; SELECT marcador/histórico; DML de acesso local conforme necessidade. | Contextos runtime/testes; autenticação HTTP só I2. |
-| Owner de migration | DDL no catálogo ou banco-alvo, com grants controlados. | Somente processo EF tooling. |
+| Runtime da instalação | CONNECT ao próprio banco; SELECT marcador/histórico; DML de acesso local conforme necessidade. | API da instalação e testes runtime; autenticação HTTP só I2. |
+| Owner de migration | DDL no banco-alvo da instalação, com grants controlados. | Somente processo EF tooling (`migrations`). |
 | Instalador | Criação restrita de bancos/papéis. | Pré-requisito local/instalação, nunca API. |
 
 Revogar CONNECT de PUBLIC nos bancos da aplicação e conceder somente aos roles
 correspondentes; remover criação pública de schema. Runtime não é superuser,
-owner, CREATEDB ou CREATEROLE e não recebe CONNECT a outros tenants.
+owner, CREATEDB ou CREATEROLE e não recebe CONNECT a outros bancos.
 Owner/provisionador não é montado na API nem reaproveitado em seus testes runtime.
 
 ## 3. Configuração
 
 | Configuração prevista | Uso e proteção |
 |-----------------------|----------------|
-| ApplicationId / EnvironmentId | Identidade confiável, única por produto/ambiente. |
-| CatalogRuntimeCredentialFile | Runtime catálogo, somente leitura; arquivo privado. |
-| RuntimeSecretMapFile / ServerAliases | Allowlist de refs opacas e destinos; API não escolhe path do catálogo. |
-| MigrationCatalogCredentialFile / MigrationSecretMapFile | Credenciais owners e resolução restrita; somente profile migrations. |
-| CatalogBootstrapFile | Registros técnicos iniciais Inactive, sem usuários/secrets; acesso restrito ao tooling. |
-| KeyRingPath / ProtectionCertificateFile | Apenas I2; key ring persistente e proteção em repouso em produção. |
+| `ApplicationId` / `EnvironmentId` | Identidade confiável do produto e ambiente da instalação. |
+| `TenantId` / `TenantDisplayName` / `TenantState` | Identidade e estado da empresa atendida por aquela instalação (via variáveis de ambiente no Dokploy/Compose). |
+| `ConnectionStrings:AppDb` / arquivo de credencial runtime | Conexão runtime exclusiva ao banco da instalação (sem DDL); secret privado no Dokploy/ambiente. |
+| Credencial de migration (tooling) | Credencial owner do banco da instalação; montada somente no profile `migrations`. |
+| `KeyRingPath` / `ProtectionCertificateFile` | Apenas I2; key ring persistente e proteção em repouso em produção. |
 
-Aliases e DatabaseName são validados; a conexão é construída com parsing seguro.
-Refs não aceitam URI, path, `..` ou informação de cliente. Todos os arquivos privados
-ficam fora do Git e do contexto de build; `.env.example` só indica parâmetros fictícios.
+Conexões são validadas com parsing seguro; o servidor nunca aceita string de conexão
+ou path vindo do consumidor HTTP. Todos os arquivos privados e segredos ficam fora do
+Git e do contexto de build; no Dokploy ficam nas variáveis/secrets da aplicação daquele
+cliente na VPS (ou em cofre externo); `.env.example` só indica parâmetros fictícios.
 
 ## 4. Contrato de autenticação — somente I2
 

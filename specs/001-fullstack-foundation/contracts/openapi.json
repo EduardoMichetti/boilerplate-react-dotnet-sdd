@@ -31,7 +31,7 @@
       "get": {
         "operationId": "getReadiness",
         "summary": "Verificar backend pronto no escopo I1",
-        "description": "Confere configuração runtime e identidade/versão do catálogo técnico. Não executa migrations, autentica cookies, consulta contas ou verifica todos os bancos de tenants. Sem exigência de key ring enquanto não existe autenticação HTTP.",
+        "description": "Confere configuração runtime da instalação e identidade/versão do banco configurado (TenantDatabaseIdentity e histórico de migrations). Não executa migrations, autentica cookies ou consulta contas. Sem exigência de key ring enquanto não existe autenticação HTTP.",
         "responses": {
           "200": {
             "description": "Backend pronto no escopo I1.",

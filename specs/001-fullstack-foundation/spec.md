@@ -25,7 +25,10 @@ de integração continuam obrigatórios.
 
 ## Clarifications
 
-### Session 2026-10-13
+### Session 2026-10-15
+
+- Q: Como deve funcionar o isolamento entre clientes/empresas e onde ficam os segredos de conexão?
+  → A: Opção 1 — implantação dedicada por cliente (single-tenant por deploy: 1 backend + 1 banco PostgreSQL da própria aplicação por cliente), sem banco apartado de catálogo central (`platform_catalog`). Os segredos e conexões de cada cliente ficam nas variáveis de ambiente/secrets da respectiva aplicação no Dokploy (na VPS) ou cofre externo, nunca no Git ou no frontend.
 
 - Q: Se uma pessoa tiver acesso ao sistema no tenant A e também no tenant B,
   as duas contas devem ter senha, bloqueio e recuperação independentes?
@@ -37,8 +40,8 @@ de integração continuam obrigatórios.
   operacional autorizado; sem tela administrativa nesta primeira versão.
 - Q: O banco e o backup de cada tenant devem conter também suas contas e permissões,
   para restaurá-las sem restaurar as contas de outros tenants?
-  → A: Sim. Contas, credenciais, permissões e sessões pertencem à fonte de dados da
-  próprio tenant; o catálogo central guarda somente seu controle técnico.
+  → A: Sim. Contas, credenciais, permissões e sessões pertencem exclusivamente ao banco
+  da própria instalação do cliente; não existe banco de catálogo central.
 - Q: Você quer registrar esse recorte na especificação ou começar a implementar
   o backend agora?
   → A: Registrar o recorte: primeiro backend iniciado, persistência e migration de
@@ -50,11 +53,13 @@ de integração continuam obrigatórios.
 
 Os atores são: desenvolvedor de um produto derivado, usuário vinculado a uma empresa,
 operador da plataforma, mantenedor e responsável por uma integração externa.
-Tenant significa um contexto de empresa com fonte de dados independente; não
-pressupõe venda, contratação ou gestão comercial nem significa automaticamente
-matriz ou filial. Cada tenant possui cadastros de negócio e contas de acesso próprios.
-Uma pessoa presente em dois tenants possui registros independentes, mesmo com
-CPF, CNPJ ou email iguais.
+Tenant/cliente significa uma instalação dedicada de empresa (1 instância da aplicação +
+1 banco PostgreSQL exclusivo da própria aplicação), configurada por variáveis de ambiente
+e secrets próprios; não existe banco apartado de catálogo central nem compartilhamento de
+processo/banco entre clientes. Também não pressupõe venda, contratação ou gestão comercial
+nem significa automaticamente matriz ou filial. Cada instalação de cliente possui cadastros
+de negócio e contas de acesso próprios. Uma pessoa presente em dois clientes possui registros
+independentes, mesmo com CPF, CNPJ ou email iguais.
 Produtos distintos também não compartilham automaticamente cadastros ou autenticação.
 
 As histórias descrevem a evolução da fundação completa. No primeiro incremento,
@@ -408,23 +413,25 @@ publicação e restauração usando duas empresas e informações sintéticas.
   central e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
   sem conceder acesso de usuário por privilégio implícito; a ausência de autorização
   DEVE resultar em acesso negado.
-- **FR-008**: A sessão autenticada DEVE permanecer vinculada à conta e ao tenant de
-  origem. Para acessar outra empresa, a pessoa DEVE autenticar a conta própria dessa
-  empresa; alterar o tenant indicado NÃO DEVE reutilizar a sessão, permissões ou dados
-  anteriores, mesmo quando o email seja igual.
-- **FR-009**: O cadastro central DEVE identificar cada empresa de forma única, seu estado
-  e referência segura ao armazenamento, sem concentrar dados de negócio nem contas,
-  credenciais, permissões ou sessões dos usuários dos tenants.
-- **FR-010**: Um operador autorizado DEVE conseguir registrar, ativar e inativar empresas
-  por procedimento documentado; identificações duplicadas DEVEM ser rejeitadas.
-- **FR-011**: O servidor DEVE resolver e validar o contexto da empresa antes de sua
-  operação, sem aceitar credenciais ou conexões escolhidas pelo consumidor.
-- **FR-012**: Cada empresa DEVE ter armazenamento exclusivo de negócio e acesso conforme o
-  isolamento obrigatório da Constituição; operações DEVEM usar somente o alvo validado.
-  Clientes, hóspedes e outros cadastros da mesma pessoa em empresas distintas DEVEM
-  ser registros independentes, sem compartilhamento, sincronização ou deduplicação
-  automática entre tenants. Contas, credenciais, permissões e sessões DEVEM pertencer
-  à fonte de dados da própria empresa, não a um cadastro central de usuários.
+- **FR-008**: A sessão autenticada DEVE permanecer vinculada à conta e à instalação de
+  origem. Para acessar outra empresa, a pessoa DEVE autenticar a conta própria na
+  instalação dessa empresa; uma sessão emitida na instalação A NÃO DEVE ser aceita
+  na instalação B, mesmo quando o email seja igual.
+- **FR-009**: Cada instalação de cliente DEVE identificar a empresa de forma única por
+  configuração segura do ambiente e marcador persistido no próprio banco da aplicação,
+  sem banco apartado de catálogo central e sem concentrar dados ou contas de múltiplos clientes.
+- **FR-010**: Um operador autorizado DEVE conseguir provisionar, ativar e inativar a
+  instalação de cada empresa por procedimento documentado no ambiente de hospedagem
+  (ex.: stack dedicada no Dokploy/VPS); identidades de instalação conflitantes DEVEM ser rejeitadas.
+- **FR-011**: O servidor DEVE validar a configuração da própria instalação e o marcador
+  de identidade do seu banco antes de operar, sem aceitar credenciais ou conexões
+  escolhidas pelo consumidor HTTP.
+- **FR-012**: Cada empresa DEVE ter instância de backend e banco PostgreSQL exclusivos
+  (single-tenant por deploy) conforme o isolamento obrigatório da Constituição; operações
+  DEVEM usar somente o banco configurado para a própria instalação. Clientes, hóspedes e
+  outros cadastros da mesma pessoa em empresas distintas DEVEM ser registros independentes,
+  sem compartilhamento, sincronização ou deduplicação automática. Contas, credenciais,
+  permissões e sessões DEVEM pertencer ao banco da própria instalação, sem cadastro central.
 - **FR-013**: Empresa ausente, desconhecida, inativa, não autorizada ou indisponível
   DEVE causar erro explícito em operações de uso dessa empresa, sem fallback para
   outra. Procedimentos técnicos somente podem tratar estados não ativos com alvo
@@ -469,12 +476,12 @@ publicação e restauração usando duas empresas e informações sintéticas.
   prescrita pela Constituição, com pré-requisitos, configuração e acesso seguro.
 - **FR-030**: O operador DEVE conseguir identificar versão e saúde da aplicação
   publicada; reinícios NÃO DEVEM eliminar informações persistidas das empresas.
-- **FR-031**: DEVEM existir procedimentos de cópia externa e restauração por empresa,
-  com validação do alvo, do conteúdo recuperado e de ausência de impacto nas demais.
+- **FR-031**: DEVEM existir procedimentos de cópia externa e restauração por instalação
+  de empresa, com validação do alvo, do conteúdo recuperado e de ausência de impacto nas demais.
   A cópia DEVE incluir os dados de acesso da própria empresa. Restaurar A NÃO DEVE
   exigir restaurar contas de B; sessões anteriores DEVEM ser invalidadas e permissões
-  recuperadas revisadas antes da liberação. O controle técnico do banco no catálogo
-  continua necessário para operar o destino validado.
+  recuperadas revisadas antes da liberação. A identidade configurada da instalação e
+  o marcador do banco continuam necessários para validar o destino restaurado.
 - **FR-032**: Falhas de publicação e de atualização de dados DEVEM ter procedimento
   de recuperação que trate aplicação e persistência, com evidências antes de produção.
 - **FR-033**: Um operador autorizado DEVE conseguir preparar contas, desativá-las,
@@ -617,11 +624,12 @@ promessas de capacidade para todos os produtos derivados.
   e mantidas por procedimentos técnicos restritos e documentados; não há tela administrativa
   nem cadastro público nesta versão. Esses procedimentos não dispensam autorização
   nem equivalem ao acesso de um usuário aos dados de negócio da empresa.
-- **AS-004 — Contas independentes**: uma identidade pertence a uma única empresa.
-  A mesma pessoa pode ter contas distintas em vários tenants, com email repetido,
-  mas credenciais e ciclo de acesso independentes. Não há troca de tenant com
-  reaproveitamento de uma identidade autenticada em outra empresa. Contas, concessões
-  e sessões ficam na fonte de dados do próprio tenant; o catálogo é somente técnico.
+- **AS-004 — Instalações e contas independentes**: cada cliente possui sua própria
+  instalação (backend + banco da aplicação) configurada por variáveis de ambiente/secrets
+  no Dokploy/VPS ou cofre externo; não existe banco apartado de catálogo central.
+  A mesma pessoa pode ter contas distintas nas instalações de vários clientes, com email
+  repetido, mas credenciais e ciclo de acesso independentes. Não há troca de cliente na
+  mesma sessão nem reaproveitamento de uma identidade autenticada em outra instalação.
 - **AS-005 — Dados de teste**: componentes e registros sintéticos podem existir
   exclusivamente nos testes de persistência e modularidade, sem expor funcionalidades
   de negócio na distribuição da fundação.

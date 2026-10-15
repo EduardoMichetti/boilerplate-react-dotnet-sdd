@@ -85,31 +85,37 @@ referências permitidas; o grafo de dependências NÃO DEVE conter ciclos.
 **Verificação:** manifests, configuração de SDK e lockfiles DEVEM corresponder à stack
 declarada; builds e verificação de tipos DEVEM passar sem erros.
 
-### IV. Multi-tenancy com isolamento obrigatório
+### IV. Isolamento por cliente com implantação dedicada (single-tenant por deploy)
 
-- Cada tenant DEVE possuir banco PostgreSQL exclusivo para seus dados de negócio.
-  Compartilhamento de aplicação NÃO DEVE implicar compartilhamento desses dados.
-- Um cadastro central DEVE registrar tenants, seus estados e referências seguras aos
-  bancos. Ele NÃO DEVE se tornar um repositório compartilhado de dados de negócio.
-- O backend DEVE resolver o identificador recebido para um tenant conhecido e ativo,
-  usando configuração confiável. Identificadores enviados pelo cliente são apenas
-  pistas não confiáveis; o cliente NÃO DEVE fornecer credenciais ou conexões.
-- Em operações autenticadas, o backend DEVE validar identidade, vínculo com o tenant
-  e permissões antes de acessar seu banco. Operações anônimas necessárias, como login,
-  DEVEM ter escopo e controles documentados, sem liberar acesso a dados protegidos.
-- Tenant ausente, desconhecido, inativo, não autorizado ou com conexão indisponível
-  DEVE causar erro explícito, sem fallback para banco padrão ou de outro tenant.
-- O contexto validado DEVE permanecer vinculado à requisição ou unidade de trabalho.
-  Conexões, pools, caches e estado compartilhado NÃO DEVEM misturar tenants.
-- Jobs, exportações, arquivos e outras operações fora de requisições HTTP DEVEM manter
-  o mesmo isolamento, com tenant explícito e autorização adequada à identidade executora.
-- Provisionamento, migrations, backup e restauração DEVEM identificar o banco-alvo e
-  registrar resultados por tenant, sem redirecionar falhas para outro banco.
+- Cada cliente/tenant DEVE possuir implantação lógica e banco PostgreSQL exclusivos
+  (1 instância de aplicação + 1 banco da própria aplicação por instalação). O código
+  e as imagens são reutilizados, mas processos, configurações, segredos e dados NÃO
+  DEVEM ser compartilhados entre clientes.
+- NÃO DEVE existir banco apartado de catálogo central compartilhado entre clientes;
+  cada instância do backend DEVE conhecer exclusivamente o banco e os segredos da
+  sua própria instalação, fornecidos por variáveis de ambiente/secrets do ambiente
+  (como Dokploy na VPS ou cofre de segredos).
+- O backend DEVE validar a identidade da própria instalação e do banco configurado
+  antes de operar, impedindo que uma configuração incorreta aponte a instância do
+  cliente A para o banco do cliente B. O cliente HTTP NÃO DEVE fornecer credenciais,
+  strings de conexão ou escolher bancos de dados.
+- Em operações autenticadas, o backend DEVE validar identidade, estado da conta,
+  sessão vinculada à instalação e permissões antes de executar a operação. Operações
+  anônimas necessárias, como login, DEVEM ter escopo e controles documentados, sem
+  liberar acesso a dados protegidos.
+- Configuração obrigatória ausente, banco de outra instalação, instância inativa ou
+  conexão indisponível DEVE causar erro explícito, sem fallback para outro banco.
+- Jobs, exportações, arquivos, caches e outras operações fora de requisições HTTP
+  DEVEM permanecer restritos à própria instalação e ao seu banco configurado.
+- Provisionamento, migrations, backup e restauração DEVEM identificar explicitamente
+  a instalação e o banco-alvo, registrando resultados por cliente sem afetar outras
+  instalações.
 
-**Verificação:** testes automatizados DEVEM usar pelo menos dois bancos de tenants
-distintos e comprovar isolamento de leitura e escrita, acesso negado, execução
-concorrente e reutilização de recursos. Falhas de resolução ou conexão NÃO DEVEM
-produzir acesso cruzado. Isolamento é requisito de liberação, não melhoria futura.
+**Verificação:** testes automatizados DEVEM usar pelo menos dois bancos PostgreSQL
+distintos (simulando duas instalações de clientes) e comprovar isolamento de dados,
+contas e sessões, bloqueio quando uma instância é apontada para o banco de outra,
+acesso negado e execução concorrente segura. Isolamento é requisito de liberação,
+não melhoria futura.
 
 ### V. API REST e contratos documentados
 
@@ -303,4 +309,4 @@ DEVEM permanecer como requisitos explícitos para a liberação correspondente.
   Sua atualização NÃO DEVE modificar esses artefatos nem executar intenções de
   implementação ou deploy sem solicitação própria.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-10-12
+**Version**: 2.0.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-10-15

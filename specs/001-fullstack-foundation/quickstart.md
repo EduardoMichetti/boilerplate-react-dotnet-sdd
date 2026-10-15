@@ -15,10 +15,10 @@ O roteiro não depende de frontend, login HTTP, painel ou Platform.Tools.
 - SDK 10.0.401, ferramenta local dotnet-ef 10.0.12 e lockfiles entregues.
   O profile `migrations` usará imagem SDK com ferramentas/pacotes restaurados no build.
 - PostgreSQL 18.6 com volume nomeado em `/var/lib/postgresql`.
-- Catálogo e dois bancos vazios de tenant preparados em ambiente exclusivamente
-  local/de teste, com owners de migration e runtime mínimo distintos.
-- Configuração privada aprovada contém ApplicationId/EnvironmentId, aliases,
-  bindings Inactive A/B, refs de credenciais e aprovação de inicialização dos alvos.
+- Banco vazio da instalação local (e segundo banco de validação para comprovar isolamento
+  SC-009), com owners de migration e runtime mínimo distintos. Não existe banco `platform_catalog`.
+- Configuração privada aprovada (`.env.local` / variáveis de ambiente) contém `ApplicationId`,
+  `EnvironmentId`, `TenantId`, conexões/secrets e aprovação de inicialização do banco.
 - Nenhuma credencial real/padrão em exemplos, migrations ou logs.
 
 A preparação inicial de bancos/papéis é pré-requisito do operador, documentado na
@@ -33,10 +33,10 @@ PowerShell na raiz do repositório:
 Copy-Item .\infra\.env.example .\infra\.env.local
 ```
 
-Preencher o arquivo privado com caminhos/referências e arquivos de credentials;
-exemplos não contêm valores de senha utilizáveis. API monta somente secrets runtime.
-Owners e CatalogBootstrapFile são montados apenas no profile `migrations`.
-Arquivos privados e key rings ficam fora do Git/contexto de build.
+Preencher o arquivo privado com as variáveis da instalação e arquivos de credenciais;
+exemplos não contêm valores de senha utilizáveis. A API monta somente o secret runtime
+da própria instalação. A credencial owner de migration é montada apenas no profile
+`migrations`. Arquivos privados e key rings ficam fora do Git/contexto de build.
 
 ```powershell
 $compose = '.\infra\compose.yaml'
@@ -61,7 +61,6 @@ Serviço pontual `migrations` tem working directory na pasta `backend/src` da im
 Linux e EF local restaurado; nomes de pastas abaixo não dependem do separador do host.
 
 ```powershell
-docker compose -f $compose --env-file $local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context CatalogDbContext -- --environment-id $environmentId
 docker compose -f $compose --env-file $local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantA --environment-id $environmentId
 docker compose -f $compose --env-file $local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantB --environment-id $environmentId
 ```
@@ -72,8 +71,8 @@ com `Pop-Location`. Não passar paths Windows para o processo Linux do container
 
 **Esperado**:
 
-- Catálogo contém somente identidade técnica e bindings iniciais, não usuários.
-- Cada banco possui marcador do próprio tenant/ambiente e tabelas Identity/concessões.
+- Não existe banco `platform_catalog` nem `CatalogDbContext`.
+- Cada banco possui marcador do próprio cliente/ambiente (`TenantDatabaseIdentity`) e tabelas Identity/concessões.
 - UseSeeding/UseAsyncSeeding não criam usuário, senha ou permissões padrão.
 - Não há migration automática no startup da API, mesmo se alguma estiver pendente.
 - Target ausente, UUID/ambiente divergente, banco existente sem marcador ou role
@@ -90,8 +89,8 @@ Invoke-RestMethod 'http://localhost:8080/openapi/v1.json'
 
 **Esperado**: status `alive`, `ready` e contrato com somente as duas operações I1.
 Rotas de login, usuários, `/me`, `/me/tenants` e `/context` retornam 404; não há
-painel ou página web. Falha de catálogo é 503 seguro em readiness, não em liveness.
-Readiness não aprova uso futuro de todo tenant nem verifica todos os bancos.
+painel ou página web. Falha de configuração ou divergência do marcador do banco da
+instalação retorna 503 seguro em readiness, não em liveness.
 
 ## 5. Executar testes e gates de I1
 

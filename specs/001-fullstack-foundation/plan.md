@@ -14,13 +14,17 @@ containers, pipelines ou funcionalidades nesta etapa; `tasks.md` pertence à pr�
 ## Summary
 
 O primeiro incremento, **I1**, entrega somente backend iniciado e executável,
-persistência de usuários/acesso e migrations aplicáveis a dois bancos PostgreSQL
-independentes. Sem frontend, painel, módulo de negócio ou suíte administrativa.
+persistência de usuários/acesso e migrations aplicáveis ao banco PostgreSQL exclusivo
+da instalação (validado em testes com dois bancos independentes simulando dois clientes).
+Sem frontend, painel, módulo de negócio, suíte administrativa ou banco de catálogo central.
 Cadastro persistível não significa login HTTP já disponível.
 
-Cada tenant possui suas contas, credenciais e concessões; sessões futuras também
-ficam no banco desse tenant. O catálogo central contém somente identificação,
-estado e referências técnicas dos bancos. Email igual em A e B não une contas.
+O modelo adotado é **uma instalação dedicada por cliente (single-tenant por deploy:
+1 backend + 1 banco da própria aplicação por cliente)**. Cada instalação recebe sua
+identidade (`TenantId`, `EnvironmentId`), estado e conexão por variáveis de ambiente/secrets
+(no Dokploy/VPS ou cofre externo) e valida o marcador de identidade gravado no seu próprio
+banco antes de operar. Não existe banco apartado `platform_catalog` nem `CatalogDbContext`.
+Cada cliente possui suas contas, credenciais, concessões e sessões futuras no próprio banco.
 
 Docker Compose local, testes reais de persistência/isolamento e checks mínimos
 de backend são suporte obrigatório de I1, não uma ampliação funcional.
@@ -37,9 +41,9 @@ posteriores. Não se libera operação protegida sem seus controles completos.
 React 19.3.0, TypeScript 7.0.2, Vite 8.3.4, Tailwind 4.3.3 e Node 24.21.0 LTS
 permanecem previstos somente para o frontend posterior.
 
-**Storage**: PostgreSQL 18.6; catálogo técnico em `platform_catalog` e um banco
-por tenant. `CatalogDbContext` não contém Identity; `TenantAccessDbContext` contém
-o modelo de acesso de um único tenant. Sem banco compartilhado de usuários.
+**Storage**: PostgreSQL 18.6; **um único banco da própria aplicação por instalação
+de cliente** (sem banco apartado de catálogo central). `TenantAccessDbContext` contém
+o marcador de identidade da instalação e o modelo de acesso local daquele cliente.
 
 **Testing**: I1 usa `xunit.v3` 4.0.2, Microsoft.Testing.Platform v2,
 Testcontainers.PostgreSql 4.16.0 e testes HTTP de saúde/ausência de endpoints.
@@ -49,22 +53,24 @@ Vitest, Testing Library e Playwright são dependências posteriores, não de I1.
 NuGet; GitHub Actions com permissões mínimas e ações fixadas por SHA.
 
 **Target Platform**: containers Linux amd64, Docker Compose v2 em Windows/Linux;
-VPS Linux e Dokploy somente na fase de publicação.
+VPS Linux e Dokploy (uma stack/serviço por cliente com variáveis de ambiente e secrets
+próprios) na fase de publicação.
 
 **Project Type**: monólito modular ASP.NET Core; quatro projetos de produção por
 camada. Migrations por EF CLI, sem processo administrativo residente.
 
-**Performance Goals**: SC-009 é o aceite de I1: dois bancos vazios, criação da
-estrutura, persistência independente e reaplicação sem duplicação/perda.
-SC-001 a SC-008 são metas posteriores; SC-003 mantém 200 operações, 100 por tenant,
-pico observado de pelo menos 20 e zero cruzamento na evolução do isolamento runtime.
+**Performance Goals**: SC-009 é o aceite de I1: dois bancos vazios (simulando duas
+instalações de clientes), criação da estrutura, persistência independente e reaplicação
+sem duplicação/perda. SC-001 a SC-008 são metas posteriores; SC-003 mantém 200 operações,
+100 por instalação de cliente, pico observado de pelo menos 20 e zero cruzamento.
 
-**Constraints**: nenhum painel, dado/conta global, seed de usuário padrão,
-secret no Git/imagem/log ou endpoint de cadastro/login protegido exposto em I1.
+**Constraints**: nenhum painel, banco de catálogo central, dado/conta global, seed de
+usuário padrão, secret no Git/imagem/log ou endpoint de cadastro/login protegido exposto em I1.
 Migrations não rodam no startup e não usam a credencial runtime.
 
-**Scale/Scope**: catálogo técnico mínimo, dois bancos sintéticos e quatro camadas;
-somente health checks e OpenAPI da superfície efetivamente disponível em I1.
+**Scale/Scope**: configuração de instalação por ambiente, dois bancos sintéticos em
+testes de isolamento e quatro camadas; somente health checks e OpenAPI da superfície
+efetivamente disponível em I1.
 
 ## Constitution Check
 
@@ -79,7 +85,7 @@ de migration e sessão; não introduz novas tecnologias.
 | I. Arquitetura modular | PASS | PASS | Quatro camadas; referências para dentro; sem microsserviços. |
 | II. Reutilização | PASS | PASS | Acesso é fundação; módulos futuros só por contratos explícitos. |
 | III. Stack | PASS | PASS | Stack e pins preservados em research; sem dependências frontend em I1. |
-| IV. Multi-tenancy | PASS | PASS | Catálogo técnico, contas locais e validação do banco-alvo antes de uso. |
+| IV. Isolamento por cliente | PASS | PASS | 1 backend + 1 banco por instalação; sem catálogo central; validação do marcador do banco antes de uso. |
 | V. API | PASS | PASS | OpenAPI de I1 separado do contrato futuro; Problem Details. |
 | VI. Segurança | PASS | PASS | Runtime sem DDL; sem seed padrão nem endpoints protegidos incompletos. |
 | VII. Qualidade | PASS | PASS | PostgreSQL real, testes e checks mínimos obrigatórios já em I1. |
@@ -128,7 +134,6 @@ backend/
 │   ├── Platform.Application/
 │   ├── Platform.Infrastructure/
 │   │   └── Persistence/
-│   │       ├── Catalog/
 │   │       ├── TenantAccess/
 │   │       └── DesignTime/
 │   └── App.Api/
@@ -161,10 +166,10 @@ ou `Platform.Tools` para apenas aplicar uma migration.
 
 | Incremento | Entrega | Requisitos e critérios |
 |------------|---------|------------------------|
-| I1 — agora | Backend, modelo de acesso, catálogo mínimo, migrations, Compose, testes e checks. | FR-034/SC-009; partes aplicáveis de FR-001 a FR-003, FR-009, FR-011 a FR-016, FR-022 a FR-028. |
-| I2 — posterior | Login/logout/contexto por tenant, sessão revogável e procedimento restrito de contas/permissões. | FR-005 a FR-008, FR-020 a FR-023, FR-033; SC-002/SC-005. |
+| I1 — agora | Backend, modelo de acesso, marcador da instalação, migrations, Compose, testes e checks. | FR-034/SC-009; partes aplicáveis de FR-001 a FR-003, FR-009, FR-011 a FR-016, FR-022 a FR-028. |
+| I2 — posterior | Login/logout/contexto na instalação do cliente, sessão revogável e procedimento restrito de contas/permissões. | FR-005 a FR-008, FR-020 a FR-023, FR-033; SC-002/SC-005. |
 | I3 — posterior | Interface web e validação de extensão por componentes opcionais de teste. | FR-004, FR-017 a FR-019; SC-001/SC-004. |
-| I4 — antes de produção | Operação ampliada de tenants, publicação e recuperação. | FR-010, FR-014/FR-015 completos, FR-029 a FR-032; SC-007. |
+| I4 — antes de produção | Operação de deploys por cliente, publicação no Dokploy e recuperação. | FR-010, FR-014/FR-015 completos, FR-029 a FR-032; SC-007. |
 | Transversal | Documentação, riscos e evidências dos incrementos entregues. | FR-024 a FR-028; SC-006/SC-008 conforme superfície existente. |
 
 Nenhum requisito futuro foi removido; também não se afirma sua conclusão em I1.
@@ -174,44 +179,46 @@ as quatro entregas como um único bloqueio para o primeiro incremento.
 ### I1 — modelo e migration de acesso
 
 - Modelo em `TenantAccessDbContext`, baseado em `IdentityUserContext<AppUser, Guid>`,
-  mais concessões explícitas por usuário e marcador de identidade do banco.
+  mais concessões explícitas por usuário e marcador de identidade da instalação no banco.
 - Email normalizado é único dentro de cada banco, não globalmente. TenantId faz
-  parte da conta e deve corresponder ao único marcador desse banco.
+  parte da conta e deve corresponder ao único marcador gravado nesse banco.
 - O vínculo da conta com a empresa é representado por sua propriedade TenantId;
-  não existe uma entidade central com vínculos da mesma conta a vários tenants.
+  não existe banco de catálogo central (`platform_catalog`) nem entidade central com
+  vínculos da mesma conta a vários tenants.
 - Hash e validação de senha usam Identity. Testes criam contas sintéticas por
   UserManager; a migration cria estrutura, não usuários ou senhas.
 - Sessão persistida é uma extensão de modelo de I2, não pré-condição de SC-009.
 
-Catálogo mínimo: identificação do produto/ambiente, Tenant e StorageBinding.
-Configuração de instalação confiável prepara apenas esses registros técnicos,
-sem painel, listagem anônima ou catálogo de usuários.
+Configuração da instalação (via variáveis de ambiente/secrets no Compose local ou no
+Dokploy na VPS): `ApplicationId`, `EnvironmentId`, `TenantId`, `TenantDisplayName`,
+estado da instância e string/secret de conexão do próprio banco. Sem painel, listagem
+anônima ou catálogo de usuários.
 
 ### I1 — aplicação segura das migrations
 
-`IDesignTimeDbContextFactory` recebe argumentos extras de EF CLI. Separar factories
-e migrations de CatalogDbContext e TenantAccessDbContext. O contexto de tenant exige
-TenantId/EnvironmentId explícitos; o servidor resolve o binding no catálogo confiável.
-Não aceitar string de conexão/secret HTTP nem inferir tenant padrão.
+`IDesignTimeDbContextFactory` de `TenantAccessDbContext` recebe a configuração da
+instalação e argumentos explícitos de EF CLI (`--tenant-id`, `--environment-id`).
+Não existe `CatalogDbContext`. Não aceitar string de conexão/secret por HTTP nem
+inferir valores padrão silenciosos.
 
 Antes de aplicar DDL:
 
-1. Validar configuração, identidade/ambiente do catálogo e target registrado.
-2. Exigir estado Inactive, permissão operacional e credencial owner do alvo.
-3. Verificar banco esperado, role efetivo e marcador existente.
-4. Se houver marcador divergente, interromper **antes** das migrations.
+1. Validar configuração da instalação (`ApplicationId`, `EnvironmentId`, `TenantId`) e conexão do banco-alvo.
+2. Exigir janela de manutenção/instância inativa, permissão operacional e credencial owner do banco daquela instalação.
+3. Verificar banco esperado, role efetivo e marcador existente (`TenantDatabaseIdentity`).
+4. Se houver marcador divergente (outro `TenantId` ou `EnvironmentId`), interromper **antes** das migrations.
 5. Se não houver marcador, permitir somente inicialização explicitamente autorizada
    de banco vazio, já criado pelo operador e sem objetos de aplicação preexistentes.
 
 Após a migration, `UseSeeding` e `UseAsyncSeeding` inicializam somente o marcador
-imutável do alvo aprovado; repetição com marcador correto é no-op. Não usar HasData
-com valores que alterem o modelo por tenant. Callback não corrige marcador ausente
+imutável da instalação aprovada; repetição com marcador correto é no-op. Não usar HasData
+com valores que alterem o modelo por cliente. Callback não corrige marcador ausente
 em banco existente nem sobrescreve identidade divergente.
 
 Lock nativo de migrations protege execução concorrente; preflight também exige
-janela sem writers/DDL concorrentes e target inativo. A credencial owner é montada
-somente no processo de tooling. API não cria bancos, modifica esquema ou inicializa
-registro técnico no startup.
+janela sem writers/DDL concorrentes. A credencial owner é montada somente no processo
+de tooling (`migrations`). A API usa credencial runtime sem permissão de DDL e não cria
+bancos, modifica esquema ou inicializa marcador no startup.
 
 ### I1 — superfície HTTP, execução e qualidade
 
@@ -219,8 +226,9 @@ Somente `/health/live`, `/health/ready` e documentação OpenAPI de I1.
 Nenhum endpoint de contas, concessões, contexto de usuário ou login é mapeado.
 Rotas não existentes retornam 404 Problem Details, não HTML ou sucesso fictício.
 
-Liveness não consulta catálogo nem banco de tenant. Readiness verifica configuração
-runtime e identidade/versão do catálogo, sem consultar todos os bancos de tenants.
+Liveness não consulta o banco de dados. Readiness verifica a configuração runtime da
+instalação e confirma que o banco configurado possui o marcador (`TenantId`/`EnvironmentId`)
+e a versão de migration esperados para aquela instância.
 Health nunca inicia lookup de sessão por cookie recebido, inclusive após I2.
 
 Compose local inclui API, PostgreSQL e perfil pontual `migrations` com SDK;
@@ -229,38 +237,37 @@ e permissões separados. Volume PostgreSQL 18 em `/var/lib/postgresql`, imagens
 versionadas/digests registrados e exemplos sem credenciais reais.
 
 Checks de I1: restore locked, build, format/analyzers, testes de domínio,
-migration/isolamento PostgreSQL real, contrato de saúde, auditoria NuGet e secret scan.
+migration/isolamento PostgreSQL real (com dois bancos simulando duas instalações),
+contrato de saúde, auditoria NuGet e secret scan.
 GitHub Actions sem secrets de produção em PR, permissões mínimas, ações por SHA
 e branch protection. Resultado incompleto/falho não aprova.
 
-### I2 — desenho de autenticação tenant-local
+### I2 — desenho de autenticação na instalação do cliente
 
-Cookie seguro e header `X-Tenant-Id` permanecem escolhas confirmadas, mas o header
-passa a ser obrigatório também no login. Ele apenas indica um alvo: catálogo, estado
-e marcador são validados antes da consulta limitada às credenciais dessa empresa.
-Essa etapa de login não concede acesso a dados de negócio.
+Como cada cliente possui seu próprio backend e seu próprio banco, o login autentica
+diretamente contra o banco daquela instalação, após confirmar configuração ativa e
+marcador `TenantDatabaseIdentity` correspondente. O header `X-Tenant-Id` (quando enviado
+pelo consumidor ou confirmado pela UI) deve coincidir com o `TenantId` configurado na
+instância; qualquer divergência é rejeitada imediatamente sem fallback.
 
 Depois da emissão, a referência de sessão protegida pelo handler nativo inclui
-TenantId, epoch de acesso e SessionId. Em operação autenticada, resolver somente
-o tenant dessa referência autenticada; header divergente nunca seleciona outro banco.
-Não varrer bancos para localizar um email ou sessão.
+`TenantId`, epoch de acesso e `SessionId`. Um cookie emitido na instalação do Cliente A
+nunca é válido na instalação do Cliente B (além de chaves de proteção e `TenantId`
+distintos, a sessão existe apenas no banco de A).
 
 Adapter `ITicketStore` sem estado mutável cria escopo por chamada a partir da
 referência já desprotegida pelo framework; não captura DbContext scoped em singleton.
-Separar target técnico pré-autenticação do contexto autorizado pós-validação,
-evitando ciclo de DI entre cookie options, store e autenticação.
 
-Validar sessão, usuário habilitado, stamp, vínculo local e concessão em cada operação.
+Validar sessão, usuário habilitado, stamp, `TenantId` da instalação e concessão em cada operação.
 Sessão absoluta inicial de 30 minutos, logout revogado antes da resposta; renew
 condicionado à sessão ativa, sem upsert, ressurreição ou extensão da expiração.
 Cookies HttpOnly/Secure/SameSite=Lax e CSRF nativo em login/logout/JSON mutável.
-Lockout inicial de 5 falhas/15 minutos por conta local; throttle de login por
-par IP confiável/tenant, sem bloquear a conta de mesmo email no banco de outro tenant.
+Lockout inicial de 5 falhas/15 minutos por conta local; throttle de login por IP confiável
+na instância, sem afetar a instalação ou banco de outro cliente.
 Sem JWT próprio, localStorage de tokens, refresh, OIDC ou identidade global.
 
-`/me` e `/context` retornam somente a conta e o tenant autenticados; retirar
-`/me/tenants`. Acesso a B exige login da conta de B e descarte do contexto de A.
-UI futura troca o alvo no login, não por reaproveitamento de sessão de outro tenant.
+`/me` e `/context` retornam somente a conta e a empresa da instalação atual; não existe
+`/me/tenants`. Acesso ao Cliente B ocorre no endereço/instalação de B, autenticando a conta de B.
 
 ### I3/I4 — evolução sem ampliar I1
 
@@ -268,26 +275,25 @@ Frontend preserva React/TypeScript/Vite/Tailwind e mesma origem da API em produ�
 Módulos futuros declaram contratos e dependências acíclicas, sem acesso direto
 a tabelas/DbContexts internos; variantes opcionais são comprovadas em testes.
 
-Operação de contas é restrita e tenant-local, sem painel. Provisionamento amplo,
-backup externo e Dokploy ficam para I4; não são exigidos para aplicar a migration inicial.
-Backup do tenant inclui contas/permissões/sessões. Restauração invalida sessões,
-renova epoch e revisa concessões antes de liberar uso, sem restaurar contas de outro tenant.
-O catálogo restaurado contém apenas metadados técnicos e exige reconciliar bindings;
-não contém contas ou sessões a recuperar.
+Operação de contas é restrita à instalação do cliente, sem painel. No Dokploy (VPS),
+cada cliente é publicado como uma aplicação/stack isolada, onde o operador configura
+as variáveis de ambiente e segredos daquele cliente (armazenados na VPS pelo Dokploy
+ou sincronizados de cofre externo). Backup do banco do cliente inclui contas, permissões,
+sessões e dados de negócio. Restauração valida o marcador do cliente, invalida sessões,
+renova epoch e revisa concessões antes de liberar uso, sem afetar qualquer outro cliente.
 
 ### Validação do desenho
 
 Verificados nesta revisão: fronteiras de incremento, referências relativas,
 hierarquia do template, rastreabilidade FR-001 a FR-034 e descoberta Spec Kit.
-Os dois contratos passaram na validação OpenAPI 3.0 local e em casos positivos/
-negativos de UUID, tenantId obrigatório, campos extras e concessões duplicadas.
-I1 contém somente duas operações de saúde; I2 tem sete operações previstas,
-sem listagem de tenants por conta. Não há usuários globais no modelo.
+I1 contém somente duas operações de saúde; I2 tem cinco operações previstas de
+autenticação/contexto mais dois health checks, sem catálogo central e sem listagem de
+tenants por conta. Não há usuários globais no modelo.
 
 Provas SC-001 a SC-009 pertencem à implementação, não são executadas neste plano.
 
 ## Complexity Tracking
 
-Sem violação constitucional ou exceção. Catálogo técnico e factories EF atendem
-isolamento e migration presentes; não adicionam produto comercial ou novo serviço.
-Adiar UI/produção não adia qualidade e segurança da superfície entregue.
+Sem violação constitucional ou exceção. O isolamento single-tenant por deploy elimina
+o banco de catálogo central (`platform_catalog`) e a resolução dinâmica de conexões,
+reduzindo a superfície de ataque e a complexidade do código.
