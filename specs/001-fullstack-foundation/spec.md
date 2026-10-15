@@ -15,11 +15,53 @@ sem funcionalidades de módulos de negócio. Não implementar código nesta etap
 
 **Governance**: [Constituição do projeto](../../.specify/memory/constitution.md).
 
+**Primeiro incremento confirmado**: backend iniciado e executável, com persistência
+e migration para o cadastro de usuários/acesso, sem telas ou painel administrativo.
+As demais capacidades da fundação descritas abaixo pertencem a incrementos posteriores;
+não são pré-condições para concluir esse primeiro recorte.
+Essa separação não adia os controles constitucionais aplicáveis ao backend:
+execução local por Docker Compose, testes de persistência/isolamento e checks mínimos
+de integração continuam obrigatórios.
+
+## Clarifications
+
+### Session 2026-10-13
+
+- Q: Se uma pessoa tiver acesso ao sistema no tenant A e também no tenant B,
+  as duas contas devem ter senha, bloqueio e recuperação independentes?
+  → A: Sim. Cada tenant tem contas e credenciais próprias; usar o mesmo
+  email não vincula identidades nem faz alterações de acesso em A afetarem B.
+- Q: Na primeira implementação do boilerplate, você quer somente o acesso funcional
+  e testado, ou também uma tela básica para cada tenant administrar seus usuários?
+  → A: Acesso funcional e testado, com gestão de contas e permissões por procedimento
+  operacional autorizado; sem tela administrativa nesta primeira versão.
+- Q: O banco e o backup de cada tenant devem conter também suas contas e permissões,
+  para restaurá-las sem restaurar as contas de outros tenants?
+  → A: Sim. Contas, credenciais, permissões e sessões pertencem à fonte de dados da
+  próprio tenant; o catálogo central guarda somente seu controle técnico.
+- Q: Você quer registrar esse recorte na especificação ou começar a implementar
+  o backend agora?
+  → A: Registrar o recorte: primeiro backend iniciado, persistência e migration de
+  usuários/acesso, sem código nesta etapa. O exemplo de revenda expressa somente
+  isolamento; não define gestão comercial. Esse recorte substitui a amplitude da
+  primeira entrega de acesso anteriormente discutida.
+
 ## User Scenarios & Testing *(mandatory)*
 
 Os atores são: desenvolvedor de um produto derivado, usuário vinculado a uma empresa,
 operador da plataforma, mantenedor e responsável por uma integração externa.
-Tenant significa a empresa cujos dados e acessos devem permanecer isolados.
+Tenant significa um contexto de empresa com fonte de dados independente; não
+pressupõe venda, contratação ou gestão comercial nem significa automaticamente
+matriz ou filial. Cada tenant possui cadastros de negócio e contas de acesso próprios.
+Uma pessoa presente em dois tenants possui registros independentes, mesmo com
+CPF, CNPJ ou email iguais.
+Produtos distintos também não compartilham automaticamente cadastros ou autenticação.
+
+As histórias descrevem a evolução da fundação completa. No primeiro incremento,
+o cenário de persistência e migration de US2, FR-034 e SC-009 define o aceite.
+Telas de login, gestão operacional ampliada, pipeline full-stack e publicação não
+são entregas desse recorte; checks de CI do backend permanecem obrigatórios antes
+da integração. Nenhuma operação protegida pode ser exposta antes de seus controles de acesso.
 
 Operações de uso de uma empresa exigem empresa ativa e vínculo autorizado.
 Administração central, preparação e recuperação são operações técnicas privilegiadas:
@@ -65,11 +107,12 @@ contexto de acesso, sem poder acessar outra empresa ou executar ações não per
 **Why this priority**: identidade, permissões e isolamento protegem todos os produtos
 que serão criados a partir da fundação.
 
-**Independent Test**: com identidades de teste, vínculos e permissões preparados,
-verificar entrada, consulta do próprio contexto, mudança autorizada de empresa e
-saída, sem qualquer módulo de negócio.
+**Independent Test**: com contas e permissões próprias de duas empresas de teste,
+inclusive contas com o mesmo email e senhas diferentes, verificar entrada, consulta
+do próprio contexto e saída. Confirmar que alteração de senha, bloqueio, recuperação
+ou revogação em uma empresa não afeta a outra, sem qualquer módulo de negócio.
 
-**Requisitos relacionados**: FR-005 a FR-008, FR-022, FR-023, NFR-001 a NFR-003,
+**Requisitos relacionados**: FR-005 a FR-008, FR-022, FR-023, FR-033, FR-034, NFR-001 a NFR-003,
 NFR-005 e NFR-006.
 
 **Acceptance Scenarios**:
@@ -83,12 +126,24 @@ NFR-005 e NFR-006.
 3. **Given** acesso expirado, revogado ou encerrado pelo usuário, **When** ocorre uma
    nova tentativa protegida, **Then** ela é negada e a interface não mantém o contexto
    anterior como utilizável.
-4. **Given** usuário autorizado em duas empresas, **When** muda a empresa selecionada,
-   **Then** o novo contexto é validado e informações da empresa anterior não são
-   reutilizadas na nova operação.
+4. **Given** pessoa com contas independentes em duas empresas, **When** tenta usar
+   a sessão de A em uma operação de B, **Then** o acesso é negado, mesmo que o email
+   seja igual; para acessar B, deve autenticar sua conta de B.
 5. **Given** identificação inválida ou tentativa de assumir a identidade de outro
    usuário, **When** o acesso é solicitado, **Then** nenhuma identidade autenticada
    é estabelecida e a resposta não divulga informações protegidas.
+6. **Given** contas com o mesmo email em A e B, **When** a senha é alterada ou o acesso
+   é bloqueado, recuperado ou revogado em A, **Then** a conta e as permissões de B
+   permanecem inalteradas; a senha de A não autentica a conta de B.
+7. **Given** procedimento operacional e operador autorizado para A, **When** prepara,
+   desativa ou redefine o acesso de uma conta e concede ou retira suas permissões,
+   **Then** a alteração é verificável e afeta somente A; operador sem autorização
+   não modifica contas ou concessões, e não há tela administrativa exigida nesta versão.
+8. **Given** backend iniciado e dois bancos de tenants vazios, **When** a migration de
+   usuários/acesso é aplicada e registros sintéticos são persistidos para validação,
+   **Then** a estrutura permite cadastrar e consultar usuários e seus acessos em cada
+   banco, sem frontend ou painel; email igual nos dois bancos não vincula os registros
+   e aplicar novamente a versão vigente não duplica a estrutura nem perde dados.
 
 ---
 
@@ -241,7 +296,9 @@ publicação e restauração usando duas empresas e informações sintéticas.
    confirma saúde e acesso seguro e preserva dados após reiniciar a aplicação.
 2. **Given** duas empresas com cópias de segurança externas ao ambiente publicado,
    **When** uma delas é restaurada em destino de validação, **Then** seu conteúdo
-   corresponde ao ponto de recuperação e não contém nem altera dados da outra.
+   inclui os dados de negócio e de acesso da própria empresa, corresponde ao ponto
+   de recuperação e não contém nem altera dados ou contas da outra. Sessões anteriores
+   não são reativadas e permissões recuperadas são revisadas antes de liberar acesso.
 3. **Given** falha de publicação ou de atualização das informações,
    **When** o procedimento de recuperação é seguido, **Then** há decisão documentada
    sobre recuperação de aplicação e dados, sem presumir que reverter a aplicação
@@ -259,6 +316,16 @@ publicação e restauração usando duas empresas e informações sintéticas.
   não concede acesso.
 - Tentativas simultâneas de empresas diferentes, com identificadores de registros
   iguais: manter leitura, gravação e estado temporário isolados.
+- CPF, CNPJ ou email iguais em empresas distintas: não mesclar cadastros, vincular
+  contas automaticamente ou impor unicidade global de dados próprios dos tenants.
+- Sessão autenticada em A usada para indicar B: negar o acesso; mudar o identificador
+  da empresa não converte a sessão de A em uma sessão de B.
+- Alteração de senha, bloqueio, recuperação ou revogação de conta em A: não alterar
+  identidade, credenciais, sessões ou permissões das contas de B.
+- Restauração de A: incluir seus dados de acesso, invalidar sessões anteriores e
+  revisar permissões recuperadas antes da liberação, sem restaurar ou alterar contas de B.
+- Empresa indicada no login: resolver e validar o alvo antes de verificar suas
+  credenciais; não enumerar empresas ou contas de outros tenants a usuários anônimos.
 - Falha de acesso ao armazenamento de uma empresa: reportar indisponibilidade apenas
   da operação dependente e não redirecioná-la para outra empresa.
 - Cadastro duplicado de identificação de empresa: rejeitar sem sobrescrever a
@@ -291,7 +358,14 @@ publicação e restauração usando duas empresas e informações sintéticas.
 #### Em escopo
 
 - Fundação web com entrada, saída e identificação do contexto de acesso.
-- Identidade, permissões e vínculos com empresas, sem funcionalidades comerciais.
+- Primeiro incremento de backend com cadastro persistível de usuários/acesso e
+  migration aplicável, validado sem frontend ou painel.
+- Contas, credenciais, permissões e sessões independentes por tenant,
+  mantidas na fonte de dados da própria empresa, sem identidade compartilhada entre
+  tenants e sem funcionalidades comerciais.
+- Evolução posterior para acesso funcional e testado, com preparação e manutenção de
+  contas por procedimento restrito; operações protegidas não são liberadas com controles
+  de segurança incompletos.
 - Cadastro operacional de empresas, resolução confiável de contexto e persistência isolada.
 - Preparação e evolução da estrutura de informações, com resultado por empresa.
 - Contratos de integração documentados, validação de entradas e erros consistentes.
@@ -305,8 +379,8 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - Entregar Clientes, Financeiro, Produtos, Estoque ou outro módulo de negócio,
   inclusive um módulo de referência.
 - Aplicativo mobile, microsserviços, mensageria e integrações comerciais específicas.
-- Painel completo de administração, autocadastro público, cobrança, contratação
-  de empresas e provisionamento comercial autônomo.
+- Qualquer painel administrativo ou de gestão comercial, autocadastro público,
+  cobrança, contratação e provisionamento comercial autônomo.
 - Integração com provedor corporativo específico de identidade, federação entre
   produtos ou login compartilhado entre aplicações independentes.
 - Implantar serviços reais, registrar empresas reais ou migrar dados de produção agora.
@@ -319,10 +393,14 @@ publicação e restauração usando duas empresas e informações sintéticas.
   limpo, seguindo um roteiro único que declare todos os pré-requisitos.
 - **FR-003**: Configuração DEVE ser separada por ambiente; ausência ou invalidade de
   valor obrigatório DEVE impedir a operação dependente com diagnóstico seguro.
-- **FR-004**: A interface web DEVE apresentar entrada, estado de autenticação, empresa
-  selecionada, contexto do próprio usuário, saída e estados de erro, sem menus de negócio.
-- **FR-005**: A fundação DEVE autenticar identidades válidas e negar identificação
-  inválida, sem permitir assumir outra identidade por informação enviada pelo cliente.
+- **FR-004**: A interface web DEVE apresentar entrada no contexto do tenant,
+  estado de autenticação, empresa corrente, contexto do próprio usuário, saída e estados
+  de erro, sem menus de negócio; identificar a empresa NÃO DEVE conceder acesso por si só.
+- **FR-005**: A fundação DEVE autenticar contas válidas da empresa indicada e negar
+  identificação inválida. Cada conta pertence exclusivamente a um tenant; o mesmo
+  email em outro tenant NÃO DEVE compartilhar senha, bloqueio, recuperação ou identidade.
+  A empresa-alvo DEVE ser resolvida e validada antes de verificar suas credenciais;
+  login anônimo NÃO DEVE enumerar contas ou empresas de outros tenants.
 - **FR-006**: A fundação DEVE permitir encerrar o acesso e rejeitar novas operações
   protegidas com autenticação expirada ou contexto de acesso revogado ou encerrado.
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
@@ -330,16 +408,23 @@ publicação e restauração usando duas empresas e informações sintéticas.
   central e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
   sem conceder acesso de usuário por privilégio implícito; a ausência de autorização
   DEVE resultar em acesso negado.
-- **FR-008**: Usuários com mais de um vínculo ativo DEVEM poder selecionar uma empresa
-  autorizada; a seleção DEVE ser revalidada e não transportar dados do contexto anterior.
+- **FR-008**: A sessão autenticada DEVE permanecer vinculada à conta e ao tenant de
+  origem. Para acessar outra empresa, a pessoa DEVE autenticar a conta própria dessa
+  empresa; alterar o tenant indicado NÃO DEVE reutilizar a sessão, permissões ou dados
+  anteriores, mesmo quando o email seja igual.
 - **FR-009**: O cadastro central DEVE identificar cada empresa de forma única, seu estado
-  e referência segura ao armazenamento, sem concentrar dados de negócio.
+  e referência segura ao armazenamento, sem concentrar dados de negócio nem contas,
+  credenciais, permissões ou sessões dos usuários dos tenants.
 - **FR-010**: Um operador autorizado DEVE conseguir registrar, ativar e inativar empresas
   por procedimento documentado; identificações duplicadas DEVEM ser rejeitadas.
 - **FR-011**: O servidor DEVE resolver e validar o contexto da empresa antes de sua
   operação, sem aceitar credenciais ou conexões escolhidas pelo consumidor.
-- **FR-012**: Cada empresa DEVE ter armazenamento de negócio exclusivo conforme o
+- **FR-012**: Cada empresa DEVE ter armazenamento exclusivo de negócio e acesso conforme o
   isolamento obrigatório da Constituição; operações DEVEM usar somente o alvo validado.
+  Clientes, hóspedes e outros cadastros da mesma pessoa em empresas distintas DEVEM
+  ser registros independentes, sem compartilhamento, sincronização ou deduplicação
+  automática entre tenants. Contas, credenciais, permissões e sessões DEVEM pertencer
+  à fonte de dados da própria empresa, não a um cadastro central de usuários.
 - **FR-013**: Empresa ausente, desconhecida, inativa, não autorizada ou indisponível
   DEVE causar erro explícito em operações de uso dessa empresa, sem fallback para
   outra. Procedimentos técnicos somente podem tratar estados não ativos com alvo
@@ -386,8 +471,24 @@ publicação e restauração usando duas empresas e informações sintéticas.
   publicada; reinícios NÃO DEVEM eliminar informações persistidas das empresas.
 - **FR-031**: DEVEM existir procedimentos de cópia externa e restauração por empresa,
   com validação do alvo, do conteúdo recuperado e de ausência de impacto nas demais.
+  A cópia DEVE incluir os dados de acesso da própria empresa. Restaurar A NÃO DEVE
+  exigir restaurar contas de B; sessões anteriores DEVEM ser invalidadas e permissões
+  recuperadas revisadas antes da liberação. O controle técnico do banco no catálogo
+  continua necessário para operar o destino validado.
 - **FR-032**: Falhas de publicação e de atualização de dados DEVEM ter procedimento
   de recuperação que trate aplicação e persistência, com evidências antes de produção.
+- **FR-033**: Um operador autorizado DEVE conseguir preparar contas, desativá-las,
+  redefinir seu acesso e conceder ou revogar permissões por procedimento restrito,
+  com empresa-alvo explícita, verificação de autorização e resultado auditável.
+  A operação NÃO DEVE modificar contas ou permissões de outro tenant, mesmo
+  com email igual. Não é exigida tela administrativa nem autocadastro público.
+- **FR-034**: O primeiro incremento DEVE entregar backend iniciado e executável,
+  modelo persistível de usuários e acessos e migration versionada para criar sua
+  estrutura na fonte de dados de cada tenant. DEVEM existir instruções para aplicar
+  a migration e testes de criação da estrutura, persistência e isolamento, sem depender
+  de frontend, painel administrativo ou módulo de negócio. Não é exigida nessa entrega
+  uma suíte de comandos de gestão operacional; endpoints protegidos NÃO DEVEM ser
+  liberados sem autenticação e autorização completas.
 
 ### Non-Functional Requirements
 
@@ -399,6 +500,8 @@ publicação e restauração usando duas empresas e informações sintéticas.
   sem usar acesso administrativo em operações rotineiras.
 - **NFR-003 — Isolamento**: a matriz de acesso, leitura e gravação DEVE apresentar zero
   acesso cruzado, inclusive sob execução concorrente, alteração de contexto e falhas.
+  Alteração de credenciais, bloqueio, recuperação ou revogação de conta em um tenant
+  NÃO DEVE afetar contas e sessões de outro tenant.
 - **NFR-004 — Reprodutibilidade**: versões e pré-requisitos DEVEM ser controlados;
   a mesma revisão DEVE permitir executar as validações em ambiente limpo sem ajustes
   manuais não documentados e sem erros de compilação ou tipagem.
@@ -441,11 +544,15 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **Referência de armazenamento**: associação confiável entre empresa e destino de
   seus dados, com configuração sensível acessível somente à operação autorizada.
 - **Identidade de usuário**: identificação autenticável e estado de acesso;
-  não determina sozinha permissões nem acesso a empresas.
-- **Vínculo com empresa**: associação entre identidade e empresa, com estado ativo
-  ou revogado e permissões aplicáveis naquele contexto.
+  pertence a um único tenant. Email é único no escopo desse tenant,
+  não globalmente entre tenants; o mesmo email pode ter contas independentes.
+  Seu cadastro e credenciais pertencem à fonte de dados dessa empresa.
+- **Vínculo com empresa**: associação da conta com sua empresa de origem, com estado
+  ativo ou revogado e permissões aplicáveis; não é uma concessão de acesso da mesma
+  identidade a várias empresas independentes.
 - **Permissão**: autorização para uma operação protegida em um contexto definido;
-  ausência de concessão implica acesso negado.
+  ausência de concessão implica acesso negado. Dados de concessão e de sessão
+  pertencem à mesma fonte de dados da conta e não são compartilhados entre tenants.
 - **Definição de módulo**: responsabilidade, contratos e dependências de componente
   opcional acrescentado por um produto, sem representar módulo de negócio entregue.
 - **Configuração de ambiente**: parâmetros necessários à execução, com distinção
@@ -456,7 +563,8 @@ publicação e restauração usando duas empresas e informações sintéticas.
 ## Success Criteria *(mandatory)*
 
 Os critérios abaixo serão demonstrados na entrega da fundação, não nesta etapa
-documental. As metas de tempo e volume são limites iniciais de aceitação, não
+documental. SC-009 define o aceite do primeiro incremento de backend; SC-001 a SC-008
+permanecem metas da evolução da fundação completa. As metas de tempo e volume não são
 promessas de capacidade para todos os produtos derivados.
 
 ### Measurable Outcomes
@@ -466,8 +574,10 @@ promessas de capacidade para todos os produtos derivados.
   um clone limpo, com pré-requisitos instalados, sem assistência do autor.
 - **SC-002**: 100% dos casos da matriz de acesso são aprovados: entrada válida,
   identificação inválida, ausência de permissão, vínculo revogado, acesso expirado,
-  empresa inativa, troca autorizada e encerramento de acesso, sem exposição ou
-  alteração de informação protegida em casos negados.
+  empresa inativa, tentativa de usar sessão de A em B e encerramento de acesso,
+  sem exposição ou alteração de informação protegida em casos negados. Com contas
+  de mesmo email em dois tenants, alteração de senha, bloqueio, recuperação e
+  revogação em A DEVEM produzir zero alteração na conta, sessões e permissões de B.
 - **SC-003**: em 200 operações sintéticas de leitura e gravação intercaladas entre
   duas empresas, 100 por empresa e pelo menos 20 simultâneas, ocorrem zero acessos
   ou alterações cruzadas, incluindo reutilização de recursos e falhas provocadas;
@@ -485,22 +595,33 @@ promessas de capacidade para todos os produtos derivados.
 - **SC-007**: um operador que não escreveu os guias publica uma versão em ambiente
   de validação e demonstra restauração de cada uma de duas empresas, preservando
   seu ponto de recuperação e sem alterar a outra empresa, usando somente os guias.
+  Cada restauração recupera suas contas e permissões sem restaurar as da outra
+  empresa; sessões anteriores permanecem inválidas até nova autenticação autorizada.
 - **SC-008**: os revisores conseguem localizar, na documentação, instruções para
   todos os tópicos de FR-024 e evidências para todos os controles de liberação
   aplicáveis, sem depender de orientações informais.
+- **SC-009**: em duas bases de tenants inicialmente vazias, a estrutura de usuários/acesso
+  é criada pela migration e o backend inicia sem frontend ou painel. Registros sintéticos
+  com email igual podem ser persistidos e consultados independentemente em A e B;
+  repetir a aplicação da versão vigente produz zero duplicação e zero perda de dados.
+  A validação não exige módulo de negócio nem cria credenciais padrão.
 
 ## Assumptions
 
 - **AS-001 — Nome confirmado**: o usuário confirmou `boilerplate-react-dotnet-sdd`.
   A menção anterior a outro nome no texto de entrada não renomeia o projeto.
-- **AS-002 — Escopo confirmado**: a primeira versão entrega somente a fundação técnica.
+- **AS-002 — Escopo confirmado**: a feature entrega somente a fundação técnica,
+  começando pelo backend e pela migration de usuários/acesso.
   Módulos de negócio, inclusive um módulo de referência, não fazem parte desta feature.
-- **AS-003 — Operação inicial**: identidades, permissões e empresas podem ser preparadas
-  por procedimentos restritos e documentados; não é necessário um painel completo
-  ou cadastro público. Esses procedimentos não dispensam autorização nem equivalem
-  ao acesso de um usuário aos dados de negócio da empresa.
-- **AS-004 — Vínculos**: uma identidade pode ter vínculos com mais de uma empresa;
-  cada operação dependente utiliza somente um contexto validado.
+- **AS-003 — Operação inicial confirmada**: contas, permissões e empresas são preparadas
+  e mantidas por procedimentos técnicos restritos e documentados; não há tela administrativa
+  nem cadastro público nesta versão. Esses procedimentos não dispensam autorização
+  nem equivalem ao acesso de um usuário aos dados de negócio da empresa.
+- **AS-004 — Contas independentes**: uma identidade pertence a uma única empresa.
+  A mesma pessoa pode ter contas distintas em vários tenants, com email repetido,
+  mas credenciais e ciclo de acesso independentes. Não há troca de tenant com
+  reaproveitamento de uma identidade autenticada em outra empresa. Contas, concessões
+  e sessões ficam na fonte de dados do próprio tenant; o catálogo é somente técnico.
 - **AS-005 — Dados de teste**: componentes e registros sintéticos podem existir
   exclusivamente nos testes de persistência e modularidade, sem expor funcionalidades
   de negócio na distribuição da fundação.
@@ -521,3 +642,18 @@ promessas de capacidade para todos os produtos derivados.
   continuam obrigatórios desde a primeira versão.
 - **AS-011 — Etapa atual**: a checklist avalia a qualidade dos requisitos. Sua aprovação
   não afirma que a fundação, seus testes ou os critérios de sucesso já foram implementados.
+- **AS-012 — Cenários futuros**: validação fiscal com atendimento técnico e gestão
+  de hotelaria são produtos derivados distintos, em repositórios próprios, com módulos
+  e dados próprios. Servem para verificar adequação da fundação; não incluem entregas
+  de arquivos fiscais, leads, chamados, hóspedes, quartos, reservas ou relatórios nesta feature.
+- **AS-013 — Primeiro incremento de backend**: a implementação começa pela base
+  executável e pela migration do cadastro de usuários/acesso. Login, sessão, autorização
+  e frontend completos pertencem à evolução posterior; operações protegidas não são
+  expostas antes desses controles. Não há painel nem gestão comercial.
+- **AS-014 — Sincronização do desenho**: plano, modelo, contratos e guia DEVEM seguir
+  contas, permissões e sessões locais ao tenant, sem identidade central compartilhável.
+  DEVEM separar o primeiro incremento de backend das entregas posteriores e manter
+  os gates constitucionais aplicáveis, sem ampliar o recorte com gestão comercial.
+- **AS-015 — Migration inicial**: a migration cria a estrutura, não usuários com senhas
+  padrão. Contas sintéticas de validação são preparadas somente em ambiente de teste,
+  sem secrets reais em código ou dados compartilhados entre tenants.

@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "boilerplate-react-dotnet-sdd - Backend I1",
+    "version": "1.0.0",
+    "description": "Contrato de design do primeiro incremento: backend executável e migration de usuários/acesso. Somente saúde é exposta. Sem endpoint de usuário, login, concessão ou painel; contratos de acesso HTTP pertencem a future-openapi.json. Não afirma implementação concluída."
+  },
+  "x-increment": "I1",
+  "servers": [
+    { "url": "/", "description": "Origem do backend." }
+  ],
+  "security": [],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "getLiveness",
+        "summary": "Verificar processo vivo",
+        "description": "Não acessa catálogo, banco de tenant ou sessão, mesmo com cookie enviado. Não retorna conexão, secret ou detalhes internos.",
+        "responses": {
+          "200": {
+            "description": "Processo vivo.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Liveness" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "getReadiness",
+        "summary": "Verificar backend pronto no escopo I1",
+        "description": "Confere configuração runtime e identidade/versão do catálogo técnico. Não executa migrations, autentica cookies, consulta contas ou verifica todos os bancos de tenants. Sem exigência de key ring enquanto não existe autenticação HTTP.",
+        "responses": {
+          "200": {
+            "description": "Backend pronto no escopo I1.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } }
+            }
+          },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Liveness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "enum": ["alive"] } }
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "enum": ["ready"] } }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "title", "status", "code", "traceId"],
+        "properties": {
+          "type": { "type": "string", "format": "uri" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "code": { "type": "string", "enum": ["DEPENDENCY_UNAVAILABLE", "NOT_FOUND", "INTERNAL_ERROR"] },
+          "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+          "detail": { "type": "string", "maxLength": 1000 },
+          "instance": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+    "responses": {
+      "ServiceUnavailable": {
+        "description": "503: DEPENDENCY_UNAVAILABLE, sem conexão, secret ou fallback.",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } }
+        }
+      },
+      "UnexpectedError": {
+        "description": "500: INTERNAL_ERROR, diagnóstico seguro com correlação.",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } }
+        }
+      }
+    }
+  }
+}
