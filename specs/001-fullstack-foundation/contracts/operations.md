@@ -28,6 +28,9 @@ sem iniciar web host nem aplicar DDL no startup.
 Gerar migrations de acesso em `TenantAccessDbContext`. Aplicar via EF CLI no profile
 Compose `migrations`, com credenciais owner daquele banco, não com o role usado pela API.
 Nenhum argumento aceita senha, conexão livre, path enviado por HTTP ou tenant padrão.
+Os argumentos de identidade devem coincidir com a configuração privada; não selecionam
+conexão nem banco. A/B exigem configurações e credenciais próprias, nunca a mesma conexão
+com apenas `--tenant-id` trocado.
 
 ### Preflight e inicialização
 
@@ -37,7 +40,8 @@ Nenhum argumento aceita senha, conexão livre, path enviado por HTTP ou tenant p
 4. Marcador errado, ambiente divergente ou estrutura existente sem marcador:
    falhar sem aplicar migration, corrigir identidade ou selecionar outro banco.
 5. Inicialização somente com banco vazio conhecido e aprovação explícita por
-   configuração privada de instalação; nunca adotar banco arbitrário existente.
+   `Migrations:AllowInitializeEmptyDatabase=true` na configuração privada de tooling;
+   nunca adotar banco arbitrário existente.
 6. Aplicar migration com lock nativo EF em janela sem writers/DDL concorrentes.
 7. UseSeeding/UseAsyncSeeding inicializam marcador técnico apenas para alvo novo
    aprovado; marcador correto existente é no-op. Não criar contas ou senhas.
@@ -45,6 +49,16 @@ Nenhum argumento aceita senha, conexão livre, path enviado por HTTP ou tenant p
 O callback ocorre depois da migration; preflight é obrigatório para não alterar
 estrutura errada antes de detectar divergência. EF lock não autentica operador
 nem torna atômicas alterações concorrentes feitas fora desse processo.
+
+`Migrations__AllowInitializeEmptyDatabase` é a variável de ambiente correspondente.
+Ausência ou `false` nega inicialização sem marcador antes de DDL; valor inválido falha
+explicitamente. `true` só vale para a identidade e o banco aprovados nessa configuração,
+com argumentos correspondentes e todas as verificações de preflight satisfeitas.
+Marcador divergente ou estrutura existente sem marcador sempre bloqueia, mesmo com
+`true`. Marcador correto permite aplicar/reaplicar sem autorização de inicialização.
+Após inicializar, remover o sinal ou voltar a `false`; ele nunca é montado na API.
+Testes devem cobrir ausência, `false`, valor inválido, aprovação válida, alvo divergente
+e reaplicação com marcador correto e sinal desligado.
 
 Migrations não criam bancos/papéis automaticamente: o operador fornece esses
 pré-requisitos em procedimento documentado. Testcontainers faz isso em testes,
@@ -75,6 +89,7 @@ Owner/provisionador não é montado na API nem reaproveitado em seus testes runt
 | `TenantId` / `TenantDisplayName` / `TenantState` | Identidade e estado da empresa atendida por aquela instalação (via variáveis de ambiente no Dokploy/Compose). |
 | `ConnectionStrings:AppDb` / arquivo de credencial runtime | Conexão runtime exclusiva ao banco da instalação (sem DDL); secret privado no Dokploy/ambiente. |
 | Credencial de migration (tooling) | Credencial owner do banco da instalação; montada somente no profile `migrations`. |
+| `Migrations:AllowInitializeEmptyDatabase` | Booleano privado exclusivo do tooling; ausente equivale a `false`. Autoriza apenas inicialização vazia aprovada, sem dispensar validação do alvo. |
 | `KeyRingPath` / `ProtectionCertificateFile` | Apenas I2; key ring persistente e proteção em repouso em produção. |
 
 Conexões são validadas com parsing seguro; o servidor nunca aceita string de conexão

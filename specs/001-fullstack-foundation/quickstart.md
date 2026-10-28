@@ -17,8 +17,11 @@ O roteiro não depende de frontend, login HTTP, painel ou Platform.Tools.
 - PostgreSQL 18.6 com volume nomeado em `/var/lib/postgresql`.
 - Banco vazio da instalação local (e segundo banco de validação para comprovar isolamento
   SC-009), com owners de migration e runtime mínimo distintos. Não existe banco `platform_catalog`.
-- Configuração privada aprovada (`.env.local` / variáveis de ambiente) contém `ApplicationId`,
-  `EnvironmentId`, `TenantId`, conexões/secrets e aprovação de inicialização do banco.
+- Configurações privadas aprovadas por instalação (`.env.local` para A e `.env.b.local`
+  para B) contêm `ApplicationId`, `EnvironmentId`, `TenantId` e conexões/secrets próprios.
+  Somente o tooling recebe `Migrations__AllowInitializeEmptyDatabase=true` para a
+  primeira inicialização do banco vazio aprovado; ausente/`false` nega essa inicialização
+  e valor inválido falha explicitamente.
 - Nenhuma credencial real/padrão em exemplos, migrations ou logs.
 
 A preparação inicial de bancos/papéis é pré-requisito do operador, documentado na
@@ -31,27 +34,39 @@ PowerShell na raiz do repositório:
 
 ```powershell
 Copy-Item .\infra\.env.example .\infra\.env.local
+Copy-Item .\infra\.env.example .\infra\.env.b.local
 ```
 
-Preencher o arquivo privado com as variáveis da instalação e arquivos de credenciais;
+Preencher cada arquivo privado com as variáveis e arquivos de credenciais da respectiva
+instalação, usando os identificadores abaixo e bancos/roles próprios. Definir
+`TenantState=Inactive` durante DDL e aprovar explicitamente cada banco vazio somente no
+tooling. O exemplo versionado mantém `Migrations__AllowInitializeEmptyDatabase=false`;
 exemplos não contêm valores de senha utilizáveis. A API monta somente o secret runtime
 da própria instalação. A credencial owner de migration é montada apenas no profile
-`migrations`. Arquivos privados e key rings ficam fora do Git/contexto de build.
+`migrations`, assim como o sinal de inicialização. Arquivos privados e key rings ficam
+fora do Git/contexto de build.
 
 ```powershell
 $compose = '.\infra\compose.yaml'
-$local = '.\infra\.env.local'
-$environmentId = '11111111-1111-4111-8111-111111111111'
+$localA = '.\infra\.env.local'
+$localB = '.\infra\.env.b.local'
+$environmentA = '11111111-1111-4111-8111-111111111111'
+$environmentB = '22222222-2222-4222-8222-222222222222'
 $tenantA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 $tenantB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-docker compose -f $compose --env-file $local config --quiet
-docker compose -f $compose --env-file $local build api migrations
-docker compose -f $compose --env-file $local up -d postgres
+docker compose --project-name boilerplate-a -f $compose --env-file $localA config --quiet
+docker compose --project-name boilerplate-b -f $compose --env-file $localB config --quiet
+docker compose --project-name boilerplate-a -f $compose --env-file $localA build api migrations
+docker compose --project-name boilerplate-b -f $compose --env-file $localB build migrations
+docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d postgres
+docker compose --project-name boilerplate-b -f $compose --env-file $localB up -d postgres
 ```
 
 **Esperado**: configuração e imagens válidas, PostgreSQL saudável, targets vazios
-aprovados e roles runtime sem DDL/CONNECT a outros tenants. Não imprimir o resultado
-completo de `compose config` com secrets ou usar `down -v` como rotina.
+aprovados, volumes/redes independentes por projeto e roles runtime sem DDL/CONNECT a
+outros tenants. PostgreSQL não publica porta no host; somente a API A será exposta neste
+roteiro. Não imprimir o resultado completo de `compose config` com secrets ou usar
+`down -v` como rotina. Interromper o roteiro se qualquer comando falhar.
 
 ## 3. Aplicar migrations entregues
 
@@ -61,9 +76,14 @@ Serviço pontual `migrations` tem working directory na pasta `backend/src` da im
 Linux e EF local restaurado; nomes de pastas abaixo não dependem do separador do host.
 
 ```powershell
-docker compose -f $compose --env-file $local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantA --environment-id $environmentId
-docker compose -f $compose --env-file $local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantB --environment-id $environmentId
+docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantA --environment-id $environmentA
+docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantB --environment-id $environmentB
 ```
+
+Cada comando usa a conexão e o owner do arquivo correspondente. Os argumentos de
+identidade apenas confirmam o alvo: não escolhem outro banco. Após inicializar, remover
+`Migrations__AllowInitializeEmptyDatabase` ou voltar a `false` em ambos os arquivos;
+marcador correto permite reaplicação sem essa autorização.
 
 Para executar EF nativamente no Windows, usar `Push-Location .\backend\src`, os
 mesmos nomes de projetos e configuração privada de tooling, retornando depois
@@ -80,8 +100,11 @@ com `Pop-Location`. Não passar paths Windows para o processo Linux do container
 
 ## 4. Iniciar o backend e confirmar superfície mínima
 
+Concluídas as migrations, definir `TenantState=Active` no arquivo privado de A.
+A API não recebe a credencial owner nem o sinal de inicialização.
+
 ```powershell
-docker compose -f $compose --env-file $local up -d api
+docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d api
 Invoke-RestMethod 'http://localhost:8080/health/live'
 Invoke-RestMethod 'http://localhost:8080/health/ready'
 Invoke-RestMethod 'http://localhost:8080/openapi/v1.json'
@@ -118,6 +141,8 @@ pois somente listar achados não bloqueia por si só. Falha/ausência de resulta
 | Reaplicação | Mesma versão aplicada novamente, sem duplicação nem perda de registros. |
 | Conta local | Mesmo email em A/B, contas e hashes independentes; unicidade dentro de cada banco. |
 | Persistência | Consulta e alteração corretas, FK/grants, commit e rollback, sem mocks substituindo PostgreSQL. |
+| Concorrência mínima | Barreira comprova operação de A sobreposta a operação de B (pico >=2), com IDs/emails iguais e credenciais runtime próprias; resultados válidos persistem somente no alvo e falha/rollback em A não altera B. Não exige a carga completa de SC-003. |
+| Inicialização autorizada | Sem marcador, sinal ausente/`false` nega antes de DDL; valor inválido falha; `true` só inicializa banco vazio aprovado. Estrutura sem marcador ou identidade divergente bloqueia mesmo com aprovação; reaplicação correta funciona com sinal desligado. |
 | Target errado | A apontando a B é bloqueado antes de DDL/acesso a contas; B não sofre mudança. |
 | Role runtime | Credencial de A não conecta a B nem executa DDL. |
 | API mínima | Contrato I1 corresponde à API; rotas futuras ausentes, sem sucesso simulado. |
@@ -129,10 +154,25 @@ Registrar IDs/quantidade de testes executados; uma execução com zero testes fa
 Checks pertinentes devem bloquear integração em GitHub Actions com permissões
 mínimas e sem secrets de produção. Não exige pipeline de frontend ou deploy.
 
+### Prova negativa dos gates — SC-006 no backend
+
+Após uma execução válida, usar alterações controladas em branch descartável para
+provocar, separadamente, falha de compilação/tipos C#, formatação e testes de
+persistência/isolamento. Exercitar o secret scan com credencial fictícia reconhecível
+pelo scanner e a política de auditoria com relatório NuGet sintético de severidade
+alta/crítica; não adicionar dependência vulnerável nem secret real.
+Também comprovar falha explícita para scan indisponível e execução com zero testes.
+
+Registrar o check afetado, evidência de falha e bloqueio de integração pelos checks
+obrigatórios de branch protection/ruleset. A aplicação dessa proteção exige permissão
+do mantenedor; sua ausência não pode ser registrada como bloqueio comprovado.
+Descartar somente as alterações do exercício e confirmar novamente a execução válida,
+sem desativar checks ou manter fixtures negativas no código distribuído.
+
 ## 6. Aceite SC-009
 
 1. Comprovar estrutura e persistência separadas em A/B.
-2. Reaplicar as migrations da seção 3 e confirmar dados/quantidades preservados.
+2. Para reaplicar, parar a API A com `docker compose --project-name boilerplate-a -f $compose --env-file $localA stop api` e definir `TenantState=Inactive` no alvo; repetir os comandos da seção 3 com o sinal de inicialização desligado e confirmar dados/quantidades preservados. Reativar A e repetir a seção 4.
 3. Demonstrar backend vivo/pronto sem frontend, painel ou módulo de negócio.
 4. Registrar resultados dos testes e ausência de credenciais padrão.
 

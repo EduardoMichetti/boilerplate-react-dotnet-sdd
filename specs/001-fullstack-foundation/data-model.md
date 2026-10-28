@@ -37,6 +37,7 @@ do serviço daquele cliente no Dokploy/VPS ou em `.env.local` no desenvolvimento
 | `TenantDisplayName` | string, 1 a 120 | Nome de apresentação da empresa naquela instalação. |
 | `TenantState` | enum (`Inactive` / `Active`) | Estado operacional configurado para a instalação. |
 | `ConnectionStrings:AppDb` (runtime) / credencial de migration (tooling) | secret / arquivo privado | Conexão exclusiva ao banco PostgreSQL daquela instalação; separada entre runtime (sem DDL) e tooling (owner de migration). |
+| `Migrations:AllowInitializeEmptyDatabase` (somente tooling) | booleano; ausente equivale a `false` | Somente `true` autoriza inicialização do banco vazio aprovado na conexão privada, após validar identidade/argumentos, banco, role e estado inativo. Valor inválido falha; não é montado nem usado pela API. |
 
 A API valida na inicialização e no readiness que a configuração da instalação coincide
 com o marcador `TenantDatabaseIdentity` gravado no banco configurado, impedindo que uma
@@ -59,9 +60,12 @@ renovado pelo procedimento de revogação global local/restauração em I2/I4.
 TenantId/EnvironmentId nunca são trocados para encobrir referência errada.
 
 Factory verifica marcador antes de DDL. Sem marcador, apenas banco vazio aprovado
-explicitamente pode receber migration e inicialização. Estrutura existente sem
-marcador é erro. UseSeeding/UseAsyncSeeding inserem o marcador desse alvo uma vez,
-sem HasData dependente do tenant nem seed de usuário.
+explicitamente com `Migrations:AllowInitializeEmptyDatabase=true` pode receber migration
+e inicialização. Sem aprovação, falhar antes de DDL; estrutura existente sem marcador
+ou marcador divergente é erro mesmo com aprovação. Marcador correto permite aplicar
+ou reaplicar migrations sem esse sinal; removê-lo ou voltar a `false` após inicialização.
+UseSeeding/UseAsyncSeeding inserem o marcador desse alvo uma vez, sem HasData dependente
+do tenant nem seed de usuário.
 
 ### AppUser
 
@@ -108,6 +112,9 @@ instalação de cliente (validado em I1 contra dois bancos independentes A e B);
 `TenantId`/`EnvironmentId` não alteram o EF model ou snapshots.
 
 I1 valida banco vazio, reaplicação sem duplicação/perda e falhas explícitas.
+Persistência em A/B inclui operações comprovadamente sobrepostas (pico >=2, ao menos
+uma por banco), identificadores/emails iguais, restrições locais e commit/rollback
+independentes com credenciais runtime. A carga completa de SC-003 permanece em I2.
 Atualização de versão anterior suportada ganha teste quando esse estado existir.
 Não usar EnsureCreated junto a migrations nem chamar Migrate no startup da API.
 

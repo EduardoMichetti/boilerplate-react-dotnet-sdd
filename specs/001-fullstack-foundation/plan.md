@@ -61,8 +61,10 @@ camada. Migrations por EF CLI, sem processo administrativo residente.
 
 **Performance Goals**: SC-009 é o aceite de I1: dois bancos vazios (simulando duas
 instalações de clientes), criação da estrutura, persistência independente e reaplicação
-sem duplicação/perda. SC-001 a SC-008 são metas posteriores; SC-003 mantém 200 operações,
-100 por instalação de cliente, pico observado de pelo menos 20 e zero cruzamento.
+sem duplicação/perda. I1 também comprova isolamento com operações de A e B efetivamente
+sobrepostas, sem antecipar a meta completa de SC-003: 200 operações, 100 por instalação
+de cliente e pico observado de pelo menos 20, em I2. SC-006/SC-008 acompanham os checks
+e a documentação de I1; os demais critérios permanecem nos incrementos posteriores.
 
 **Constraints**: nenhum painel, banco de catálogo central, dado/conta global, seed de
 usuário padrão, secret no Git/imagem/log ou endpoint de cadastro/login protegido exposto em I1.
@@ -187,6 +189,12 @@ as quatro entregas como um único bloqueio para o primeiro incremento.
   vínculos da mesma conta a vários tenants.
 - Hash e validação de senha usam Identity. Testes criam contas sintéticas por
   UserManager; a migration cria estrutura, não usuários ou senhas.
+- A prova de persistência de I1 usa credenciais runtime próprias em dois bancos reais,
+  com o mesmo email e identificador local em A/B. Uma barreira de sincronização deve
+  comprovar ao menos uma operação de cada banco sobreposta à outra (pico observado >=2).
+  Verificar leituras, gravações, concessão/revogação, unicidade local, FKs, commit e
+  rollback; falha provocada em A não altera B. Negar todas as operações não satisfaz
+  a prova. Não exige endpoints de usuário nem a carga completa de SC-003.
 - Sessão persistida é uma extensão de modelo de I2, não pré-condição de SC-009.
 
 Configuração da instalação (via variáveis de ambiente/secrets no Compose local ou no
@@ -209,6 +217,16 @@ Antes de aplicar DDL:
 4. Se houver marcador divergente (outro `TenantId` ou `EnvironmentId`), interromper **antes** das migrations.
 5. Se não houver marcador, permitir somente inicialização explicitamente autorizada
    de banco vazio, já criado pelo operador e sem objetos de aplicação preexistentes.
+
+Essa autorização é `Migrations:AllowInitializeEmptyDatabase`, booleana e exclusiva do
+tooling (variável `Migrations__AllowInitializeEmptyDatabase`). Ausente ou `false`, nega
+inicialização de banco sem marcador antes de DDL; valor inválido é erro explícito.
+Somente `true` autoriza o alvo da conexão privada aprovada, após validar a identidade
+configurada, sua correspondência com os argumentos EF CLI, banco, role e estado inativo.
+O sinal não seleciona outro banco nem dispensa qualquer validação. Marcador divergente
+ou estrutura existente sem marcador sempre bloqueia, mesmo com `true`. Com marcador
+correto, aplicar/reaplicar migrations não exige essa autorização de inicialização.
+Remover o sinal ou voltar a `false` após a primeira inicialização; não montá-lo na API.
 
 Após a migration, `UseSeeding` e `UseAsyncSeeding` inicializam somente o marcador
 imutável da instalação aprovada; repetição com marcador correto é no-op. Não usar HasData
@@ -235,12 +253,22 @@ Compose local inclui API, PostgreSQL e perfil pontual `migrations` com SDK;
 esse perfil usa EF CLI, não suíte administrativa. Runtime e tooling têm secrets
 e permissões separados. Volume PostgreSQL 18 em `/var/lib/postgresql`, imagens
 versionadas/digests registrados e exemplos sem credenciais reais.
+O roteiro de A/B usa configurações privadas e projetos Compose distintos, com volumes
+e redes próprios, sem nomes globais nem porta de PostgreSQL publicada. Alterar somente
+`--tenant-id` nunca seleciona outra instalação ou conexão.
 
 Checks de I1: restore locked, build, format/analyzers, testes de domínio,
 migration/isolamento PostgreSQL real (com dois bancos simulando duas instalações),
 contrato de saúde, auditoria NuGet e secret scan.
+Os lockfiles são gerados no primeiro restore da fase de setup e atualizados junto de
+alterações de dependências, antes de qualquer build/CI que use `--locked-mode`.
 GitHub Actions sem secrets de produção em PR, permissões mínimas, ações por SHA
 e branch protection. Resultado incompleto/falho não aprova.
+SC-006 exige uma execução válida e exercícios negativos controlados dos checks de I1:
+compilação/tipos C#, convenções, persistência/isolamento, secret fictício, relatório
+sintético de vulnerabilidade alta/crítica, scan indisponível e zero testes.
+Registrar falha por check e comprovar que os checks obrigatórios bloqueiam integração;
+não introduzir secrets reais ou dependências vulneráveis para executar o exercício.
 
 ### I2 — desenho de autenticação na instalação do cliente
 
