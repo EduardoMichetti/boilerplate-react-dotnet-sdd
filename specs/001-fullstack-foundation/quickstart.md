@@ -4,10 +4,42 @@
 **References**: [plano](plan.md), [pesquisa](research.md), [modelo](data-model.md),
 [contrato I1](contracts/openapi.json) e [operação](contracts/operations.md).
 
-Roteiro para executar **depois da implementação de I1**. Projetos, migrations,
-manifest de ferramentas, templates e serviços Compose citados ainda não foram
-criados por este planejamento. Não executar como se o backend já estivesse entregue.
+O roteiro completo das seções 1 a 7 é para executar **depois da implementação de I1**.
+A Parada 1 entrega somente solution/projetos, manifests/lockfiles, configuração
+validada, porta de identidade, tratamento de erros e fixture PostgreSQL.
+Migrations, modelo de usuários, endpoints de saúde/OpenAPI, Compose e CI ainda não
+estão entregues. Não executar o roteiro completo como se I1 já estivesse concluído.
 O roteiro não depende de frontend, login HTTP, painel ou Platform.Tools.
+
+## Checkpoint da Parada 1 — fases 1 e 2
+
+Pré-requisitos: SDK **10.0.401** instalado (o `global.json` não permite roll-forward),
+runtime ASP.NET Core/.NET 10.0.12 e Docker com engine Linux responsivo. O SDK inclui
+o runtime correspondente. Não são necessárias credenciais ou bases externas:
+a fixture cria dois bancos descartáveis e roles próprios com senhas aleatórias.
+
+```powershell
+dotnet --version
+dotnet tool restore
+dotnet restore .\backend\Boilerplate.slnx --locked-mode
+dotnet build .\backend\Boilerplate.slnx --no-restore
+dotnet format .\backend\Boilerplate.slnx --verify-no-changes --no-restore
+dotnet test --solution .\backend\Boilerplate.slnx --no-restore --minimum-expected-tests 1
+```
+
+Interromper ao primeiro comando com erro. O formato em `.editorconfig` é verificado
+por `dotnet format`; corrigir com o mesmo comando sem `--verify-no-changes`.
+Domain permanece sem dependências HTTP/EF/Identity; Application depende somente de
+Domain e tipos nativos .NET. A validação de configuração não abre conexões: valida
+campos e sintaxe sem incluir valores privados nos erros; a prova do marcador e a
+validação específica Npgsql chegam nas próximas fases.
+
+Nesta parada, iniciar a API não comprova prontidão: saúde/OpenAPI e autenticação
+retornam 404 Problem Details. A fixture usa `postgres:18.6` fixado pelo digest registrado
+em `PostgresInstallationFixture`, não reutiliza containers/bases entre suítes e descarta
+o container ao finalizar. Seus testes verificam banco vazio, roles sem privilégios
+administrativos, runtime sem DDL/CREATE/TEMPORARY e negação de CONNECT entre A/B.
+Nenhuma migration ou conta padrão é criada.
 
 ## 1. Pré-requisitos e alvos
 

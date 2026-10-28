@@ -24,12 +24,12 @@ description: "Task list for feature implementation (Incremento I1 — Backend, P
 
 **Purpose**: Criar a estrutura enxuta do repositório para o backend `.NET 10` com versões fixadas e ferramentas de qualidade.
 
-- [ ] T001 Criar `global.json` fixando SDK `10.0.401` e runner `Microsoft.Testing.Platform` na raiz `global.json`
-- [ ] T002 Criar manifesto de ferramentas locais com `dotnet-ef` `10.0.12` em `.config/dotnet-tools.json`
-- [ ] T003 [P] Configurar propriedades comuns de compilação (`net10.0`, `Nullable=enable`, `ImplicitUsings=enable`, `RestorePackagesWithLockFile=true`) em `Directory.Build.props`
-- [ ] T004 [P] Configurar gerenciamento central de versões de pacotes NuGet (`EF Core 10.0.12`, `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3`, `xunit.v3 4.0.2`, `Testcontainers.PostgreSql 4.16.0`) em `Directory.Packages.props`
-- [ ] T005 [P] Configurar regras de formatação e estilo verificáveis por `dotnet format` em `.editorconfig`
-- [ ] T006 Criar a solution `backend/Boilerplate.slnx` e os projetos `backend/src/Platform.Domain/Platform.Domain.csproj`, `backend/src/Platform.Application/Platform.Application.csproj`, `backend/src/Platform.Infrastructure/Platform.Infrastructure.csproj`, `backend/src/App.Api/App.Api.csproj`, `backend/tests/Platform.UnitTests/Platform.UnitTests.csproj`, `backend/tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj` e `backend/tests/Platform.ContractTests/Platform.ContractTests.csproj`
+- [X] T001 Criar `global.json` fixando SDK `10.0.401` e runner `Microsoft.Testing.Platform` na raiz `global.json`
+- [X] T002 Criar manifesto de ferramentas locais com `dotnet-ef` `10.0.12` em `.config/dotnet-tools.json`
+- [X] T003 [P] Configurar propriedades comuns de compilação (`net10.0`, `Nullable=enable`, `ImplicitUsings=enable`, `RestorePackagesWithLockFile=true`) em `Directory.Build.props`
+- [X] T004 [P] Configurar gerenciamento central de versões de pacotes NuGet (`EF Core 10.0.12`, `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3`, `xunit.v3 4.0.2`, `Testcontainers.PostgreSql 4.16.0`) em `Directory.Packages.props`
+- [X] T005 [P] Configurar regras de formatação e estilo verificáveis por `dotnet format` em `.editorconfig`
+- [X] T006 Criar a solution `backend/Boilerplate.slnx` e os projetos `backend/src/Platform.Domain/Platform.Domain.csproj`, `backend/src/Platform.Application/Platform.Application.csproj`, `backend/src/Platform.Infrastructure/Platform.Infrastructure.csproj`, `backend/src/App.Api/App.Api.csproj`, `backend/tests/Platform.UnitTests/Platform.UnitTests.csproj`, `backend/tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj` e `backend/tests/Platform.ContractTests/Platform.ContractTests.csproj`
 
 T006 inclui o primeiro restore e a geração dos arquivos `packages.lock.json` junto de cada projeto, antes de validar restore com `--locked-mode`. Toda alteração posterior de dependências deve atualizar o lockfile correspondente na mesma tarefa; T039 apenas verifica sua consistência final.
 
@@ -43,13 +43,19 @@ T006 inclui o primeiro restore e a geração dos arquivos `packages.lock.json` j
 
 **⚠️ CRITICAL**: Nenhuma User Story deve ser iniciada antes da conclusão desta fase.
 
-- [ ] T007 [P] Criar enum `TenantState` (`enum (Inactive / Active) — Estado operacional configurado para a instalação.`) e exceções/resultados de domínio em `backend/src/Platform.Domain/Tenancy/TenantState.cs`
-- [ ] T008 [P] Implementar `InstallationTenantOptions` com validação explícita das restrições de `data-model.md` (`ApplicationId`: `string, 1 a 100 — Identidade confiável do produto derivado.`; `EnvironmentId`: `UUID — Identificador imutável do ambiente daquela instalação; não vazio.`; `TenantId`: `UUID — Identificador imutável do cliente/empresa daquela instalação; não vazio.`; `TenantDisplayName`: `string, 1 a 120 — Nome de apresentação da empresa naquela instalação.`; `TenantState`: `enum (Inactive / Active) — Estado operacional configurado para a instalação.`; `ConnectionStrings:AppDb`: `secret / arquivo privado — Conexão exclusiva ao banco PostgreSQL daquela instalação; separada entre runtime (sem DDL) e tooling (owner de migration).`) em `backend/src/Platform.Application/Configuration/InstallationTenantOptions.cs`
-- [ ] T009 [P] Criar contratos de porta para leitura da identidade do banco (`ITenantDatabaseIdentityProbe`) em `backend/src/Platform.Application/Tenancy/ITenantDatabaseIdentityProbe.cs`
-- [ ] T010 [P] Implementar fábrica e handler de respostas de erro `ProblemDetails` (`DEPENDENCY_UNAVAILABLE`, `NOT_FOUND`, `INTERNAL_ERROR`, `traceId` hexadecimal de 32 caracteres, sem expor secrets ou strings de conexão) em `backend/src/App.Api/Diagnostics/ProblemDetailsSetup.cs`
-- [ ] T011 Criar fixture base de PostgreSQL real (`postgres:18.6`) com Testcontainers para provisionar dois bancos isolados (Cliente A e Cliente B) com roles `owner` (migration) e `runtime` (sem DDL e sem `CONNECT` cruzado), usando alvos descartáveis próprios por suíte sem compartilhar estado entre execuções paralelas, em `backend/tests/Platform.IntegrationTests/Fixtures/PostgresInstallationFixture.cs`
+- [X] T007 [P] Criar enum `TenantState` (`enum (Inactive / Active) — Estado operacional configurado para a instalação.`) e exceções/resultados de domínio em `backend/src/Platform.Domain/Tenancy/TenantState.cs`
+- [X] T008 [P] Implementar `InstallationTenantOptions` com validação explícita das restrições de `data-model.md` (`ApplicationId`: `string, 1 a 100 — Identidade confiável do produto derivado.`; `EnvironmentId`: `UUID — Identificador imutável do ambiente daquela instalação; não vazio.`; `TenantId`: `UUID — Identificador imutável do cliente/empresa daquela instalação; não vazio.`; `TenantDisplayName`: `string, 1 a 120 — Nome de apresentação da empresa naquela instalação.`; `TenantState`: `enum (Inactive / Active) — Estado operacional configurado para a instalação.`; `ConnectionStrings:AppDb`: `secret / arquivo privado — Conexão exclusiva ao banco PostgreSQL daquela instalação; separada entre runtime (sem DDL) e tooling (owner de migration).`) em `backend/src/Platform.Application/Configuration/InstallationTenantOptions.cs`
+- [X] T009 [P] Criar contratos de porta para leitura da identidade do banco (`ITenantDatabaseIdentityProbe`) em `backend/src/Platform.Application/Tenancy/ITenantDatabaseIdentityProbe.cs`
+- [X] T010 [P] Implementar fábrica e handler de respostas de erro `ProblemDetails` (`DEPENDENCY_UNAVAILABLE`, `NOT_FOUND`, `INTERNAL_ERROR`, `traceId` hexadecimal de 32 caracteres, sem expor secrets ou strings de conexão) em `backend/src/App.Api/Diagnostics/ProblemDetailsSetup.cs`
+- [X] T011 Criar fixture base de PostgreSQL real (`postgres:18.6`) com Testcontainers para provisionar dois bancos isolados (Cliente A e Cliente B) com roles `owner` (migration) e `runtime` (sem DDL e sem `CONNECT` cruzado), usando alvos descartáveis próprios por suíte sem compartilhar estado entre execuções paralelas, em `backend/tests/Platform.IntegrationTests/Fixtures/PostgresInstallationFixture.cs`
 
 **Checkpoint**: Fundação pronta — cada entrega de User Story abaixo pode ser executada e validada em lotes pequenos.
+
+**Evidência da Parada 1 (2026-10-28)**: SDK 10.0.401, `dotnet-ef` 10.0.12 restaurado,
+restore `--locked-mode`, build com zero avisos/erros e `dotnet format --verify-no-changes`
+aprovados. MTP: 20 testes aprovados (12 unitários, 5 de diagnóstico/contrato e 3 da fixture
+com PostgreSQL real), sem falhas ou ignorados. Grafo das quatro camadas e sete lockfiles
+verificados. Fase 3 não iniciada; esta evidência não declara SC-009 concluído.
 
 ---
 
