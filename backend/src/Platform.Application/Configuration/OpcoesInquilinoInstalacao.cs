@@ -11,32 +11,32 @@ public sealed class OpcoesInquilinoInstalacao
     /// <summary>
     /// Identificador do produto ou aplicação derivado (de 1 a 100 caracteres).
     /// </summary>
-    public string? IdAplicacao { get; init; }
+    public string? IdAplicacao { get; set; }
 
     /// <summary>
     /// Identificador único e imutável do ambiente da instalação (UUID não vazio).
     /// </summary>
-    public Guid IdAmbiente { get; init; }
+    public Guid IdAmbiente { get; set; }
 
     /// <summary>
     /// Identificador único e imutável do inquilino (UUID não vazio).
     /// </summary>
-    public Guid IdInquilino { get; init; }
+    public Guid IdInquilino { get; set; }
 
     /// <summary>
     /// Nome amigável de exibição do inquilino/empresa (de 1 a 120 caracteres).
     /// </summary>
-    public string? NomeExibicaoInquilino { get; init; }
+    public string? NomeExibicaoInquilino { get; set; }
 
     /// <summary>
     /// Estado operacional configurado para a instalação (Inativo ou Ativo).
     /// </summary>
-    public EstadoInquilino? EstadoInquilino { get; init; }
+    public EstadoInquilino? EstadoInquilino { get; set; }
 
     /// <summary>
     /// Strings de conexão da instalação com o banco de dados dedicado.
     /// </summary>
-    public StringsConexaoInstalacao? StringsConexao { get; init; }
+    public StringsConexaoInstalacao? StringsConexao { get; set; }
 
     /// <summary>
     /// Valida as invariantes obrigatórias dos parâmetros de configuração da instalação.
@@ -101,5 +101,5 @@ public sealed class StringsConexaoInstalacao
     /// <summary>
     /// String de conexão do banco de dados principal da aplicação para esta instalação.
     /// </summary>
-    public string? BancoApp { get; init; }
+    public string? BancoApp { get; set; }
 }

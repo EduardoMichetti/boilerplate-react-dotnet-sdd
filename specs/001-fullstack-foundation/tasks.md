@@ -114,12 +114,12 @@ verificados. Fase 3 não iniciada; esta evidência não declara SC-009 concluíd
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T025 [P] [US5] Criar testes de contrato HTTP validando `/health/live`, `/health/ready`, `/openapi/v1.json`, `503 DEPENDENCY_UNAVAILABLE` (quando o marcador do banco diverge ou o banco está indisponível) e `404 NOT_FOUND` em rotas ausentes (`/api/v1/auth/login`, `/api/v1/me`, `/api/v1/context`) em `backend/tests/Platform.ContractTests/Health/HealthAndOpenApiContractTests.cs`
+- [X] T025 [P] [US5] Criar testes de contrato HTTP validando `/health/live`, `/health/ready`, `/openapi/v1.json`, `503 DEPENDENCY_UNAVAILABLE` (quando o marcador do banco diverge ou o banco está indisponível) e `404 NOT_FOUND` em rotas ausentes (`/api/v1/auth/login`, `/api/v1/me`, `/api/v1/context`) em `backend/tests/Platform.ContractTests/Health/TestesContratoHealthEOpenApi.cs`
 
 ### Implementation for User Story 5
 
-- [ ] T026 [P] [US5] Implementar health checks de liveness (sem acesso a banco ou cookies) e readiness (validando `InstallationTenantOptions` e `ITenantDatabaseIdentityProbe` sem rodar migrations no startup) em `backend/src/App.Api/Health/InstallationReadinessHealthCheck.cs`
-- [ ] T027 [US5] Configurar geração de OpenAPI 3.0.3 (`/openapi/v1.json`), mapeamento de `/health/live` e `/health/ready` e fallback `404 Problem Details` em `backend/src/App.Api/Program.cs`
+- [X] T026 [P] [US5] Implementar health checks de liveness (sem acesso a banco ou cookies) e readiness (validando `InstallationTenantOptions` e `ITenantDatabaseIdentityProbe` sem rodar migrations no startup) em `backend/src/App.Api/Health/VerificacaoSaudeProntidaoInstalacao.cs`
+- [X] T027 [US5] Configurar geração de OpenAPI 3.0.3 (`/openapi/v1.json`), mapeamento de `/health/live` e `/health/ready` e fallback `404 Problem Details` em `backend/src/App.Api/Program.cs`
 
 **Checkpoint**: API executável, expondo exclusivamente a superfície contratada para o I1.
 

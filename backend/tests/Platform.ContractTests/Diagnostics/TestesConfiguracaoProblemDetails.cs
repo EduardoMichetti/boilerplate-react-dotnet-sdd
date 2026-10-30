@@ -16,12 +16,12 @@ namespace Platform.ContractTests.Diagnostics;
 public sealed class TestesConfiguracaoProblemDetails
 {
     [Fact]
-    public async Task EsqueletoAplicacaoNaoExpoeEndpointsDeFasesPosteriores()
+    public async Task EndpointsDeFasesPosterioresPermanecemAusentesRetornando404ProblemDetails()
     {
         await using WebApplicationFactory<Program> aplicacao = new();
         using HttpClient cliente = aplicacao.CreateClient();
 
-        foreach (string caminho in new[] { "/health/live", "/health/ready", "/openapi/v1.json", "/api/v1/auth/login" })
+        foreach (string caminho in new[] { "/api/v1/auth/login", "/api/v1/me", "/api/v1/context", "/api/v1/users" })
         {
             using HttpResponseMessage resposta = await cliente.GetAsync(caminho, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.NotFound, resposta.StatusCode);
@@ -30,10 +30,10 @@ public sealed class TestesConfiguracaoProblemDetails
     }
 
     [Theory]
-    [InlineData("/nao-encontrado", HttpStatusCode.NotFound, "NAO_ENCONTRADO")]
-    [InlineData("/falha", HttpStatusCode.InternalServerError, "ERRO_INTERNO")]
-    [InlineData("/isolamento", HttpStatusCode.ServiceUnavailable, "DEPENDENCIA_INDISPONIVEL")]
-    [InlineData("/configuracao", HttpStatusCode.ServiceUnavailable, "DEPENDENCIA_INDISPONIVEL")]
+    [InlineData("/nao-encontrado", HttpStatusCode.NotFound, "NOT_FOUND")]
+    [InlineData("/falha", HttpStatusCode.InternalServerError, "INTERNAL_ERROR")]
+    [InlineData("/isolamento", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
+    [InlineData("/configuracao", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
     public async Task ErrosUtilizamProblemDetailsSeguroMesmoComCabecalhoHtml(
         string caminho, HttpStatusCode statusEsperado, string codigoEsperado)
     {

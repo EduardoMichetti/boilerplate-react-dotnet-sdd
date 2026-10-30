@@ -48,9 +48,9 @@ public static class ConfiguracaoProblemDetails
     {
         (string codigo, string titulo, string secao) = codigoStatus switch
         {
-            StatusCodes.Status404NotFound => ("NAO_ENCONTRADO", "Recurso não encontrado.", "15.5.5"),
-            StatusCodes.Status503ServiceUnavailable => ("DEPENDENCIA_INDISPONIVEL", "Uma dependência obrigatória está indisponível.", "15.6.4"),
-            StatusCodes.Status500InternalServerError => ("ERRO_INTERNO", "Ocorreu um erro inesperado.", "15.6.1"),
+            StatusCodes.Status404NotFound => ("NOT_FOUND", "Recurso não encontrado.", "15.5.5"),
+            StatusCodes.Status503ServiceUnavailable => ("DEPENDENCY_UNAVAILABLE", "Uma dependência obrigatória está indisponível.", "15.6.4"),
+            StatusCodes.Status500InternalServerError => ("INTERNAL_ERROR", "Ocorreu um erro inesperado.", "15.6.1"),
             _ => throw new ArgumentOutOfRangeException(nameof(codigoStatus))
         };
         ActivityTraceId idRastreio = Activity.Current?.TraceId ?? default;
@@ -72,7 +72,10 @@ public static class ConfiguracaoProblemDetails
         };
     }
 
-    private static Task EscreverAsync(HttpContext contexto, int codigoStatus)
+    /// <summary>
+    /// Escreve uma resposta HTTP padronizada em formato application/problem+json.
+    /// </summary>
+    public static Task EscreverAsync(HttpContext contexto, int codigoStatus)
     {
         contexto.Response.StatusCode = codigoStatus;
         return contexto.Response.WriteAsJsonAsync(
