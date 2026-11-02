@@ -155,11 +155,11 @@ verificados. Fase 3 não iniciada; esta evidência não declara SC-009 concluíd
 
 ### Tests for User Story 4 & User Story 6 ⚠️
 
-- [ ] T034 [P] [US4] Criar testes automatizados de arquitetura verificando que `Platform.Domain` não referencia EF Core, Identity ou HTTP, que `Platform.Application` não referencia `Platform.Infrastructure` e que não há dependências circulares em `backend/tests/Platform.UnitTests/Architecture/LayerDependencyTests.cs`
+- [X] T034 [P] [US4] Criar testes automatizados de arquitetura verificando que `Platform.Domain` não referencia EF Core, Identity ou HTTP, que `Platform.Application` não referencia `Platform.Infrastructure` e que não há dependências circulares em `backend/tests/Platform.UnitTests/Architecture/LayerDependencyTests.cs`
 
 ### Implementation for User Story 4 & User Story 6
 
-- [ ] T036 [US6] Criar workflow do backend com restore em `--locked-mode` usando lockfiles de T006, build, `dotnet format --verify-no-changes`, testes/Testcontainers com falha para zero testes, auditoria NuGet com bloqueio de achados altos/críticos não mitigados e `gitleaks`; scan ausente/falho não aprova, permissões são mínimas e actions fixadas por SHA; configurar/verificar checks obrigatórios de branch protection/ruleset com o mantenedor em `.github/workflows/backend-ci.yml`
+- [X] T036 [US6] Criar workflow do backend com restore em `--locked-mode` usando lockfiles de T006, build, `dotnet format --verify-no-changes`, testes/Testcontainers com falha para zero testes, auditoria NuGet com bloqueio de achados altos/críticos não mitigados e `gitleaks`; scan ausente/falho não aprova, permissões são mínimas e actions fixadas por SHA; configurar/verificar checks obrigatórios de branch protection/ruleset com o mantenedor em `.github/workflows/backend-ci.yml`
 
 **Checkpoint**: Limites arquiteturais e gates automatizados de qualidade e segurança ativos para o I1.
 
@@ -171,9 +171,9 @@ verificados. Fase 3 não iniciada; esta evidência não declara SC-009 concluíd
 
 **Independent Test**: Seguir `README.md` e `specs/001-fullstack-foundation/quickstart.md` do zero, executar a bateria válida e demonstrar falha/bloqueio de cada exercício negativo da seção 5, retornando ao estado válido sem desativar checks.
 
-- [ ] T037 [P] [US7] Registrar ADR documentando a decisão de implantação dedicada por cliente (1 backend + 1 banco PostgreSQL por instalação, sem `platform_catalog`, com segredos por aplicação no Dokploy/VPS) em `docs/adr/0001-single-tenant-per-deploy.md`
-- [ ] T038 [P] [US7] Atualizar `README.md` com arquitetura, pré-requisitos de bancos/roles, configurações e projetos Compose próprios para A/B, aprovação de inicialização desligada por padrão e removida após uso, sequência inativar/migrar/ativar, checks obrigatórios e separação de `I1` a `I4` em `README.md`
-- [ ] T039 Conferir os `packages.lock.json` existentes com restore em `--locked-mode` e executar `specs/001-fullstack-foundation/quickstart.md`, incluindo prova concorrente mínima e exercícios negativos de SC-006 (compilação/tipos, formatação, persistência/isolamento, secret fictício, relatório sintético de vulnerabilidade alta/crítica, scan indisponível e zero testes); registrar check/resultado/bloqueio no workflow/PR e confirmar execução válida após descartar somente as alterações do exercício, sem secrets reais ou dependências vulneráveis
+- [X] T037 [P] [US7] Registrar ADR documentando a decisão de implantação dedicada por cliente (1 backend + 1 banco PostgreSQL por instalação, sem `platform_catalog`, com segredos por aplicação no Dokploy/VPS) em `docs/adr/0001-single-tenant-per-deploy.md`
+- [X] T038 [P] [US7] Atualizar `README.md` com arquitetura, pré-requisitos de bancos/roles, configurações e projetos Compose próprios para A/B, aprovação de inicialização desligada por padrão e removida após uso, sequência inativar/migrar/ativar, checks obrigatórios e separação de `I1` a `I4` em `README.md`
+- [X] T039 Conferir os `packages.lock.json` existentes com restore em `--locked-mode` e executar `specs/001-fullstack-foundation/quickstart.md`, incluindo prova concorrente mínima e exercícios negativos de SC-006 (compilação/tipos, formatação, persistência/isolamento, secret fictício, relatório sintético de vulnerabilidade alta/crítica, scan indisponível e zero testes); registrar check/resultado/bloqueio no workflow/PR e confirmar execução válida após descartar somente as alterações do exercício, sem secrets reais ou dependências vulneráveis
 
 ---
 
