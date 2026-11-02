@@ -11,13 +11,24 @@ TestResults/
 coverage/
 *.trx
 *.log
+# Arquivos de ambiente e segredos locais privados
 .env
-.env*.local
+.env*
+!.env.example
+**/.env
+**/.env*
+!**/.env.example
+*.env*.local
+**/*.env*.local
 secrets/
+**/secrets/
 keyrings/
+**/keyrings/
 *.pfx
 *.pem
 *.key
+
+# Arquivos de sistema e temporários
 .DS_Store
 Thumbs.db
 *.tmp

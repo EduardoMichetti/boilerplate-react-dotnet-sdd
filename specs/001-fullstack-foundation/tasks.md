@@ -133,15 +133,15 @@ verificados. Fase 3 não iniciada; esta evidência não declara SC-009 concluíd
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T028 [P] [US1] Criar testes unitários garantindo que configuração obrigatória ausente ou inválida em `InstallationTenantOptions` bloqueia a prontidão com diagnóstico seguro (sem expor secrets ou connection strings) em `backend/tests/Platform.UnitTests/Configuration/InstallationTenantOptionsValidationTests.cs`
+- [X] T028 [P] [US1] Criar testes unitários garantindo que configuração obrigatória ausente ou inválida em `InstallationTenantOptions` bloqueia a prontidão com diagnóstico seguro (sem expor secrets ou connection strings) em `backend/tests/Platform.UnitTests/Configuration/InstallationTenantOptionsValidationTests.cs`
 
 ### Implementation for User Story 1
 
-- [ ] T029 [P] [US1] Criar `Dockerfile` multi-stage para `App.Api` (runtime ASP.NET Core `10.0.12` não-root, sem SDK ou credenciais de migration) em `infra/docker/Dockerfile.api`
-- [ ] T030 [P] [US1] Criar `Dockerfile` para o serviço pontual `migrations` (SDK `10.0.401` com `dotnet-ef` `10.0.12` restaurado) em `infra/docker/Dockerfile.migrations`
-- [ ] T031 [P] [US1] Criar arquivo de exemplo com variáveis fictícias da instalação (`ApplicationId`, `EnvironmentId`, `TenantId`, `TenantDisplayName`, `TenantState`, conexões runtime/migration e `Migrations__AllowInitializeEmptyDatabase=false`), documentando configurações privadas próprias para A/B, em `infra/.env.example`
-- [ ] T032 [US1] Criar `infra/compose.yaml` com `postgres` (`postgres:18.6`, volume em `/var/lib/postgresql`, sem porta no host), `api` e `migrations` (profile pontual); separar credenciais runtime/owner, montar aprovação de inicialização somente no tooling e permitir projetos A/B com volumes/redes independentes e sem nomes globais em `infra/compose.yaml`
-- [ ] T033 [US1] Atualizar `.gitignore` para excluir `.env*.local` (incluindo A/B), arquivos privados de secrets, artefatos de build/test e key rings locais em `.gitignore`
+- [X] T029 [P] [US1] Criar `Dockerfile` multi-stage para `App.Api` (runtime ASP.NET Core `10.0.12` não-root, sem SDK ou credenciais de migration) em `infra/docker/Dockerfile.api`
+- [X] T030 [P] [US1] Criar `Dockerfile` para o serviço pontual `migrations` (SDK `10.0.401` com `dotnet-ef` `10.0.12` restaurado) em `infra/docker/Dockerfile.migrations`
+- [X] T031 [P] [US1] Criar arquivo de exemplo com variáveis fictícias da instalação (`ApplicationId`, `EnvironmentId`, `TenantId`, `TenantDisplayName`, `TenantState`, conexões runtime/migration e `Migrations__AllowInitializeEmptyDatabase=false`), documentando configurações privadas próprias para A/B, em `infra/.env.example`
+- [X] T032 [US1] Criar `infra/compose.yaml` com `postgres` (`postgres:18.6`, volume em `/var/lib/postgresql`, sem porta no host), `api` e `migrations` (profile pontual); separar credenciais runtime/owner, montar aprovação de inicialização somente no tooling e permitir projetos A/B com volumes/redes independentes e sem nomes globais em `infra/compose.yaml`
+- [X] T033 [US1] Atualizar `.gitignore` para excluir `.env*.local` (incluindo A/B), arquivos privados de secrets, artefatos de build/test e key rings locais em `.gitignore`
 
 **Checkpoint**: Ambiente local completo e reproduzível via Docker Compose para uma instalação de cliente.
 

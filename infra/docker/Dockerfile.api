@@ -1,0 +1,44 @@
+# Stage 1: Build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401 AS build
+WORKDIR /src
+
+# Copiar arquivos de configuração de compilação e versionamento central de pacotes
+COPY ["Directory.Build.props", "./"]
+COPY ["Directory.Packages.props", "./"]
+COPY ["global.json", "./"]
+
+# Copiar arquivos de projeto e lockfiles para restore com cache otimizado
+COPY ["backend/src/Platform.Domain/Platform.Domain.csproj", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Domain/packages.lock.json", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Application/Platform.Application.csproj", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Application/packages.lock.json", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Infrastructure/Platform.Infrastructure.csproj", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/Platform.Infrastructure/packages.lock.json", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/App.Api/App.Api.csproj", "backend/src/App.Api/"]
+COPY ["backend/src/App.Api/packages.lock.json", "backend/src/App.Api/"]
+
+# Restaurar dependências utilizando locked-mode garantindo integridade
+RUN dotnet restore "backend/src/App.Api/App.Api.csproj" --locked-mode
+
+# Copiar o código-fonte dos projetos da aplicação
+COPY ["backend/src/Platform.Domain/", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Application/", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Infrastructure/", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/App.Api/", "backend/src/App.Api/"]
+
+# Compilar e publicar a API sem SDK ou credenciais no pacote final
+RUN dotnet publish "backend/src/App.Api/App.Api.csproj" -c Release -o /app/publish --no-restore
+
+# Stage 2: Runtime ASP.NET Core 10.0.12 seguro e não-root
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12 AS runtime
+WORKDIR /app
+
+ENV ASPNETCORE_HTTP_PORTS=8080
+EXPOSE 8080
+
+COPY --from=build /app/publish .
+
+# Execução como usuário não-root nativo da imagem oficial do .NET
+USER $APP_UID
+
+ENTRYPOINT ["dotnet", "App.Api.dll"]
