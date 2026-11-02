@@ -10,14 +10,14 @@ using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 /// <summary>
 /// Opções necessárias para a validação prévia de migração (preflight) antes de executar operações DDL.
 /// </summary>
-public sealed record OpcoesPreValidacaoMigracao(
+public sealed record OpcoesPreflightMigracao(
     string? IdAplicacao,
     Guid IdAmbiente,
-    Guid IdInquilino,
-    EstadoInquilino? EstadoInquilino,
+    Guid IdTenant,
+    EstadoTenant? EstadoTenant,
     string? StringConexao,
     string? PermissaoInicializarBancoVazioBruta,
-    Guid? IdInquilinoCli = null,
+    Guid? IdTenantCli = null,
     Guid? IdAmbienteCli = null);
 
 /// <summary>
@@ -26,13 +26,13 @@ public sealed record OpcoesPreValidacaoMigracao(
 public sealed record MarcadorBancoExistente(
     bool TabelaExiste,
     bool LinhaExiste,
-    Guid IdInquilino,
+    Guid IdTenant,
     Guid IdAmbiente);
 
 /// <summary>
-/// Utilitário de pré-validação (preflight) executado antes da aplicação de migrations para garantir o isolamento e a segurança da base.
+/// Utilitário de pré-validação (preflight) executado antes da aplicação de migrations para garantir o isolamento e a segurança da base do tenant.
 /// </summary>
-public static class PreValidacaoMigracaoInquilino
+public static class PreflightMigracaoTenant
 {
     /// <summary>
     /// Converte o valor textual da flag de autorização para inicialização de banco de dados vazio.
@@ -50,14 +50,14 @@ public static class PreValidacaoMigracaoInquilino
         }
 
         throw new ArgumentException(
-            "Migrations:AllowInitializeEmptyDatabase possui sintaxe booleana inválida.",
+            "Migracoes:PermitirInicializarBancoVazio possui sintaxe booleana inválida.",
             nameof(valorBruto));
     }
 
     /// <summary>
-    /// Valida as opções informadas para a pré-validação antes de tentar abrir qualquer conexão.
+    /// Valida as opções informadas para o preflight antes de tentar abrir qualquer conexão.
     /// </summary>
-    public static void ValidarOpcoes(OpcoesPreValidacaoMigracao opcoes)
+    public static void ValidarOpcoes(OpcoesPreflightMigracao opcoes)
     {
         ArgumentNullException.ThrowIfNull(opcoes);
 
@@ -71,12 +71,12 @@ public static class PreValidacaoMigracaoInquilino
             throw new ArgumentException("IdAmbiente deve ser um UUID não vazio.", nameof(opcoes));
         }
 
-        if (opcoes.IdInquilino == Guid.Empty)
+        if (opcoes.IdTenant == Guid.Empty)
         {
-            throw new ArgumentException("IdInquilino deve ser um UUID não vazio.", nameof(opcoes));
+            throw new ArgumentException("IdTenant deve ser um UUID não vazio.", nameof(opcoes));
         }
 
-        if (opcoes.EstadoInquilino != EstadoInquilino.Inativo)
+        if (opcoes.EstadoTenant != EstadoTenant.Inativo)
         {
             throw new InvalidOperationException(
                 "A instalação deve estar em estado Inativo (janela de manutenção) para aplicar migrations.");
@@ -96,10 +96,10 @@ public static class PreValidacaoMigracaoInquilino
             throw new ArgumentException("A string de conexão possui sintaxe inválida.", nameof(opcoes), ex);
         }
 
-        if (opcoes.IdInquilinoCli.HasValue && opcoes.IdInquilinoCli.Value != opcoes.IdInquilino)
+        if (opcoes.IdTenantCli.HasValue && opcoes.IdTenantCli.Value != opcoes.IdTenant)
         {
             throw new InvalidOperationException(
-                $"O argumento informado na CLI ({opcoes.IdInquilinoCli}) diverge do IdInquilino configurado ({opcoes.IdInquilino}).");
+                $"O argumento informado na CLI ({opcoes.IdTenantCli}) diverge do IdTenant configurado ({opcoes.IdTenant}).");
         }
 
         if (opcoes.IdAmbienteCli.HasValue && opcoes.IdAmbienteCli.Value != opcoes.IdAmbiente)
@@ -115,7 +115,7 @@ public static class PreValidacaoMigracaoInquilino
     /// Avalia se o estado atual do banco de dados permite ou bloqueia a execução da migration.
     /// </summary>
     public static void AvaliarEstadoBanco(
-        OpcoesPreValidacaoMigracao opcoes,
+        OpcoesPreflightMigracao opcoes,
         int totalTabelasUsuario,
         MarcadorBancoExistente? marcador)
     {
@@ -128,7 +128,7 @@ public static class PreValidacaoMigracaoInquilino
             {
                 throw new InvalidOperationException(
                     "Inicialização de banco vazio não autorizada antes de DDL. " +
-                    "Configure Migrations:AllowInitializeEmptyDatabase=true para autorizar.");
+                    "Configure Migracoes:PermitirInicializarBancoVazio=true para autorizar.");
             }
 
             return;
@@ -137,20 +137,20 @@ public static class PreValidacaoMigracaoInquilino
         if (marcador is null || !marcador.TabelaExiste || !marcador.LinhaExiste)
         {
             throw new InvalidOperationException(
-                "Estrutura existente sem marcador IdentidadeBancoInquilino. Operação bloqueada antes de DDL.");
+                "Estrutura existente sem marcador IdentidadeBancoTenant. Operação bloqueada antes de DDL.");
         }
 
-        if (marcador.IdInquilino != opcoes.IdInquilino || marcador.IdAmbiente != opcoes.IdAmbiente)
+        if (marcador.IdTenant != opcoes.IdTenant || marcador.IdAmbiente != opcoes.IdAmbiente)
         {
-            throw new ExcecaoIsolamentoInquilino();
+            throw new ExcecaoIsolamentoTenant();
         }
     }
 
     /// <summary>
     /// Conecta ao banco de dados e executa todas as verificações prévias de segurança e isolamento.
     /// </summary>
-    public static async Task ExecutarPreValidacaoAsync(
-        OpcoesPreValidacaoMigracao opcoes,
+    public static async Task ExecutarPreflightAsync(
+        OpcoesPreflightMigracao opcoes,
         CancellationToken tokenCancelamento = default)
     {
         ValidarOpcoes(opcoes);
@@ -190,7 +190,7 @@ public static class PreValidacaoMigracaoInquilino
             if (tabelaMarcadorExiste)
             {
                 await using NpgsqlCommand lerMarcador = new(
-                    "SELECT \"IdInquilino\", \"IdAmbiente\" FROM \"foundation\".\"identidade_banco\" WHERE \"IdUnico\" = 1",
+                    "SELECT \"IdTenant\", \"IdAmbiente\" FROM \"foundation\".\"identidade_banco\" WHERE \"IdUnico\" = 1",
                     conexao);
                 await using NpgsqlDataReader leitor = await lerMarcador.ExecuteReaderAsync(tokenCancelamento);
                 if (await leitor.ReadAsync(tokenCancelamento))
@@ -198,7 +198,7 @@ public static class PreValidacaoMigracaoInquilino
                     marcador = new MarcadorBancoExistente(
                         TabelaExiste: true,
                         LinhaExiste: true,
-                        IdInquilino: leitor.GetGuid(0),
+                        IdTenant: leitor.GetGuid(0),
                         IdAmbiente: leitor.GetGuid(1));
                 }
                 else
@@ -219,19 +219,19 @@ public static class PreValidacaoMigracaoInquilino
     /// Realiza a inserção síncrona do registro de identidade do banco de dados na base.
     /// </summary>
     public static void PopularIdentidadeBanco(
-        ContextoBancoAcessoInquilino contexto,
-        Guid idInquilino,
+        AcessoTenantDbContext contexto,
+        Guid idTenant,
         Guid idAmbiente)
     {
-        IdentidadeBancoInquilino? existente = contexto.IdentidadeBanco
-            .FirstOrDefault(e => e.IdUnico == IdentidadeBancoInquilino.IdUnicoPadrao);
+        IdentidadeBancoTenant? existente = contexto.IdentidadeBanco
+            .FirstOrDefault(e => e.IdUnico == IdentidadeBancoTenant.IdUnicoPadrao);
 
         if (existente is null)
         {
-            contexto.IdentidadeBanco.Add(new IdentidadeBancoInquilino
+            contexto.IdentidadeBanco.Add(new IdentidadeBancoTenant
             {
-                IdUnico = IdentidadeBancoInquilino.IdUnicoPadrao,
-                IdInquilino = idInquilino,
+                IdUnico = IdentidadeBancoTenant.IdUnicoPadrao,
+                IdTenant = idTenant,
                 IdAmbiente = idAmbiente,
                 EpocaAcesso = Guid.NewGuid(),
                 InicializadoEm = DateTimeOffset.UtcNow
@@ -240,9 +240,9 @@ public static class PreValidacaoMigracaoInquilino
         }
         else
         {
-            if (existente.IdInquilino != idInquilino || existente.IdAmbiente != idAmbiente)
+            if (existente.IdTenant != idTenant || existente.IdAmbiente != idAmbiente)
             {
-                throw new ExcecaoIsolamentoInquilino();
+                throw new ExcecaoIsolamentoTenant();
             }
         }
     }
@@ -251,20 +251,20 @@ public static class PreValidacaoMigracaoInquilino
     /// Realiza a inserção assíncrona do registro de identidade do banco de dados na base.
     /// </summary>
     public static async Task PopularIdentidadeBancoAsync(
-        ContextoBancoAcessoInquilino contexto,
-        Guid idInquilino,
+        AcessoTenantDbContext contexto,
+        Guid idTenant,
         Guid idAmbiente,
         CancellationToken tokenCancelamento = default)
     {
-        IdentidadeBancoInquilino? existente = await contexto.IdentidadeBanco
-            .FirstOrDefaultAsync(e => e.IdUnico == IdentidadeBancoInquilino.IdUnicoPadrao, tokenCancelamento);
+        IdentidadeBancoTenant? existente = await contexto.IdentidadeBanco
+            .FirstOrDefaultAsync(e => e.IdUnico == IdentidadeBancoTenant.IdUnicoPadrao, tokenCancelamento);
 
         if (existente is null)
         {
-            contexto.IdentidadeBanco.Add(new IdentidadeBancoInquilino
+            contexto.IdentidadeBanco.Add(new IdentidadeBancoTenant
             {
-                IdUnico = IdentidadeBancoInquilino.IdUnicoPadrao,
-                IdInquilino = idInquilino,
+                IdUnico = IdentidadeBancoTenant.IdUnicoPadrao,
+                IdTenant = idTenant,
                 IdAmbiente = idAmbiente,
                 EpocaAcesso = Guid.NewGuid(),
                 InicializadoEm = DateTimeOffset.UtcNow
@@ -273,9 +273,9 @@ public static class PreValidacaoMigracaoInquilino
         }
         else
         {
-            if (existente.IdInquilino != idInquilino || existente.IdAmbiente != idAmbiente)
+            if (existente.IdTenant != idTenant || existente.IdAmbiente != idAmbiente)
             {
-                throw new ExcecaoIsolamentoInquilino();
+                throw new ExcecaoIsolamentoTenant();
             }
         }
     }

@@ -90,7 +90,7 @@ public static class ConfiguracaoProblemDetails
         public async ValueTask<bool> TryHandleAsync(
             HttpContext contextoHttp, Exception excecao, CancellationToken tokenCancelamento)
         {
-            int codigoStatus = excecao is ExcecaoConfiguracaoInstalacao or ExcecaoIsolamentoInquilino
+            int codigoStatus = excecao is ExcecaoConfiguracaoInstalacao or ExcecaoIsolamentoTenant
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status500InternalServerError;
             ProblemDetails problema = Criar(contextoHttp, codigoStatus);

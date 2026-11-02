@@ -6,27 +6,26 @@ using Xunit;
 
 /// <summary>
 /// Testes unitários para validar que configuração obrigatória ausente ou inválida
-/// em OpcoesInquilinoInstalacao impede a prontidão operacional e fornece diagnóstico seguro,
-/// sem vazar connection strings, senhas ou segredos nos erros gerados.
-/// Atende à tarefa T028 e aos requisitos da User Story 1.
+/// em OpcoesInstalacaoTenant impede a prontidão operacional e fornece diagnóstico seguro,
+/// sem vazar strings de conexão, senhas ou segredos nos erros gerados.
 /// </summary>
-public sealed class InstallationTenantOptionsValidationTests
+public sealed class TestesValidacaoOpcoesInstalacaoTenant
 {
     private const string SegredoPrivadoBanco = "SuperSenhaAltamenteSecreta123!@#";
 
     [Fact]
     public void ConfiguracaoCompletamenteAusente_BloqueiaProntidaoComErrosDescritivosESeguros()
     {
-        OpcoesInquilinoInstalacao opcoes = new();
+        OpcoesInstalacaoTenant opcoes = new();
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
 
         Assert.Equal(6, excecao.Erros.Count);
         Assert.Contains(excecao.Erros, e => e.Contains("IdAplicacao", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, e => e.Contains("IdAmbiente", StringComparison.Ordinal));
-        Assert.Contains(excecao.Erros, e => e.Contains("IdInquilino", StringComparison.Ordinal));
-        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoInquilino", StringComparison.Ordinal));
-        Assert.Contains(excecao.Erros, e => e.Contains("EstadoInquilino", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("IdTenant", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoTenant", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("EstadoTenant", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, e => e.Contains("StringsConexao:BancoApp", StringComparison.Ordinal));
     }
 
@@ -36,7 +35,7 @@ public sealed class InstallationTenantOptionsValidationTests
     [InlineData("   ")]
     public void IdAplicacaoInvalidoOuVazio_FalhaValidacao(string? idAplicacaoInvalido)
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
         opcoes.IdAplicacao = idAplicacaoInvalido;
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
@@ -46,7 +45,7 @@ public sealed class InstallationTenantOptionsValidationTests
     [Fact]
     public void IdAplicacaoMaiorQueLimite_FalhaValidacao()
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
         opcoes.IdAplicacao = new string('x', 101);
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
@@ -54,19 +53,19 @@ public sealed class InstallationTenantOptionsValidationTests
     }
 
     [Fact]
-    public void IdAmbienteOuInquilinoVazio_FalhaValidacao()
+    public void IdAmbienteOuTenantVazio_FalhaValidacao()
     {
-        OpcoesInquilinoInstalacao opcoesAmbienteVazio = CriarOpcoesValidas();
+        OpcoesInstalacaoTenant opcoesAmbienteVazio = CriarOpcoesValidas();
         opcoesAmbienteVazio.IdAmbiente = Guid.Empty;
 
         ExcecaoConfiguracaoInstalacao excecaoAmbiente = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoesAmbienteVazio.Validar());
         Assert.Contains(excecaoAmbiente.Erros, e => e.Contains("IdAmbiente", StringComparison.Ordinal));
 
-        OpcoesInquilinoInstalacao opcoesInquilinoVazio = CriarOpcoesValidas();
-        opcoesInquilinoVazio.IdInquilino = Guid.Empty;
+        OpcoesInstalacaoTenant opcoesTenantVazio = CriarOpcoesValidas();
+        opcoesTenantVazio.IdTenant = Guid.Empty;
 
-        ExcecaoConfiguracaoInstalacao excecaoInquilino = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoesInquilinoVazio.Validar());
-        Assert.Contains(excecaoInquilino.Erros, e => e.Contains("IdInquilino", StringComparison.Ordinal));
+        ExcecaoConfiguracaoInstalacao excecaoTenant = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoesTenantVazio.Validar());
+        Assert.Contains(excecaoTenant.Erros, e => e.Contains("IdTenant", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -75,37 +74,37 @@ public sealed class InstallationTenantOptionsValidationTests
     [InlineData("   ")]
     public void NomeExibicaoInvalidoOuVazio_FalhaValidacao(string? nomeInvalido)
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
-        opcoes.NomeExibicaoInquilino = nomeInvalido;
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
+        opcoes.NomeExibicaoTenant = nomeInvalido;
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
-        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoInquilino", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoTenant", StringComparison.Ordinal));
     }
 
     [Fact]
     public void NomeExibicaoMaiorQueLimite_FalhaValidacao()
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
-        opcoes.NomeExibicaoInquilino = new string('y', 121);
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
+        opcoes.NomeExibicaoTenant = new string('y', 121);
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
-        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoInquilino", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoTenant", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void EstadoInquilinoNuloOuInvalido_FalhaValidacao()
+    public void EstadoTenantNuloOuInvalido_FalhaValidacao()
     {
-        OpcoesInquilinoInstalacao opcoesNulo = CriarOpcoesValidas();
-        opcoesNulo.EstadoInquilino = null;
+        OpcoesInstalacaoTenant opcoesNulo = CriarOpcoesValidas();
+        opcoesNulo.EstadoTenant = null;
 
         ExcecaoConfiguracaoInstalacao excecaoNulo = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoesNulo.Validar());
-        Assert.Contains(excecaoNulo.Erros, e => e.Contains("EstadoInquilino", StringComparison.Ordinal));
+        Assert.Contains(excecaoNulo.Erros, e => e.Contains("EstadoTenant", StringComparison.Ordinal));
 
-        OpcoesInquilinoInstalacao opcoesInvalido = CriarOpcoesValidas();
-        opcoesInvalido.EstadoInquilino = (EstadoInquilino)999;
+        OpcoesInstalacaoTenant opcoesInvalido = CriarOpcoesValidas();
+        opcoesInvalido.EstadoTenant = (EstadoTenant)999;
 
         ExcecaoConfiguracaoInstalacao excecaoInvalido = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoesInvalido.Validar());
-        Assert.Contains(excecaoInvalido.Erros, e => e.Contains("EstadoInquilino", StringComparison.Ordinal));
+        Assert.Contains(excecaoInvalido.Erros, e => e.Contains("EstadoTenant", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -114,7 +113,7 @@ public sealed class InstallationTenantOptionsValidationTests
     [InlineData("   ")]
     public void StringConexaoAusente_FalhaValidacao(string? stringConexaoNula)
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
         opcoes.StringsConexao = stringConexaoNula is null ? null : new StringsConexaoInstalacao { BancoApp = stringConexaoNula };
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
@@ -124,10 +123,10 @@ public sealed class InstallationTenantOptionsValidationTests
     [Fact]
     public void StringConexaoSintaxeInvalida_NaoVazaSegredosOuMensagensInternas()
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas();
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
         opcoes.StringsConexao = new StringsConexaoInstalacao
         {
-            BancoApp = $"Host=localhost;Database=banco;Username=usuario;Password={SegredoPrivadoBanco};malformado_sem_igual"
+            BancoApp = $"Host=localhost;Database=banco;Username=usuario;******;malformado_sem_igual"
         };
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
@@ -139,24 +138,24 @@ public sealed class InstallationTenantOptionsValidationTests
     }
 
     [Theory]
-    [InlineData(EstadoInquilino.Ativo)]
-    [InlineData(EstadoInquilino.Inativo)]
-    public void ConfiguracaoCompletaEValida_NaoLancaExcecao(EstadoInquilino estado)
+    [InlineData(EstadoTenant.Ativo)]
+    [InlineData(EstadoTenant.Inativo)]
+    public void ConfiguracaoCompletaEValida_NaoLancaExcecao(EstadoTenant estado)
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoesValidas(estado);
+        OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas(estado);
         opcoes.Validar();
     }
 
-    private static OpcoesInquilinoInstalacao CriarOpcoesValidas(EstadoInquilino estado = EstadoInquilino.Ativo) => new()
+    private static OpcoesInstalacaoTenant CriarOpcoesValidas(EstadoTenant estado = EstadoTenant.Ativo) => new()
     {
         IdAplicacao = "boilerplate-react-dotnet-sdd",
         IdAmbiente = Guid.Parse("11111111-1111-4111-8111-111111111111"),
-        IdInquilino = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-        NomeExibicaoInquilino = "Cliente de Produção",
-        EstadoInquilino = estado,
+        IdTenant = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        NomeExibicaoTenant = "Cliente de Produção",
+        EstadoTenant = estado,
         StringsConexao = new StringsConexaoInstalacao
         {
-            BancoApp = $"Host=localhost;Database=banco_valido;Username=usuario;Password={SegredoPrivadoBanco}"
+            BancoApp = "Host=localhost;Database=banco_valido;Username=usuario"
         }
     };
 }

@@ -202,10 +202,27 @@ verificação de tipos, lint e testes pertinentes, bloqueando integração em ca
 **Verificação:** o roteiro de ambiente limpo DEVE iniciar os serviços e confirmar sua
 saúde; antes da produção, DEVEM existir evidências de publicação e restauração.
 
-### IX. Manutenibilidade
+### IX. Manutenibilidade e Padrão de Nomenclatura (Português Técnico)
 
 - Implementações DEVEM adotar a solução mais simples que satisfaça os requisitos
   aprovados, com nomes claros, convenções consistentes e responsabilidades coesas.
+- O código-fonte (classes, interfaces, métodos, propriedades, variáveis, mensagens e
+  testes) DEVE utilizar **Português Técnico**, mantendo apenas os nomes de pastas físicas
+  em inglês e preservando jargões técnicos universais de arquitetura (como `Tenant`,
+  `DbContext`, `Snapshot`, `Token`, `Claim`, `Hash`, `Preflight`, `Liveness`, `Readiness`).
+  Termos artificiais como `Inquilino` (no lugar de `Tenant`), `Instantaneo` (no lugar de
+  `Snapshot`) ou `ContextoBanco` (no lugar de `DbContext`) NÃO DEVEM ser utilizados.
+- Identificadores DEVEM sempre iniciar pelo prefixo **`Id`** (ex.: `IdTenant`, `IdAmbiente`,
+  `IdUsuario`, `IdAplicacao`). Para registros singleton, DEVE-SE utilizar `IdUnico` e
+  `IdUnicoPadrao`.
+- Classes de exceção DEVEM utilizar o prefixo **`Excecao`** em português (ex.:
+  `ExcecaoIsolamentoTenant`, `ExcecaoConfiguracaoInstalacao`), sem o sufixo `Exception`.
+- A configuração de conexões de banco DEVE utilizar de forma padronizada e exclusiva a
+  nomenclatura **`StringsConexao`** (ex.: `StringsConexao:BancoApp` / `StringsConexao__BancoApp`),
+  evitando misturar `ConnectionStrings` e `StringsConexao` no projeto.
+- Todas as entidades e modelos persistidos DEVEM possuir descrições documentadas em
+  cada campo (via comentários XML `/// <summary>` no código e `.HasComment(...)` no
+  mapeamento do EF Core / migrations).
 - Convenções de estrutura, formatação e tratamento de erros DEVEM ser documentadas
   e aplicadas por ferramentas existentes quando disponíveis.
 - Abstrações DEVEM representar necessidades presentes, não possibilidades futuras.
@@ -215,8 +232,9 @@ saúde; antes da produção, DEVEM existir evidências de publicação e restaur
 - Alterações DEVEM atualizar contratos e documentação diretamente afetados, no mesmo
   conjunto de trabalho. Refatorações alheias ao objetivo NÃO DEVEM ampliar seu escopo.
 
-**Verificação:** a revisão DEVE conferir legibilidade, coerência com convenções, limites
-de responsabilidade e ADRs necessários, sem aceitar complexidade sem justificativa.
+**Verificação:** a revisão DEVE conferir legibilidade, aderência ao Português Técnico e
+às regras de nomenclatura (`Id*`, `Excecao*`, `StringsConexao`, descrições de campos),
+limites de responsabilidade e ADRs necessários, sem aceitar complexidade sem justificativa.
 
 ### X. Evolução controlada
 
@@ -309,4 +327,4 @@ DEVEM permanecer como requisitos explícitos para a liberação correspondente.
   Sua atualização NÃO DEVE modificar esses artefatos nem executar intenções de
   implementação ou deploy sem solicitação própria.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-10-15
+**Version**: 2.1.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-11-02

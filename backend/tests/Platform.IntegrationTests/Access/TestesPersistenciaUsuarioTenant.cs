@@ -10,7 +10,7 @@ using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 using Platform.IntegrationTests.Fixtures;
 using Xunit;
 
-public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres fixture)
+public sealed class TestesPersistenciaUsuarioTenant(FixtureInstalacaoPostgres fixture)
     : IClassFixture<FixtureInstalacaoPostgres>, IAsyncLifetime
 {
     public async ValueTask InitializeAsync()
@@ -18,34 +18,34 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
         CancellationToken tokenCancelamento = TestContext.Current.CancellationToken;
 
         // Garante que ambas as bases estejam migradas antes de rodar os testes de persistência
-        foreach (InstalacaoTestePostgres inquilino in new[] { fixture.InquilinoA, fixture.InquilinoB })
+        foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
         {
-            DbContextOptionsBuilder<ContextoBancoAcessoInquilino> construtor = new();
-            construtor.UseNpgsql(inquilino.StringConexaoProprietario, npgsql =>
+            DbContextOptionsBuilder<AcessoTenantDbContext> construtor = new();
+            construtor.UseNpgsql(tenant.StringConexaoProprietario, npgsql =>
             {
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
             });
             construtor.UseSeeding((contexto, _) =>
             {
-                if (contexto is ContextoBancoAcessoInquilino contextoInquilino)
+                if (contexto is AcessoTenantDbContext contextoTenant)
                 {
-                    PreValidacaoMigracaoInquilino.PopularIdentidadeBanco(contextoInquilino, inquilino.IdInquilino, inquilino.IdAmbiente);
+                    PreflightMigracaoTenant.PopularIdentidadeBanco(contextoTenant, tenant.IdTenant, tenant.IdAmbiente);
                 }
             });
             construtor.UseAsyncSeeding(async (contexto, _, ct) =>
             {
-                if (contexto is ContextoBancoAcessoInquilino contextoInquilino)
+                if (contexto is AcessoTenantDbContext contextoTenant)
                 {
-                    await PreValidacaoMigracaoInquilino.PopularIdentidadeBancoAsync(contextoInquilino, inquilino.IdInquilino, inquilino.IdAmbiente, ct);
+                    await PreflightMigracaoTenant.PopularIdentidadeBancoAsync(contextoTenant, tenant.IdTenant, tenant.IdAmbiente, ct);
                 }
             });
 
-            await using (ContextoBancoAcessoInquilino contexto = new(construtor.Options))
+            await using (AcessoTenantDbContext contexto = new(construtor.Options))
             {
                 await contexto.Database.MigrateAsync(tokenCancelamento);
             }
 
-            await inquilino.ConcederPermissoesExecucaoAsync(tokenCancelamento);
+            await tenant.ConcederPermissoesExecucaoAsync(tokenCancelamento);
         }
     }
 
@@ -55,20 +55,20 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
     public async Task MesmoEmailEId_CriamContasIndependentesComSenhasDistintas()
     {
         Guid idUsuarioCompartilhado = Guid.NewGuid();
-        const string emailCompartilhado = "comum@inquilino.local";
-        const string senhaA = "SenhaInquilinoA123!";
-        const string senhaB = "SenhaInquilinoB456!";
+        const string emailCompartilhado = "comum@tenant.local";
+        const string senhaA = "SenhaTenantA123!";
+        const string senhaB = "SenhaTenantB456!";
 
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoA)
         {
             UsuarioAplicacao usuarioA = new()
             {
                 Id = idUsuarioCompartilhado,
-                IdInquilino = fixture.InquilinoA.IdInquilino,
+                IdTenant = fixture.TenantA.IdTenant,
                 UserName = emailCompartilhado,
                 Email = emailCompartilhado,
-                NomeExibicao = "Usuário no Inquilino A",
+                NomeExibicao = "Usuário no Tenant A",
                 EstaAtivo = true
             };
 
@@ -76,16 +76,16 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
             Assert.True(resultadoA.Succeeded, string.Join("; ", resultadoA.Errors.Select(e => e.Description)));
         }
 
-        var (escopoB, gerenciadorUsuariosB, _) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+        var (escopoB, gerenciadorUsuariosB, _) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
         await using (escopoB)
         {
             UsuarioAplicacao usuarioB = new()
             {
                 Id = idUsuarioCompartilhado,
-                IdInquilino = fixture.InquilinoB.IdInquilino,
+                IdTenant = fixture.TenantB.IdTenant,
                 UserName = emailCompartilhado,
                 Email = emailCompartilhado,
-                NomeExibicao = "Usuário no Inquilino B",
+                NomeExibicao = "Usuário no Tenant B",
                 EstaAtivo = true
             };
 
@@ -94,22 +94,22 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
         }
 
         // Verifica que as senhas e hashes são independentes e isolados
-        var (escopoVerificacaoA, gerenciadorVerificacaoA, _) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopoVerificacaoA, gerenciadorVerificacaoA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoVerificacaoA)
         {
             UsuarioAplicacao? carregadoA = await gerenciadorVerificacaoA.FindByIdAsync(idUsuarioCompartilhado.ToString());
             Assert.NotNull(carregadoA);
-            Assert.Equal("Usuário no Inquilino A", carregadoA.NomeExibicao);
+            Assert.Equal("Usuário no Tenant A", carregadoA.NomeExibicao);
             Assert.True(await gerenciadorVerificacaoA.CheckPasswordAsync(carregadoA, senhaA));
             Assert.False(await gerenciadorVerificacaoA.CheckPasswordAsync(carregadoA, senhaB));
         }
 
-        var (escopoVerificacaoB, gerenciadorVerificacaoB, _) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+        var (escopoVerificacaoB, gerenciadorVerificacaoB, _) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
         await using (escopoVerificacaoB)
         {
             UsuarioAplicacao? carregadoB = await gerenciadorVerificacaoB.FindByIdAsync(idUsuarioCompartilhado.ToString());
             Assert.NotNull(carregadoB);
-            Assert.Equal("Usuário no Inquilino B", carregadoB.NomeExibicao);
+            Assert.Equal("Usuário no Tenant B", carregadoB.NomeExibicao);
             Assert.True(await gerenciadorVerificacaoB.CheckPasswordAsync(carregadoB, senhaB));
             Assert.False(await gerenciadorVerificacaoB.CheckPasswordAsync(carregadoB, senhaA));
         }
@@ -119,15 +119,15 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
     public async Task PermissoesLocais_ConcedemERevogamIndependentemente()
     {
         Guid idUsuario = Guid.NewGuid();
-        const string email = "teste_perm@inquilino.local";
+        const string email = "teste_perm@tenant.local";
 
-        var (escopoA, gerenciadorUsuariosA, contextoBancoA) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopoA, gerenciadorUsuariosA, contextoBancoA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoA)
         {
             await gerenciadorUsuariosA.CreateAsync(new UsuarioAplicacao
             {
                 Id = idUsuario,
-                IdInquilino = fixture.InquilinoA.IdInquilino,
+                IdTenant = fixture.TenantA.IdTenant,
                 UserName = email,
                 Email = email,
                 NomeExibicao = "Usuário A"
@@ -143,13 +143,13 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
             await contextoBancoA.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        var (escopoB, gerenciadorUsuariosB, contextoBancoB) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+        var (escopoB, gerenciadorUsuariosB, contextoBancoB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
         await using (escopoB)
         {
             await gerenciadorUsuariosB.CreateAsync(new UsuarioAplicacao
             {
                 Id = idUsuario,
-                IdInquilino = fixture.InquilinoB.IdInquilino,
+                IdTenant = fixture.TenantB.IdTenant,
                 UserName = email,
                 Email = email,
                 NomeExibicao = "Usuário B"
@@ -166,19 +166,19 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
         }
 
         // Verifica permissões distintas
-        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoChecagemA)
         {
             var permissoesA = await dbChecagemA.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
             Assert.Single(permissoesA);
             Assert.Equal("fundacao.contexto.ler", permissoesA[0].CodigoPermissao);
 
-            // Revoga permissão no Inquilino A
+            // Revoga permissão no Tenant A
             dbChecagemA.Permissoes.Remove(permissoesA[0]);
             await dbChecagemA.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
         await using (escopoChecagemB)
         {
             var permissoesB = await dbChecagemB.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -186,8 +186,8 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
             Assert.Equal("modulo.personalizado.acesso", permissoesB[0].CodigoPermissao);
         }
 
-        // Confirma que Inquilino A tem 0 permissões e Inquilino B continua intacto
-        var (escopoFinalA, _, dbFinalA) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        // Confirma que Tenant A tem 0 permissões e Tenant B continua intacto
+        var (escopoFinalA, _, dbFinalA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoFinalA)
         {
             Assert.Empty(await dbFinalA.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -197,14 +197,14 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
     [Fact]
     public async Task UnicidadeEmail_AplicadaLocalmentePorBanco()
     {
-        const string emailDuplicado = "duplicado@inquilino.local";
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        const string emailDuplicado = "duplicado@tenant.local";
+        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoA)
         {
             var usuario1 = new UsuarioAplicacao
             {
                 Id = Guid.NewGuid(),
-                IdInquilino = fixture.InquilinoA.IdInquilino,
+                IdTenant = fixture.TenantA.IdTenant,
                 UserName = emailDuplicado,
                 Email = emailDuplicado,
                 NomeExibicao = "Usuário 1"
@@ -215,7 +215,7 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
             var usuario2 = new UsuarioAplicacao
             {
                 Id = Guid.NewGuid(),
-                IdInquilino = fixture.InquilinoA.IdInquilino,
+                IdTenant = fixture.TenantA.IdTenant,
                 UserName = emailDuplicado,
                 Email = emailDuplicado,
                 NomeExibicao = "Usuário 2"
@@ -226,22 +226,22 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
     }
 
     [Fact]
-    public async Task RestricaoChaveEstrangeira_ImpedeContaComIdInquilinoDivergente()
+    public async Task RestricaoChaveEstrangeira_ImpedeContaComIdTenantDivergente()
     {
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoA)
         {
-            UsuarioAplicacao usuarioInquilinoInvalido = new()
+            UsuarioAplicacao usuarioTenantInvalido = new()
             {
                 Id = Guid.NewGuid(),
-                IdInquilino = fixture.InquilinoB.IdInquilino, // ID de inquilino divergente!
-                UserName = "divergente@inquilino.local",
-                Email = "divergente@inquilino.local",
-                NomeExibicao = "Usuário Inquilino Inválido"
+                IdTenant = fixture.TenantB.IdTenant, // ID de tenant divergente!
+                UserName = "divergente@tenant.local",
+                Email = "divergente@tenant.local",
+                NomeExibicao = "Usuário Tenant Inválido"
             };
 
             await Assert.ThrowsAnyAsync<DbUpdateException>(
-                () => gerenciadorUsuariosA.CreateAsync(usuarioInquilinoInvalido, "Senha123!"));
+                () => gerenciadorUsuariosA.CreateAsync(usuarioTenantInvalido, "Senha123!"));
         }
     }
 
@@ -251,7 +251,7 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
         Guid idUsuarioRollback = Guid.NewGuid();
         Guid idUsuarioCommit = Guid.NewGuid();
 
-        var (escopo, _, contextoBanco) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        var (escopo, _, contextoBanco) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopo)
         {
             // 1. Rollback
@@ -260,9 +260,9 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
                 contextoBanco.Users.Add(new UsuarioAplicacao
                 {
                     Id = idUsuarioRollback,
-                    IdInquilino = fixture.InquilinoA.IdInquilino,
-                    UserName = "rollback@inquilino.local",
-                    Email = "rollback@inquilino.local",
+                    IdTenant = fixture.TenantA.IdTenant,
+                    UserName = "rollback@tenant.local",
+                    Email = "rollback@tenant.local",
                     NomeExibicao = "Usuário Rollback"
                 });
                 await contextoBanco.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -278,9 +278,9 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
                 contextoBanco.Users.Add(new UsuarioAplicacao
                 {
                     Id = idUsuarioCommit,
-                    IdInquilino = fixture.InquilinoA.IdInquilino,
-                    UserName = "commit@inquilino.local",
-                    Email = "commit@inquilino.local",
+                    IdTenant = fixture.TenantA.IdTenant,
+                    UserName = "commit@tenant.local",
+                    Email = "commit@tenant.local",
                     NomeExibicao = "Usuário Commit"
                 });
                 await contextoBanco.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -303,7 +303,7 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
 
         Task tarefaA = Task.Run(async () =>
         {
-            var (escopoA, _, dbA) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+            var (escopoA, _, dbA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
             await using (escopoA)
             await using (var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
             {
@@ -319,9 +319,9 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
                 dbA.Users.Add(new UsuarioAplicacao
                 {
                     Id = idUsuarioA,
-                    IdInquilino = fixture.InquilinoA.IdInquilino,
-                    UserName = "concorrente_a@inquilino.local",
-                    Email = "concorrente_a@inquilino.local",
+                    IdTenant = fixture.TenantA.IdTenant,
+                    UserName = "concorrente_a@tenant.local",
+                    Email = "concorrente_a@tenant.local",
                     NomeExibicao = "Concorrente A"
                 });
                 await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -337,7 +337,7 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
 
         Task tarefaB = Task.Run(async () =>
         {
-            var (escopoB, _, dbB) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+            var (escopoB, _, dbB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
             await using (escopoB)
             await using (var txB = await dbB.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
             {
@@ -353,9 +353,9 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
                 dbB.Users.Add(new UsuarioAplicacao
                 {
                     Id = idUsuarioB,
-                    IdInquilino = fixture.InquilinoB.IdInquilino,
-                    UserName = "concorrente_b@inquilino.local",
-                    Email = "concorrente_b@inquilino.local",
+                    IdTenant = fixture.TenantB.IdTenant,
+                    UserName = "concorrente_b@tenant.local",
+                    Email = "concorrente_b@tenant.local",
                     NomeExibicao = "Concorrente B"
                 });
                 await dbB.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -373,27 +373,27 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
 
         Assert.True(picoConcorrenciaObservado >= 2, $"Pico de concorrência foi {picoConcorrenciaObservado}, esperado >= 2");
 
-        // Verifica que o Inquilino A realizou rollback e não possui idUsuarioA
-        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.InquilinoA.StringConexaoExecucao);
+        // Verifica que o Tenant A realizou rollback e não possui idUsuarioA
+        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
         await using (escopoChecagemA)
         {
             Assert.Null(await dbChecagemA.Users.FindAsync([idUsuarioA], TestContext.Current.CancellationToken));
         }
 
-        // Verifica que o Inquilino B realizou commit e possui idUsuarioB
-        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.InquilinoB.StringConexaoExecucao);
+        // Verifica que o Tenant B realizou commit e possui idUsuarioB
+        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
         await using (escopoChecagemB)
         {
             Assert.NotNull(await dbChecagemB.Users.FindAsync([idUsuarioB], TestContext.Current.CancellationToken));
         }
     }
 
-    private static (ServiceProvider Provedor, UserManager<UsuarioAplicacao> GerenciadorUsuarios, ContextoBancoAcessoInquilino ContextoBanco) CriarEscopoCliente(
+    private static (ServiceProvider Provedor, UserManager<UsuarioAplicacao> GerenciadorUsuarios, AcessoTenantDbContext ContextoBanco) CriarEscopoCliente(
         string stringConexao)
     {
         ServiceCollection servicos = new();
         servicos.AddLogging();
-        servicos.AddDbContext<ContextoBancoAcessoInquilino>(opcoes =>
+        servicos.AddDbContext<AcessoTenantDbContext>(opcoes =>
         {
             opcoes.UseNpgsql(stringConexao, npgsql =>
             {
@@ -404,9 +404,9 @@ public sealed class TestesPersistenciaUsuarioInquilino(FixtureInstalacaoPostgres
         {
             opcoes.User.RequireUniqueEmail = true;
         })
-        .AddEntityFrameworkStores<ContextoBancoAcessoInquilino>();
+        .AddEntityFrameworkStores<AcessoTenantDbContext>();
 
         ServiceProvider provedor = servicos.BuildServiceProvider();
-        return (provedor, provedor.GetRequiredService<UserManager<UsuarioAplicacao>>(), provedor.GetRequiredService<ContextoBancoAcessoInquilino>());
+        return (provedor, provedor.GetRequiredService<UserManager<UsuarioAplicacao>>(), provedor.GetRequiredService<AcessoTenantDbContext>());
     }
 }

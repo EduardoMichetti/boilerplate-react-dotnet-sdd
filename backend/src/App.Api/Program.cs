@@ -13,39 +13,25 @@ WebApplicationBuilder construtor = WebApplication.CreateBuilder(args);
 
 construtor.Services.AdicionarProblemDetailsSeguro();
 
-construtor.Services.AddOptions<OpcoesInquilinoInstalacao>()
+construtor.Services.AddOptions<OpcoesInstalacaoTenant>()
     .Configure<IConfiguration>((opcoes, config) =>
     {
-        string? idAplicacao = config["IdAplicacao"] ?? config["ApplicationId"];
-        string? idAmbienteStr = config["IdAmbiente"] ?? config["EnvironmentId"];
-        _ = Guid.TryParse(idAmbienteStr, out Guid idAmbiente);
-
-        string? idInquilinoStr = config["IdInquilino"] ?? config["TenantId"];
-        _ = Guid.TryParse(idInquilinoStr, out Guid idInquilino);
-
-        string? nomeExibicao = config["NomeExibicaoInquilino"] ?? config["TenantDisplayName"];
-
-        string? estadoStr = config["EstadoInquilino"] ?? config["TenantState"];
-        EstadoInquilino? estado = Enum.TryParse<EstadoInquilino>(estadoStr, true, out EstadoInquilino est) ? est : null;
-
-        string? stringConexao = config["StringsConexao:BancoApp"]
-            ?? config["ConnectionStrings:AppDb"]
-            ?? config["StringsConexao__BancoApp"]
-            ?? config["ConnectionStrings__AppDb"]
-            ?? config.GetConnectionString("BancoApp")
-            ?? config.GetConnectionString("AppDb");
-
-        opcoes.IdAplicacao = idAplicacao;
+        opcoes.IdAplicacao = config["IdAplicacao"];
+        _ = Guid.TryParse(config["IdAmbiente"], out Guid idAmbiente);
+        _ = Guid.TryParse(config["IdTenant"], out Guid idTenant);
         opcoes.IdAmbiente = idAmbiente;
-        opcoes.IdInquilino = idInquilino;
-        opcoes.NomeExibicaoInquilino = nomeExibicao;
-        opcoes.EstadoInquilino = estado;
-        opcoes.StringsConexao = new StringsConexaoInstalacao { BancoApp = stringConexao };
+        opcoes.IdTenant = idTenant;
+        opcoes.NomeExibicaoTenant = config["NomeExibicaoTenant"];
+        opcoes.EstadoTenant = Enum.TryParse<EstadoTenant>(config["EstadoTenant"], true, out EstadoTenant est) ? est : null;
+        opcoes.StringsConexao = new StringsConexaoInstalacao
+        {
+            BancoApp = config["StringsConexao:BancoApp"] ?? config["StringsConexao__BancoApp"]
+        };
     });
 
-construtor.Services.AddDbContext<ContextoBancoAcessoInquilino>((provedor, opcoes) =>
+construtor.Services.AddDbContext<AcessoTenantDbContext>((provedor, opcoes) =>
 {
-    OpcoesInquilinoInstalacao config = provedor.GetRequiredService<IOptions<OpcoesInquilinoInstalacao>>().Value;
+    OpcoesInstalacaoTenant config = provedor.GetRequiredService<IOptions<OpcoesInstalacaoTenant>>().Value;
     if (!string.IsNullOrWhiteSpace(config.StringsConexao?.BancoApp))
     {
         opcoes.UseNpgsql(config.StringsConexao.BancoApp, npgsql =>
@@ -55,9 +41,8 @@ construtor.Services.AddDbContext<ContextoBancoAcessoInquilino>((provedor, opcoes
     }
 });
 
-construtor.Services.AddScoped<ISondaIdentidadeBancoInquilino, SondaIdentidadeBancoInquilino>();
+construtor.Services.AddScoped<IVerificadorIdentidadeBancoTenant, VerificadorIdentidadeBancoTenant>();
 construtor.Services.AddScoped<VerificacaoSaudeProntidaoInstalacao>();
-construtor.Services.AddScoped<InstallationReadinessHealthCheck>();
 
 construtor.Services.AddOpenApi("v1", opcoes =>
 {
@@ -100,7 +85,7 @@ aplicacao.MapGet("/health/ready", async (
 })
 .WithName("getReadiness")
 .WithSummary("Verificar backend pronto no escopo I1")
-.WithDescription("Confere configuração runtime da instalação e identidade/versão do banco configurado (TenantDatabaseIdentity e histórico de migrations). Não executa migrations, autentica cookies ou consulta contas. Sem exigência de key ring enquanto não existe autenticação HTTP.")
+.WithDescription("Confere configuração runtime da instalação e identidade/versão do banco configurado (IdentidadeBancoTenant e histórico de migrations). Não executa migrations, autentica cookies ou consulta contas. Sem exigência de key ring enquanto não existe autenticação HTTP.")
 .Produces<RespostaReadiness>(StatusCodes.Status200OK, "application/json")
 .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 

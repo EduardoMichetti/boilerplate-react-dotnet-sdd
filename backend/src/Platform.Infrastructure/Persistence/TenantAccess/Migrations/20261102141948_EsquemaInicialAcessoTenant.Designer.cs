@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Platform.Infrastructure.Persistence.TenantAccess;
@@ -10,10 +11,12 @@ using Platform.Infrastructure.Persistence.TenantAccess;
 
 namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 {
-    [DbContext(typeof(ContextoBancoAcessoInquilino))]
-    partial class ContextoBancoAcessoInquilinoModelSnapshot : ModelSnapshot
+    [DbContext(typeof(AcessoTenantDbContext))]
+    [Migration("20261102141948_EsquemaInicialAcessoTenant")]
+    partial class EsquemaInicialAcessoTenant
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -86,7 +89,7 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                     b.ToTable("tokens_usuario", "access");
                 });
 
-            modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoInquilino", b =>
+            modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoTenant", b =>
                 {
                     b.Property<int>("IdUnico")
                         .HasColumnType("integer")
@@ -100,9 +103,9 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .HasColumnType("uuid")
                         .HasComment("Identificador único do ambiente de execução correspondente a esta instalação.");
 
-                    b.Property<Guid>("IdInquilino")
+                    b.Property<Guid>("IdTenant")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador imutável do inquilino proprietário deste banco de dados.");
+                        .HasComment("Identificador imutável do tenant proprietário deste banco de dados.");
 
                     b.Property<DateTimeOffset>("InicializadoEm")
                         .HasColumnType("timestamp with time zone")
@@ -110,12 +113,12 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 
                     b.HasKey("IdUnico");
 
-                    b.HasAlternateKey("IdInquilino")
-                        .HasName("uq_identidade_banco_id_inquilino");
+                    b.HasAlternateKey("IdTenant")
+                        .HasName("uq_identidade_banco_id_tenant");
 
                     b.ToTable("identidade_banco", "foundation", t =>
                         {
-                            t.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por inquilino.");
+                            t.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por tenant.");
                         });
                 });
 
@@ -174,9 +177,9 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .HasDefaultValue(true)
                         .HasComment("Indica se o usuário está ativo no sistema e autorizado a acessar.");
 
-                    b.Property<Guid>("IdInquilino")
+                    b.Property<Guid>("IdTenant")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador imutável do inquilino (tenant) proprietário desta conta.");
+                        .HasComment("Identificador imutável do tenant proprietário desta conta.");
 
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("boolean");
@@ -222,8 +225,8 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("IdInquilino")
-                        .HasDatabaseName("ix_usuarios_id_inquilino");
+                    b.HasIndex("IdTenant")
+                        .HasDatabaseName("ix_usuarios_id_tenant");
 
                     b.HasIndex("NormalizedEmail")
                         .IsUnique()
@@ -235,7 +238,7 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 
                     b.ToTable("usuarios", "access", t =>
                         {
-                            t.HasComment("Armazena os usuários da aplicação vinculados exclusivamente ao inquilino desta instalação.");
+                            t.HasComment("Armazena os usuários da aplicação vinculados exclusivamente ao tenant desta instalação.");
                         });
                 });
 
@@ -279,10 +282,10 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 
             modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.UsuarioAplicacao", b =>
                 {
-                    b.HasOne("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoInquilino", null)
+                    b.HasOne("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoTenant", null)
                         .WithMany()
-                        .HasForeignKey("IdInquilino")
-                        .HasPrincipalKey("IdInquilino")
+                        .HasForeignKey("IdTenant")
+                        .HasPrincipalKey("IdTenant")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

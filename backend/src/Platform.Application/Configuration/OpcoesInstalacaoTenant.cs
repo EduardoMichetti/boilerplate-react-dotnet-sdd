@@ -4,9 +4,9 @@ using Platform.Domain.Tenancy;
 namespace Platform.Application.Configuration;
 
 /// <summary>
-/// Opções de configuração essenciais para a inicialização e isolamento da instalação do inquilino.
+/// Opções de configuração essenciais para a inicialização e isolamento da instalação do tenant.
 /// </summary>
-public sealed class OpcoesInquilinoInstalacao
+public sealed class OpcoesInstalacaoTenant
 {
     /// <summary>
     /// Identificador do produto ou aplicação derivado (de 1 a 100 caracteres).
@@ -19,19 +19,19 @@ public sealed class OpcoesInquilinoInstalacao
     public Guid IdAmbiente { get; set; }
 
     /// <summary>
-    /// Identificador único e imutável do inquilino (UUID não vazio).
+    /// Identificador único e imutável do tenant (UUID não vazio).
     /// </summary>
-    public Guid IdInquilino { get; set; }
+    public Guid IdTenant { get; set; }
 
     /// <summary>
-    /// Nome amigável de exibição do inquilino/empresa (de 1 a 120 caracteres).
+    /// Nome amigável de exibição do tenant/empresa (de 1 a 120 caracteres).
     /// </summary>
-    public string? NomeExibicaoInquilino { get; set; }
+    public string? NomeExibicaoTenant { get; set; }
 
     /// <summary>
     /// Estado operacional configurado para a instalação (Inativo ou Ativo).
     /// </summary>
-    public EstadoInquilino? EstadoInquilino { get; set; }
+    public EstadoTenant? EstadoTenant { get; set; }
 
     /// <summary>
     /// Strings de conexão da instalação com o banco de dados dedicado.
@@ -55,19 +55,19 @@ public sealed class OpcoesInquilinoInstalacao
             erros.Add("IdAmbiente deve ser um UUID não vazio.");
         }
 
-        if (IdInquilino == Guid.Empty)
+        if (IdTenant == Guid.Empty)
         {
-            erros.Add("IdInquilino deve ser um UUID não vazio.");
+            erros.Add("IdTenant deve ser um UUID não vazio.");
         }
 
-        if (string.IsNullOrWhiteSpace(NomeExibicaoInquilino) || NomeExibicaoInquilino.Length > 120)
+        if (string.IsNullOrWhiteSpace(NomeExibicaoTenant) || NomeExibicaoTenant.Length > 120)
         {
-            erros.Add("NomeExibicaoInquilino deve conter entre 1 e 120 caracteres.");
+            erros.Add("NomeExibicaoTenant deve conter entre 1 e 120 caracteres.");
         }
 
-        if (EstadoInquilino is not { } estado || !Enum.IsDefined(estado))
+        if (EstadoTenant is not { } estado || !Enum.IsDefined(estado))
         {
-            erros.Add("EstadoInquilino deve ser explicitamente Inativo ou Ativo.");
+            erros.Add("EstadoTenant deve ser explicitamente Inativo ou Ativo.");
         }
 
         if (string.IsNullOrWhiteSpace(StringsConexao?.BancoApp))

@@ -7,10 +7,10 @@ using Platform.Infrastructure.Persistence.TenantAccess.Configurations;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 /// <summary>
-/// Contexto de banco de dados do Entity Framework Core para o módulo de acesso do inquilino.
+/// DbContext do Entity Framework Core para o módulo de acesso do tenant.
 /// Integra a identidade do banco e os usuários com permissões.
 /// </summary>
-public sealed class ContextoBancoAcessoInquilino(DbContextOptions<ContextoBancoAcessoInquilino> opcoes)
+public sealed class AcessoTenantDbContext(DbContextOptions<AcessoTenantDbContext> opcoes)
     : IdentityUserContext<UsuarioAplicacao, Guid>(opcoes)
 {
     /// <summary>
@@ -19,9 +19,9 @@ public sealed class ContextoBancoAcessoInquilino(DbContextOptions<ContextoBancoA
     public DbSet<PermissaoUsuario> Permissoes => Set<PermissaoUsuario>();
 
     /// <summary>
-    /// Conjunto singleton que armazena a identidade do banco de dados do inquilino.
+    /// Conjunto singleton que armazena a identidade do banco de dados do tenant.
     /// </summary>
-    public DbSet<IdentidadeBancoInquilino> IdentidadeBanco => Set<IdentidadeBancoInquilino>();
+    public DbSet<IdentidadeBancoTenant> IdentidadeBanco => Set<IdentidadeBancoTenant>();
 
     protected override void OnModelCreating(ModelBuilder construtor)
     {
@@ -34,19 +34,19 @@ public sealed class ContextoBancoAcessoInquilino(DbContextOptions<ContextoBancoA
         construtor.Entity<IdentityUserLogin<Guid>>(b => b.ToTable("logins_usuario", "access"));
         construtor.Entity<IdentityUserToken<Guid>>(b => b.ToTable("tokens_usuario", "access"));
 
-        construtor.Entity<IdentidadeBancoInquilino>(b =>
+        construtor.Entity<IdentidadeBancoTenant>(b =>
         {
             b.ToTable("identidade_banco", "foundation", tabela =>
-                tabela.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por inquilino."));
+                tabela.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por tenant."));
 
             b.HasKey(e => e.IdUnico);
             b.Property(e => e.IdUnico)
                 .ValueGeneratedNever()
                 .HasComment("Identificador singleton fixado em 1 para garantir linha única.");
 
-            b.Property(e => e.IdInquilino)
+            b.Property(e => e.IdTenant)
                 .IsRequired()
-                .HasComment("Identificador imutável do inquilino proprietário deste banco de dados.");
+                .HasComment("Identificador imutável do tenant proprietário deste banco de dados.");
 
             b.Property(e => e.IdAmbiente)
                 .IsRequired()
@@ -61,16 +61,16 @@ public sealed class ContextoBancoAcessoInquilino(DbContextOptions<ContextoBancoA
                 .HasColumnType("timestamp with time zone")
                 .HasComment("Data e hora UTC em que o banco de dados da instalação foi inicializado tecnicamente.");
 
-            b.HasAlternateKey(e => e.IdInquilino)
-                .HasName("uq_identidade_banco_id_inquilino");
+            b.HasAlternateKey(e => e.IdTenant)
+                .HasName("uq_identidade_banco_id_tenant");
         });
 
         construtor.Entity<UsuarioAplicacao>(b =>
         {
-            b.HasOne<IdentidadeBancoInquilino>()
+            b.HasOne<IdentidadeBancoTenant>()
                 .WithMany()
-                .HasForeignKey(u => u.IdInquilino)
-                .HasPrincipalKey(t => t.IdInquilino)
+                .HasForeignKey(u => u.IdTenant)
+                .HasPrincipalKey(t => t.IdTenant)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

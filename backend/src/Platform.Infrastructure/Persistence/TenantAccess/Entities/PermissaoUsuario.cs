@@ -1,7 +1,7 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 /// <summary>
-/// Representa uma permissão pontual de acesso concedida a um usuário dentro do escopo da instalação do inquilino.
+/// Representa uma permissão pontual de acesso concedida a um usuário dentro do escopo da instalação do tenant.
 /// </summary>
 public sealed class PermissaoUsuario
 {

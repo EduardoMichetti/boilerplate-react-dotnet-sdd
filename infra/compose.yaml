@@ -21,17 +21,17 @@ services:
       dockerfile: infra/docker/Dockerfile.api
     restart: unless-stopped
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${PORTA_API:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      ApplicationId: ${ApplicationId}
-      EnvironmentId: ${EnvironmentId}
-      TenantId: ${TenantId}
-      TenantDisplayName: ${TenantDisplayName}
-      TenantState: ${TenantState}
-      ConnectionStrings__AppDb: ${ConnectionStrings__AppDb}
+      IdAplicacao: ${IdAplicacao}
+      IdAmbiente: ${IdAmbiente}
+      IdTenant: ${IdTenant}
+      NomeExibicaoTenant: ${NomeExibicaoTenant}
+      EstadoTenant: ${EstadoTenant}
+      StringsConexao__BancoApp: ${StringsConexao__BancoApp}
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: "8080"
 
@@ -45,13 +45,13 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ApplicationId: ${ApplicationId}
-      EnvironmentId: ${EnvironmentId}
-      TenantId: ${TenantId}
-      TenantDisplayName: ${TenantDisplayName}
-      TenantState: ${TenantState}
-      ConnectionStrings__AppDb: ${ConnectionStrings__AppDbOwner}
-      Migrations__AllowInitializeEmptyDatabase: ${Migrations__AllowInitializeEmptyDatabase:-false}
+      IdAplicacao: ${IdAplicacao}
+      IdAmbiente: ${IdAmbiente}
+      IdTenant: ${IdTenant}
+      NomeExibicaoTenant: ${NomeExibicaoTenant}
+      EstadoTenant: ${EstadoTenant}
+      StringsConexao__BancoApp: ${StringsConexao__BancoAppProprietario}
+      Migracoes__PermitirInicializarBancoVazio: ${Migracoes__PermitirInicializarBancoVazio:-false}
 
 volumes:
   dados_postgres:

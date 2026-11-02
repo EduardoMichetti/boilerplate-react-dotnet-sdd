@@ -3,16 +3,16 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 using Microsoft.AspNetCore.Identity;
 
 /// <summary>
-/// Entidade de usuário da aplicação vinculada exclusivamente a um inquilino (tenant).
+/// Entidade de usuário da aplicação vinculada exclusivamente a um tenant.
 /// Herda os campos padrão de autenticação do ASP.NET Core Identity (como Email, UserName, PasswordHash).
 /// </summary>
 public sealed class UsuarioAplicacao : IdentityUser<Guid>
 {
     /// <summary>
-    /// Identificador único e imutável do inquilino (tenant) proprietário desta conta de usuário.
-    /// Funciona como chave estrangeira para a identidade do banco de dados do inquilino.
+    /// Identificador único e imutável do tenant proprietário desta conta de usuário.
+    /// Funciona como chave estrangeira para a identidade do banco de dados do tenant.
     /// </summary>
-    public Guid IdInquilino { get; set; }
+    public Guid IdTenant { get; set; }
 
     /// <summary>
     /// Nome amigável de exibição do usuário na interface (deve conter entre 1 e 120 caracteres).
@@ -39,9 +39,9 @@ public sealed class UsuarioAplicacao : IdentityUser<Guid>
             throw new ArgumentException("Id deve ser um UUID não vazio.", nameof(Id));
         }
 
-        if (IdInquilino == Guid.Empty)
+        if (IdTenant == Guid.Empty)
         {
-            throw new ArgumentException("IdInquilino deve ser um UUID não vazio.", nameof(IdInquilino));
+            throw new ArgumentException("IdTenant deve ser um UUID não vazio.", nameof(IdTenant));
         }
 
         if (string.IsNullOrWhiteSpace(NomeExibicao) || NomeExibicao.Length > 120)

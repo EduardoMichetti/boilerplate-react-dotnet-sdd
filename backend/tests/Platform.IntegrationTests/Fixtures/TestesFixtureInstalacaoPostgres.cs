@@ -9,7 +9,7 @@ public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fi
     [Fact]
     public async Task ProprietarioEExecucaoPossuemApenasPrivilegiosEsperados()
     {
-        foreach (InstalacaoTestePostgres instalacao in new[] { fixture.InquilinoA, fixture.InquilinoB })
+        foreach (InstalacaoTestePostgres instalacao in new[] { fixture.TenantA, fixture.TenantB })
         {
             await using NpgsqlConnection conexaoProprietario = new(instalacao.StringConexaoProprietario);
             await conexaoProprietario.OpenAsync(TestContext.Current.CancellationToken);
@@ -40,8 +40,8 @@ public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fi
     {
         foreach ((InstalacaoTestePostgres origem, InstalacaoTestePostgres destino) in new[]
         {
-            (fixture.InquilinoA, fixture.InquilinoB),
-            (fixture.InquilinoB, fixture.InquilinoA)
+            (fixture.TenantA, fixture.TenantB),
+            (fixture.TenantB, fixture.TenantA)
         })
         {
             NpgsqlConnectionStringBuilder construtorConexao = new(origem.StringConexaoExecucao)
@@ -60,10 +60,10 @@ public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fi
     [Fact]
     public async Task BancosProvisionadosPermanecemVaziosAntesDasMigrations()
     {
-        Assert.NotEqual(fixture.InquilinoA.NomeBancoDados, fixture.InquilinoB.NomeBancoDados);
-        Assert.NotEqual(fixture.InquilinoA.IdInquilino, fixture.InquilinoB.IdInquilino);
+        Assert.NotEqual(fixture.TenantA.NomeBancoDados, fixture.TenantB.NomeBancoDados);
+        Assert.NotEqual(fixture.TenantA.IdTenant, fixture.TenantB.IdTenant);
 
-        foreach (InstalacaoTestePostgres instalacao in new[] { fixture.InquilinoA, fixture.InquilinoB })
+        foreach (InstalacaoTestePostgres instalacao in new[] { fixture.TenantA, fixture.TenantB })
         {
             await using NpgsqlConnection conexao = new(instalacao.StringConexaoProprietario);
             await conexao.OpenAsync(TestContext.Current.CancellationToken);

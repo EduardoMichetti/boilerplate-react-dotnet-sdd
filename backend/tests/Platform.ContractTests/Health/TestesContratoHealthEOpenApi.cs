@@ -20,7 +20,7 @@ using Xunit;
 public sealed class TestesContratoHealthEOpenApi
 {
     private static readonly Guid IdAmbientePadrao = Guid.Parse("11111111-1111-4111-8111-111111111111");
-    private static readonly Guid IdInquilinoPadrao = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    private static readonly Guid IdTenantPadrao = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     private static readonly Guid EpocaAcessoPadrao = Guid.Parse("33333333-3333-4333-8333-333333333333");
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class TestesContratoHealthEOpenApi
     {
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => throw new InvalidOperationException("Banco não deve ser acessado por liveness!")));
+            new VerificadorIdentidadeBancoFake(() => throw new InvalidOperationException("Banco não deve ser acessado por liveness!")));
 
         using HttpClient cliente = aplicacao.CreateClient();
         cliente.DefaultRequestHeaders.Add("Cookie", "__Host-bps-session=token-sintetico-que-nao-deve-ser-lido");
@@ -49,15 +49,15 @@ public sealed class TestesContratoHealthEOpenApi
     [Fact]
     public async Task GetReady_Retorna200EStatusReady_QuandoInstalacaoEValidaEPronta()
     {
-        InstantaneoIdentidadeBancoInquilino instantaneoEsperado = new(
-            IdInquilinoPadrao,
+        IdentidadeBancoTenantSnapshot snapshotEsperado = new(
+            IdTenantPadrao,
             IdAmbientePadrao,
             EpocaAcessoPadrao,
             PossuiVersaoMigracaoEsperada: true);
 
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(instantaneoEsperado)));
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(snapshotEsperado)));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -75,8 +75,8 @@ public sealed class TestesContratoHealthEOpenApi
     [Fact]
     public async Task GetReady_Retorna503ProblemDetails_QuandoMarcadorDoBancoDiverge()
     {
-        // IdInquilino diverge da configuração
-        InstantaneoIdentidadeBancoInquilino instantaneoDivergente = new(
+        // IdTenant diverge da configuração
+        IdentidadeBancoTenantSnapshot snapshotDivergente = new(
             Guid.NewGuid(),
             IdAmbientePadrao,
             EpocaAcessoPadrao,
@@ -84,7 +84,7 @@ public sealed class TestesContratoHealthEOpenApi
 
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(instantaneoDivergente)));
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(snapshotDivergente)));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -112,7 +112,7 @@ public sealed class TestesContratoHealthEOpenApi
 
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => throw new TimeoutException($"Conexão falhou para {segredoPrivado}")));
+            new VerificadorIdentidadeBancoFake(() => throw new TimeoutException($"Conexão falhou para {segredoPrivado}")));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -131,17 +131,17 @@ public sealed class TestesContratoHealthEOpenApi
     }
 
     [Fact]
-    public async Task GetReady_Retorna503ProblemDetails_QuandoInquilinoEstaInativo()
+    public async Task GetReady_Retorna503ProblemDetails_QuandoTenantEstaInativo()
     {
-        InstantaneoIdentidadeBancoInquilino instantaneoEsperado = new(
-            IdInquilinoPadrao,
+        IdentidadeBancoTenantSnapshot snapshotEsperado = new(
+            IdTenantPadrao,
             IdAmbientePadrao,
             EpocaAcessoPadrao,
             PossuiVersaoMigracaoEsperada: true);
 
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
-            CriarOpcoesValidas(estado: EstadoInquilino.Inativo),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(instantaneoEsperado)));
+            CriarOpcoesValidas(estado: EstadoTenant.Inativo),
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(snapshotEsperado)));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -160,15 +160,15 @@ public sealed class TestesContratoHealthEOpenApi
     [Fact]
     public async Task GetReady_Retorna503ProblemDetails_QuandoExistemMigracoesPendentes()
     {
-        InstantaneoIdentidadeBancoInquilino instantaneoComMigracoesPendentes = new(
-            IdInquilinoPadrao,
+        IdentidadeBancoTenantSnapshot snapshotComMigracoesPendentes = new(
+            IdTenantPadrao,
             IdAmbientePadrao,
             EpocaAcessoPadrao,
             PossuiVersaoMigracaoEsperada: false);
 
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(instantaneoComMigracoesPendentes)));
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(snapshotComMigracoesPendentes)));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -189,8 +189,8 @@ public sealed class TestesContratoHealthEOpenApi
     {
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(new InstantaneoIdentidadeBancoInquilino(
-                IdInquilinoPadrao, IdAmbientePadrao, EpocaAcessoPadrao, true))));
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(new IdentidadeBancoTenantSnapshot(
+                IdTenantPadrao, IdAmbientePadrao, EpocaAcessoPadrao, true))));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -225,8 +225,8 @@ public sealed class TestesContratoHealthEOpenApi
     {
         await using WebApplicationFactory<Program> aplicacao = CriarAplicacaoCom(
             CriarOpcoesValidas(),
-            new SondaIdentidadeBancoFake(() => Task.FromResult(new InstantaneoIdentidadeBancoInquilino(
-                IdInquilinoPadrao, IdAmbientePadrao, EpocaAcessoPadrao, true))));
+            new VerificadorIdentidadeBancoFake(() => Task.FromResult(new IdentidadeBancoTenantSnapshot(
+                IdTenantPadrao, IdAmbientePadrao, EpocaAcessoPadrao, true))));
 
         using HttpClient cliente = aplicacao.CreateClient();
 
@@ -244,40 +244,40 @@ public sealed class TestesContratoHealthEOpenApi
         Assert.Matches("^[0-9a-f]{32}$", raiz.GetProperty("traceId").GetString()!);
     }
 
-    private static OpcoesInquilinoInstalacao CriarOpcoesValidas(EstadoInquilino estado = EstadoInquilino.Ativo) => new()
+    private static OpcoesInstalacaoTenant CriarOpcoesValidas(EstadoTenant estado = EstadoTenant.Ativo) => new()
     {
         IdAplicacao = "boilerplate-react-dotnet-sdd",
         IdAmbiente = IdAmbientePadrao,
-        IdInquilino = IdInquilinoPadrao,
-        NomeExibicaoInquilino = "Cliente de Teste",
-        EstadoInquilino = estado,
+        IdTenant = IdTenantPadrao,
+        NomeExibicaoTenant = "Cliente de Teste",
+        EstadoTenant = estado,
         StringsConexao = new StringsConexaoInstalacao
         {
-            BancoApp = "Host=localhost;Database=banco_teste;Username=postgres;Password=teste"
+            BancoApp = "Host=localhost;Database=banco_teste;Username=postgres"
         }
     };
 
     private static WebApplicationFactory<Program> CriarAplicacaoCom(
-        OpcoesInquilinoInstalacao opcoes,
-        ISondaIdentidadeBancoInquilino sonda)
+        OpcoesInstalacaoTenant opcoes,
+        IVerificadorIdentidadeBancoTenant verificador)
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
-                services.RemoveAll<IOptions<OpcoesInquilinoInstalacao>>();
-                services.AddSingleton<IOptions<OpcoesInquilinoInstalacao>>(Options.Create(opcoes));
+                services.RemoveAll<IOptions<OpcoesInstalacaoTenant>>();
+                services.AddSingleton<IOptions<OpcoesInstalacaoTenant>>(Options.Create(opcoes));
 
-                services.RemoveAll<ISondaIdentidadeBancoInquilino>();
-                services.AddScoped<ISondaIdentidadeBancoInquilino>(_ => sonda);
+                services.RemoveAll<IVerificadorIdentidadeBancoTenant>();
+                services.AddScoped<IVerificadorIdentidadeBancoTenant>(_ => verificador);
             });
         });
     }
 
-    private sealed class SondaIdentidadeBancoFake(
-        Func<Task<InstantaneoIdentidadeBancoInquilino>> acaoLeitura) : ISondaIdentidadeBancoInquilino
+    private sealed class VerificadorIdentidadeBancoFake(
+        Func<Task<IdentidadeBancoTenantSnapshot>> acaoLeitura) : IVerificadorIdentidadeBancoTenant
     {
-        public Task<InstantaneoIdentidadeBancoInquilino> LerAsync(CancellationToken tokenCancelamento = default)
+        public Task<IdentidadeBancoTenantSnapshot> LerAsync(CancellationToken tokenCancelamento = default)
             => acaoLeitura();
     }
 }

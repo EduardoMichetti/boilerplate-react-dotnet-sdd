@@ -6,54 +6,54 @@ using Xunit;
 
 public sealed class TestesValidadorPreMigracao
 {
-    private static readonly Guid IdInquilinoAlvo = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    private static readonly Guid IdTenantAlvo = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     private static readonly Guid IdAmbienteAlvo = Guid.Parse("11111111-1111-4111-8111-111111111111");
     private const string StringConexaoValida = "Host=localhost;Database=teste;Username=postgres";
 
     [Fact]
     public void ValidarOpcoes_AceitaEstadoInativoEIdentidadeCoincidente()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
-            idInquilinoCli: IdInquilinoAlvo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
+            idTenantCli: IdTenantAlvo,
             idAmbienteCli: IdAmbienteAlvo);
 
-        PreValidacaoMigracaoInquilino.ValidarOpcoes(opcoes);
+        PreflightMigracaoTenant.ValidarOpcoes(opcoes);
     }
 
     [Fact]
     public void ValidarOpcoes_RejeitaEstadoAtivoParaDDL()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(estadoInquilino: EstadoInquilino.Ativo);
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(estadoTenant: EstadoTenant.Ativo);
 
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.ValidarOpcoes(opcoes));
+            () => PreflightMigracaoTenant.ValidarOpcoes(opcoes));
 
         Assert.Contains("Inativo", excecao.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ValidarOpcoes_RejeitaIdInquilinoDivergenteNaCli()
+    public void ValidarOpcoes_RejeitaIdTenantDivergenteNaCli()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
-            idInquilinoCli: Guid.NewGuid()); // divergente
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
+            idTenantCli: Guid.NewGuid()); // divergente
 
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.ValidarOpcoes(opcoes));
+            () => PreflightMigracaoTenant.ValidarOpcoes(opcoes));
 
-        Assert.Contains("IdInquilino", excecao.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IdTenant", excecao.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ValidarOpcoes_RejeitaIdAmbienteDivergenteNaCli()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             idAmbienteCli: Guid.NewGuid()); // divergente
 
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.ValidarOpcoes(opcoes));
+            () => PreflightMigracaoTenant.ValidarOpcoes(opcoes));
 
         Assert.Contains("IdAmbiente", excecao.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -65,9 +65,9 @@ public sealed class TestesValidadorPreMigracao
     public void AnalisarPermissaoInicializacao_RejeitaSintaxeBooleanaInvalida(string valorBruto)
     {
         ArgumentException excecao = Assert.Throws<ArgumentException>(
-            () => PreValidacaoMigracaoInquilino.AnalisarPermissaoInicializacao(valorBruto));
+            () => PreflightMigracaoTenant.AnalisarPermissaoInicializacao(valorBruto));
 
-        Assert.Contains("AllowInitializeEmptyDatabase", excecao.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PermitirInicializarBancoVazio", excecao.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -76,7 +76,7 @@ public sealed class TestesValidadorPreMigracao
     [InlineData("   ")]
     public void AnalisarPermissaoInicializacao_RetornaFalsoQuandoAusenteOuVazio(string? valorBruto)
     {
-        bool resultado = PreValidacaoMigracaoInquilino.AnalisarPermissaoInicializacao(valorBruto);
+        bool resultado = PreflightMigracaoTenant.AnalisarPermissaoInicializacao(valorBruto);
         Assert.False(resultado);
     }
 
@@ -88,19 +88,19 @@ public sealed class TestesValidadorPreMigracao
     [InlineData("False", false)]
     public void AnalisarPermissaoInicializacao_ConverteCorretamenteTextosValidos(string valorBruto, bool esperado)
     {
-        bool resultado = PreValidacaoMigracaoInquilino.AnalisarPermissaoInicializacao(valorBruto);
+        bool resultado = PreflightMigracaoTenant.AnalisarPermissaoInicializacao(valorBruto);
         Assert.Equal(esperado, resultado);
     }
 
     [Fact]
     public void AvaliarEstadoBanco_BancoVazio_RejeitaQuandoNaoAutorizado()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "false");
 
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 0, marcador: null));
+            () => PreflightMigracaoTenant.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 0, marcador: null));
 
         Assert.Contains("não autorizada", excecao.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -108,23 +108,23 @@ public sealed class TestesValidadorPreMigracao
     [Fact]
     public void AvaliarEstadoBanco_BancoVazio_PermiteQuandoAutorizado()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "true");
 
-        PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 0, marcador: null);
+        PreflightMigracaoTenant.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 0, marcador: null);
     }
 
     [Fact]
     public void AvaliarEstadoBanco_BancoExistente_RejeitaQuandoSemTabelaMarcador()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "true");
 
         // Tabelas existentes mas sem a tabela de marcador
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(
+            () => PreflightMigracaoTenant.AvaliarEstadoBanco(
                 opcoes,
                 totalTabelasUsuario: 5,
                 marcador: new MarcadorBancoExistente(TabelaExiste: false, LinhaExiste: false, Guid.Empty, Guid.Empty)));
@@ -135,12 +135,12 @@ public sealed class TestesValidadorPreMigracao
     [Fact]
     public void AvaliarEstadoBanco_BancoExistente_RejeitaQuandoLinhaDoMarcadorAusente()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "true");
 
         InvalidOperationException excecao = Assert.Throws<InvalidOperationException>(
-            () => PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(
+            () => PreflightMigracaoTenant.AvaliarEstadoBanco(
                 opcoes,
                 totalTabelasUsuario: 5,
                 marcador: new MarcadorBancoExistente(TabelaExiste: true, LinhaExiste: false, Guid.Empty, Guid.Empty)));
@@ -149,69 +149,69 @@ public sealed class TestesValidadorPreMigracao
     }
 
     [Fact]
-    public void AvaliarEstadoBanco_BancoExistente_RejeitaQuandoMarcadorDivergeDoInquilino()
+    public void AvaliarEstadoBanco_BancoExistente_RejeitaQuandoMarcadorDivergeDoTenant()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "true");
 
         MarcadorBancoExistente marcadorDivergente = new(
             TabelaExiste: true,
             LinhaExiste: true,
-            IdInquilino: Guid.NewGuid(), // outro inquilino
+            IdTenant: Guid.NewGuid(), // outro tenant
             IdAmbiente: IdAmbienteAlvo);
 
-        Assert.Throws<ExcecaoIsolamentoInquilino>(
-            () => PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorDivergente));
+        Assert.Throws<ExcecaoIsolamentoTenant>(
+            () => PreflightMigracaoTenant.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorDivergente));
     }
 
     [Fact]
     public void AvaliarEstadoBanco_BancoExistente_RejeitaQuandoMarcadorDivergeDoAmbiente()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "true");
 
         MarcadorBancoExistente marcadorDivergente = new(
             TabelaExiste: true,
             LinhaExiste: true,
-            IdInquilino: IdInquilinoAlvo,
+            IdTenant: IdTenantAlvo,
             IdAmbiente: Guid.NewGuid()); // outro ambiente
 
-        Assert.Throws<ExcecaoIsolamentoInquilino>(
-            () => PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorDivergente));
+        Assert.Throws<ExcecaoIsolamentoTenant>(
+            () => PreflightMigracaoTenant.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorDivergente));
     }
 
     [Fact]
     public void AvaliarEstadoBanco_BancoExistente_PermiteQuandoMarcadorConfereMesmoComPermissaoInicializarFalsa()
     {
-        OpcoesPreValidacaoMigracao opcoes = CriarOpcoes(
-            estadoInquilino: EstadoInquilino.Inativo,
+        OpcoesPreflightMigracao opcoes = CriarOpcoes(
+            estadoTenant: EstadoTenant.Inativo,
             permissaoInicializarBruta: "false"); // allowInit é false, mas a base já possui marcador válido
 
         MarcadorBancoExistente marcadorCorrespondente = new(
             TabelaExiste: true,
             LinhaExiste: true,
-            IdInquilino: IdInquilinoAlvo,
+            IdTenant: IdTenantAlvo,
             IdAmbiente: IdAmbienteAlvo);
 
-        PreValidacaoMigracaoInquilino.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorCorrespondente);
+        PreflightMigracaoTenant.AvaliarEstadoBanco(opcoes, totalTabelasUsuario: 5, marcador: marcadorCorrespondente);
     }
 
-    private static OpcoesPreValidacaoMigracao CriarOpcoes(
-        EstadoInquilino estadoInquilino = EstadoInquilino.Inativo,
+    private static OpcoesPreflightMigracao CriarOpcoes(
+        EstadoTenant estadoTenant = EstadoTenant.Inativo,
         string? permissaoInicializarBruta = null,
-        Guid? idInquilinoCli = null,
+        Guid? idTenantCli = null,
         Guid? idAmbienteCli = null)
     {
-        return new OpcoesPreValidacaoMigracao(
+        return new OpcoesPreflightMigracao(
             IdAplicacao: "produto-teste",
             IdAmbiente: IdAmbienteAlvo,
-            IdInquilino: IdInquilinoAlvo,
-            EstadoInquilino: estadoInquilino,
+            IdTenant: IdTenantAlvo,
+            EstadoTenant: estadoTenant,
             StringConexao: StringConexaoValida,
             PermissaoInicializarBancoVazioBruta: permissaoInicializarBruta,
-            IdInquilinoCli: idInquilinoCli,
+            IdTenantCli: idTenantCli,
             IdAmbienteCli: idAmbienteCli);
     }
 }

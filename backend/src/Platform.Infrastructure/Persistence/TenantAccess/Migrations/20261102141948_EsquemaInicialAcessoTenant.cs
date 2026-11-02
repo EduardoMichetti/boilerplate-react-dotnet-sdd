@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations;
 
 /// <inheritdoc />
-public partial class EsquemaInicialAcessoInquilino : Migration
+public partial class EsquemaInicialAcessoTenant : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
@@ -24,7 +24,7 @@ public partial class EsquemaInicialAcessoInquilino : Migration
             columns: table => new
             {
                 IdUnico = table.Column<int>(type: "integer", nullable: false, comment: "Identificador singleton fixado em 1 para garantir linha única."),
-                IdInquilino = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador imutável do inquilino proprietário deste banco de dados."),
+                IdTenant = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador imutável do tenant proprietário deste banco de dados."),
                 IdAmbiente = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador único do ambiente de execução correspondente a esta instalação."),
                 EpocaAcesso = table.Column<Guid>(type: "uuid", nullable: false, comment: "Época de acesso atual utilizada para revogação e invalidação global de sessões."),
                 InicializadoEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, comment: "Data e hora UTC em que o banco de dados da instalação foi inicializado tecnicamente.")
@@ -32,9 +32,9 @@ public partial class EsquemaInicialAcessoInquilino : Migration
             constraints: table =>
             {
                 table.PrimaryKey("PK_identidade_banco", x => x.IdUnico);
-                table.UniqueConstraint("uq_identidade_banco_id_inquilino", x => x.IdInquilino);
+                table.UniqueConstraint("uq_identidade_banco_id_tenant", x => x.IdTenant);
             },
-            comment: "Armazena a identidade singleton do banco de dados para comprovação e isolamento por inquilino.");
+            comment: "Armazena a identidade singleton do banco de dados para comprovação e isolamento por tenant.");
 
         migrationBuilder.CreateTable(
             name: "usuarios",
@@ -42,7 +42,7 @@ public partial class EsquemaInicialAcessoInquilino : Migration
             columns: table => new
             {
                 Id = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador único da conta do usuário (UUID v4)."),
-                IdInquilino = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador imutável do inquilino (tenant) proprietário desta conta."),
+                IdTenant = table.Column<Guid>(type: "uuid", nullable: false, comment: "Identificador imutável do tenant proprietário desta conta."),
                 NomeExibicao = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false, comment: "Nome amigável de exibição do usuário na aplicação."),
                 EstaAtivo = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true, comment: "Indica se o usuário está ativo no sistema e autorizado a acessar."),
                 UserName = table.Column<string>(type: "character varying(254)", maxLength: 254, nullable: true, comment: "Nome de usuário no sistema para propósitos de autenticação."),
@@ -64,14 +64,14 @@ public partial class EsquemaInicialAcessoInquilino : Migration
             {
                 table.PrimaryKey("PK_usuarios", x => x.Id);
                 table.ForeignKey(
-                    name: "FK_usuarios_identidade_banco_IdInquilino",
-                    column: x => x.IdInquilino,
+                    name: "FK_usuarios_identidade_banco_IdTenant",
+                    column: x => x.IdTenant,
                     principalSchema: "foundation",
                     principalTable: "identidade_banco",
-                    principalColumn: "IdInquilino",
+                    principalColumn: "IdTenant",
                     onDelete: ReferentialAction.Restrict);
             },
-            comment: "Armazena os usuários da aplicação vinculados exclusivamente ao inquilino desta instalação.");
+            comment: "Armazena os usuários da aplicação vinculados exclusivamente ao tenant desta instalação.");
 
         migrationBuilder.CreateTable(
             name: "logins_usuario",
@@ -183,10 +183,10 @@ public partial class EsquemaInicialAcessoInquilino : Migration
             unique: true);
 
         migrationBuilder.CreateIndex(
-            name: "ix_usuarios_id_inquilino",
+            name: "ix_usuarios_id_tenant",
             schema: "access",
             table: "usuarios",
-            column: "IdInquilino");
+            column: "IdTenant");
 
         migrationBuilder.CreateIndex(
             name: "UserNameIndex",

@@ -11,9 +11,9 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuarioValido = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
-            Email = "usuario@inquilino.local",
-            UserName = "usuario@inquilino.local",
+            IdTenant = Guid.NewGuid(),
+            Email = "usuario@tenant.local",
+            UserName = "usuario@tenant.local",
             NomeExibicao = "Usuário Válido",
             EstaAtivo = true
         };
@@ -27,8 +27,8 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.Empty,
-            IdInquilino = Guid.NewGuid(),
-            Email = "usuario@inquilino.local",
+            IdTenant = Guid.NewGuid(),
+            Email = "usuario@tenant.local",
             NomeExibicao = "Usuário"
         };
 
@@ -37,18 +37,18 @@ public sealed class TestesModeloAcessoUsuario
     }
 
     [Fact]
-    public void UsuarioAplicacaoRejeitaIdInquilinoVazio()
+    public void UsuarioAplicacaoRejeitaIdTenantVazio()
     {
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.Empty,
-            Email = "usuario@inquilino.local",
+            IdTenant = Guid.Empty,
+            Email = "usuario@tenant.local",
             NomeExibicao = "Usuário"
         };
 
         ArgumentException excecao = Assert.Throws<ArgumentException>(() => usuario.Validar());
-        Assert.Equal("IdInquilino", excecao.ParamName);
+        Assert.Equal("IdTenant", excecao.ParamName);
     }
 
     [Theory]
@@ -59,8 +59,8 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
-            Email = "usuario@inquilino.local",
+            IdTenant = Guid.NewGuid(),
+            Email = "usuario@tenant.local",
             NomeExibicao = nomeExibicao
         };
 
@@ -74,8 +74,8 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
-            Email = "usuario@inquilino.local",
+            IdTenant = Guid.NewGuid(),
+            Email = "usuario@tenant.local",
             NomeExibicao = new string('x', 121)
         };
 
@@ -91,7 +91,7 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
+            IdTenant = Guid.NewGuid(),
             Email = email,
             NomeExibicao = "Usuário"
         };
@@ -106,7 +106,7 @@ public sealed class TestesModeloAcessoUsuario
         UsuarioAplicacao usuario = new()
         {
             Id = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
+            IdTenant = Guid.NewGuid(),
             Email = new string('a', 246) + "@exemplo.com", // 258 caracteres
             NomeExibicao = "Usuário"
         };

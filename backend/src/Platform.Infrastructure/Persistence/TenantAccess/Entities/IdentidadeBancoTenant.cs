@@ -1,9 +1,9 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 /// <summary>
-/// Entidade de registro único (singleton) gravada na base para comprovar e proteger a identidade da instalação e do inquilino.
+/// Entidade de registro único (singleton) gravada na base para comprovar e proteger a identidade da instalação e do tenant.
 /// </summary>
-public sealed class IdentidadeBancoInquilino
+public sealed class IdentidadeBancoTenant
 {
     /// <summary>
     /// Valor fixo da chave primária singleton (sempre igual a 1) para garantir uma única linha de identidade na base.
@@ -16,9 +16,9 @@ public sealed class IdentidadeBancoInquilino
     public int IdUnico { get; set; } = IdUnicoPadrao;
 
     /// <summary>
-    /// Identificador único e imutável do inquilino (tenant) proprietário desta base de dados.
+    /// Identificador único e imutável do tenant proprietário desta base de dados.
     /// </summary>
-    public Guid IdInquilino { get; set; }
+    public Guid IdTenant { get; set; }
 
     /// <summary>
     /// Identificador único e imutável do ambiente operacional (ex.: desenvolvimento, homologação ou produção).
@@ -31,7 +31,7 @@ public sealed class IdentidadeBancoInquilino
     public Guid EpocaAcesso { get; set; }
 
     /// <summary>
-    /// Data e hora em UTC em que a base de dados do inquilino foi inicializada tecnicamente pela migration.
+    /// Data e hora em UTC em que a base de dados do tenant foi inicializada tecnicamente pela migration.
     /// </summary>
     public DateTimeOffset InicializadoEm { get; set; }
 
@@ -45,9 +45,9 @@ public sealed class IdentidadeBancoInquilino
             throw new ArgumentException($"IdUnico deve ser {IdUnicoPadrao}.", nameof(IdUnico));
         }
 
-        if (IdInquilino == Guid.Empty)
+        if (IdTenant == Guid.Empty)
         {
-            throw new ArgumentException("IdInquilino deve ser um UUID não vazio.", nameof(IdInquilino));
+            throw new ArgumentException("IdTenant deve ser um UUID não vazio.", nameof(IdTenant));
         }
 
         if (IdAmbiente == Guid.Empty)

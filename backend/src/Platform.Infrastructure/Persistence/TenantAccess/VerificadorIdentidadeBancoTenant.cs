@@ -6,28 +6,28 @@ using Platform.Domain.Tenancy;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 /// <summary>
-/// Implementação da sonda de identidade do banco de dados do inquilino utilizando o contexto do EF Core.
+/// Implementação do verificador de identidade do banco de dados do tenant utilizando o AcessoTenantDbContext.
 /// </summary>
-public sealed class SondaIdentidadeBancoInquilino(ContextoBancoAcessoInquilino contexto)
-    : ISondaIdentidadeBancoInquilino
+public sealed class VerificadorIdentidadeBancoTenant(AcessoTenantDbContext contexto)
+    : IVerificadorIdentidadeBancoTenant
 {
     /// <inheritdoc />
-    public async Task<InstantaneoIdentidadeBancoInquilino> LerAsync(CancellationToken tokenCancelamento = default)
+    public async Task<IdentidadeBancoTenantSnapshot> LerAsync(CancellationToken tokenCancelamento = default)
     {
-        IdentidadeBancoInquilino? identidade = await contexto.IdentidadeBanco
+        IdentidadeBancoTenant? identidade = await contexto.IdentidadeBanco
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.IdUnico == IdentidadeBancoInquilino.IdUnicoPadrao, tokenCancelamento);
+            .FirstOrDefaultAsync(e => e.IdUnico == IdentidadeBancoTenant.IdUnicoPadrao, tokenCancelamento);
 
         if (identidade is null)
         {
-            throw new ExcecaoIsolamentoInquilino();
+            throw new ExcecaoIsolamentoTenant();
         }
 
         IEnumerable<string> migracoesPendentes = await contexto.Database.GetPendingMigrationsAsync(tokenCancelamento);
         bool possuiVersaoMigracaoEsperada = !migracoesPendentes.Any();
 
-        return new InstantaneoIdentidadeBancoInquilino(
-            identidade.IdInquilino,
+        return new IdentidadeBancoTenantSnapshot(
+            identidade.IdTenant,
             identidade.IdAmbiente,
             identidade.EpocaAcesso,
             possuiVersaoMigracaoEsperada);

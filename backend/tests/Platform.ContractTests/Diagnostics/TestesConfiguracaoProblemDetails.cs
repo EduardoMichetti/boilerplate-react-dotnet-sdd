@@ -55,7 +55,7 @@ public sealed class TestesConfiguracaoProblemDetails
                 case "/falha":
                     throw new InvalidOperationException(segredoPrivado);
                 case "/isolamento":
-                    throw new ExcecaoIsolamentoInquilino();
+                    throw new ExcecaoIsolamentoTenant();
                 case "/configuracao":
                     throw new ExcecaoConfiguracaoInstalacao(["IdAplicacao é obrigatório."]);
                 default:

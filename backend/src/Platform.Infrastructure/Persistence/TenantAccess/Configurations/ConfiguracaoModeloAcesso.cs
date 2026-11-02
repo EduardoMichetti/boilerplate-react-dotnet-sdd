@@ -12,16 +12,16 @@ public sealed class ConfiguracaoUsuarioAplicacao : IEntityTypeConfiguration<Usua
     public void Configure(EntityTypeBuilder<UsuarioAplicacao> construtor)
     {
         construtor.ToTable("usuarios", "access", tabela =>
-            tabela.HasComment("Armazena os usuários da aplicação vinculados exclusivamente ao inquilino desta instalação."));
+            tabela.HasComment("Armazena os usuários da aplicação vinculados exclusivamente ao tenant desta instalação."));
 
         construtor.HasKey(u => u.Id);
         construtor.Property(u => u.Id)
             .ValueGeneratedNever()
             .HasComment("Identificador único da conta do usuário (UUID v4).");
 
-        construtor.Property(u => u.IdInquilino)
+        construtor.Property(u => u.IdTenant)
             .IsRequired()
-            .HasComment("Identificador imutável do inquilino (tenant) proprietário desta conta.");
+            .HasComment("Identificador imutável do tenant proprietário desta conta.");
 
         construtor.Property(u => u.NomeExibicao)
             .IsRequired()
@@ -53,8 +53,8 @@ public sealed class ConfiguracaoUsuarioAplicacao : IEntityTypeConfiguration<Usua
             .IsUnique()
             .HasDatabaseName("ix_usuarios_email_normalizado");
 
-        construtor.HasIndex(u => u.IdInquilino)
-            .HasDatabaseName("ix_usuarios_id_inquilino");
+        construtor.HasIndex(u => u.IdTenant)
+            .HasDatabaseName("ix_usuarios_id_tenant");
 
         construtor.HasMany(u => u.Permissoes)
             .WithOne(p => p.Usuario)

@@ -6,7 +6,7 @@ using Xunit;
 namespace Platform.IntegrationTests.Fixtures;
 
 /// <summary>
-/// Fixture de teste que provisiona um contêiner real de PostgreSQL com dois bancos isolados (Inquilino A e Inquilino B).
+/// Fixture de teste que provisiona um contêiner real de PostgreSQL com dois bancos isolados (Tenant A e Tenant B).
 /// </summary>
 public sealed class FixtureInstalacaoPostgres : IAsyncLifetime
 {
@@ -21,12 +21,12 @@ public sealed class FixtureInstalacaoPostgres : IAsyncLifetime
 
     public FixtureInstalacaoPostgres()
     {
-        InquilinoA = new InstalacaoTestePostgres(_conteiner, "a");
-        InquilinoB = new InstalacaoTestePostgres(_conteiner, "b");
+        TenantA = new InstalacaoTestePostgres(_conteiner, "a");
+        TenantB = new InstalacaoTestePostgres(_conteiner, "b");
     }
 
-    public InstalacaoTestePostgres InquilinoA { get; }
-    public InstalacaoTestePostgres InquilinoB { get; }
+    public InstalacaoTestePostgres TenantA { get; }
+    public InstalacaoTestePostgres TenantB { get; }
 
     public async ValueTask InitializeAsync()
     {
@@ -35,7 +35,7 @@ public sealed class FixtureInstalacaoPostgres : IAsyncLifetime
         await using NpgsqlConnection admin = new(_conteiner.GetConnectionString());
         await admin.OpenAsync(tokenCancelamento);
 
-        foreach (InstalacaoTestePostgres instalacao in new[] { InquilinoA, InquilinoB })
+        foreach (InstalacaoTestePostgres instalacao in new[] { TenantA, TenantB })
         {
             await instalacao.ProvisionarAsync(admin, tokenCancelamento);
         }
@@ -48,7 +48,7 @@ public sealed class FixtureInstalacaoPostgres : IAsyncLifetime
 }
 
 /// <summary>
-/// Representa a infraestrutura de banco de dados e credenciais provisionada para um inquilino de teste.
+/// Representa a infraestrutura de banco de dados e credenciais provisionada para um tenant de teste.
 /// </summary>
 public sealed class InstalacaoTestePostgres
 {
@@ -65,7 +65,7 @@ public sealed class InstalacaoTestePostgres
         PapelExecucao = $"execucao_{rotulo}_{sufixo}";
     }
 
-    public Guid IdInquilino { get; } = Guid.NewGuid();
+    public Guid IdTenant { get; } = Guid.NewGuid();
     public Guid IdAmbiente { get; } = Guid.NewGuid();
     public string NomeBancoDados { get; }
     public string PapelProprietario { get; }

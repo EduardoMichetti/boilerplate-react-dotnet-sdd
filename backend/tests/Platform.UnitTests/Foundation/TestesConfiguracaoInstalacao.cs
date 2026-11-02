@@ -7,9 +7,9 @@ namespace Platform.UnitTests.Foundation;
 public sealed class TestesConfiguracaoInstalacao
 {
     [Theory]
-    [InlineData(EstadoInquilino.Inativo)]
-    [InlineData(EstadoInquilino.Ativo)]
-    public void ConfiguracaoValidaAceitaAmbosOsEstadosOperacionais(EstadoInquilino estado)
+    [InlineData(EstadoTenant.Inativo)]
+    [InlineData(EstadoTenant.Ativo)]
+    public void ConfiguracaoValidaAceitaAmbosOsEstadosOperacionais(EstadoTenant estado)
     {
         CriarOpcoes(estado: estado).Validar();
     }
@@ -18,7 +18,7 @@ public sealed class TestesConfiguracaoInstalacao
     public void ConfiguracaoAusenteReportaTodosOsCamposObrigatoriosSemVazarValores()
     {
         ExcecaoConfiguracaoInstalacao excecao =
-            Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => new OpcoesInquilinoInstalacao().Validar());
+            Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => new OpcoesInstalacaoTenant().Validar());
 
         Assert.Equal(6, excecao.Erros.Count);
         Assert.Contains(excecao.Erros, erro => erro.Contains("IdAplicacao", StringComparison.Ordinal));
@@ -45,7 +45,7 @@ public sealed class TestesConfiguracaoInstalacao
     [InlineData(100, 121, false)]
     public void ComprimentoDeTextosRespeitaLimitesDeclarados(int tamanhoAplicacao, int tamanhoExibicao, bool valido)
     {
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoes(
+        OpcoesInstalacaoTenant opcoes = CriarOpcoes(
             idAplicacao: new string('a', tamanhoAplicacao),
             nomeExibicao: new string('b', tamanhoExibicao));
 
@@ -62,11 +62,11 @@ public sealed class TestesConfiguracaoInstalacao
     [Fact]
     public void IdentificadoresVaziosEEstadoDesconhecidoSaoRejeitados()
     {
-        OpcoesInquilinoInstalacao opcoes = new()
+        OpcoesInstalacaoTenant opcoes = new()
         {
             IdAplicacao = "produto-teste",
-            NomeExibicaoInquilino = "Instalação sintética",
-            EstadoInquilino = (EstadoInquilino)42,
+            NomeExibicaoTenant = "Instalação sintética",
+            EstadoTenant = (EstadoTenant)42,
             StringsConexao = new() { BancoApp = "Host=localhost;Database=sintetico;Username=sintetico" }
         };
 
@@ -79,7 +79,7 @@ public sealed class TestesConfiguracaoInstalacao
     public void StringConexaoMalFormatadaNaoApareceNosDiagnosticos()
     {
         const string valorPrivado = "segredo-privado-sintetico";
-        OpcoesInquilinoInstalacao opcoes = CriarOpcoes(
+        OpcoesInstalacaoTenant opcoes = CriarOpcoes(
             stringConexao: $"******;malformada");
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(opcoes.Validar);
@@ -88,8 +88,8 @@ public sealed class TestesConfiguracaoInstalacao
         Assert.All(excecao.Erros, erro => Assert.DoesNotContain(valorPrivado, erro, StringComparison.Ordinal));
     }
 
-    private static OpcoesInquilinoInstalacao CriarOpcoes(
-        EstadoInquilino estado = EstadoInquilino.Ativo,
+    private static OpcoesInstalacaoTenant CriarOpcoes(
+        EstadoTenant estado = EstadoTenant.Ativo,
         string idAplicacao = "produto-teste",
         string nomeExibicao = "Instalação sintética",
         string stringConexao = "Host=localhost;Database=sintetico;Username=sintetico")
@@ -98,9 +98,9 @@ public sealed class TestesConfiguracaoInstalacao
         {
             IdAplicacao = idAplicacao,
             IdAmbiente = Guid.NewGuid(),
-            IdInquilino = Guid.NewGuid(),
-            NomeExibicaoInquilino = nomeExibicao,
-            EstadoInquilino = estado,
+            IdTenant = Guid.NewGuid(),
+            NomeExibicaoTenant = nomeExibicao,
+            EstadoTenant = estado,
             StringsConexao = new() { BancoApp = stringConexao }
         };
     }
