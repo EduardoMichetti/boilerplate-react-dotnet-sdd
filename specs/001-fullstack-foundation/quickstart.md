@@ -108,14 +108,17 @@ Serviço pontual `migrations` tem working directory na pasta `backend/src` da im
 Linux e EF local restaurado; nomes de pastas abaixo não dependem do separador do host.
 
 ```powershell
-docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantA --environment-id $environmentA
-docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context TenantAccessDbContext -- --tenant-id $tenantB --environment-id $environmentB
+docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantA --environment-id $environmentA
+docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantB --environment-id $environmentB
 ```
 
 Cada comando usa a conexão e o owner do arquivo correspondente. Os argumentos de
-identidade apenas confirmam o alvo: não escolhem outro banco. Após inicializar, remover
-`Migrations__AllowInitializeEmptyDatabase` ou voltar a `false` em ambos os arquivos;
-marcador correto permite reaplicação sem essa autorização.
+identidade apenas confirmam o alvo: não escolhem outro banco.
+
+> **Observação sobre o log na primeira execução:**  
+> Ao inicializar um banco vazio, o log apresentará uma mensagem `Failed executing DbCommand (...) SELECT ... FROM foundation."__EFMigrationsHistory"`. Isso é esperado porque a tabela de histórico ainda não existe; o EF Core trata essa exceção internamente, cria a tabela e aplica a migração com sucesso (`Applying migration... Done.`).
+
+Após inicializar, remover `Migrations__AllowInitializeEmptyDatabase` ou voltar a `false` em ambos os arquivos e alterar `EstadoTenant=Ativo`; marcador correto permite reaplicação sem autorização de banco vazio.
 
 Para executar EF nativamente no Windows, usar `Push-Location .\backend\src`, os
 mesmos nomes de projetos e configuração privada de tooling, retornando depois

@@ -79,16 +79,32 @@ docker compose --project-name boilerplate-a -f infra/compose.yaml --env-file inf
 ```
 
 ### Passo 3: Executar a primeira migration (Inicialização do Banco)
-1. Edite `infra/.env.local` e defina temporariamente:
-   - `TenantState=Inactive`
-   - `Migrations__AllowInitializeEmptyDatabase=true`
+
+> **⚠️ Ponto de Atenção Obrigatório:**  
+> Por segurança arquitetural contra corrupção e concorrência, o preflight rejeita DDL se a instalação estiver ativa ou se a inicialização de banco vazio não for aprovada.
+
+1. No arquivo `infra/.env.local`, verifique se estão configuradas as variáveis de janela de manutenção:
+   - `EstadoTenant=Inativo`
+   - `Migracoes__PermitirInicializarBancoVazio=true`
 2. Execute o serviço pontual de migração:
    ```powershell
-   docker compose --project-name boilerplate-a -f infra/compose.yaml --env-file infra/.env.local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context ContextoBancoAcessoInquilino -- --tenant-id aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa --environment-id 11111111-1111-4111-8111-111111111111
+   docker compose --project-name boilerplate-a -f infra/compose.yaml --env-file infra/.env.local --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa --environment-id 11111111-1111-4111-8111-111111111111
    ```
-3. Retorne `Migrations__AllowInitializeEmptyDatabase=false` e altere `TenantState=Active`.
+   > **ℹ️ Observação sobre o log de inicialização:**  
+   > Na **primeira execução**, é esperado ver uma mensagem `Failed executing DbCommand (...) SELECT ... FROM foundation."__EFMigrationsHistory"`. Isso ocorre porque o banco é novo e a tabela de histórico de migrations ainda não existia. O EF Core captura isso internamente, cria a tabela e aplica as migrations com sucesso até o log final `Done.`.
+3. Conclua a janela de manutenção alterando em `infra/.env.local`:
+   - `EstadoTenant=Ativo` (libera a API para requisições)
+   - `Migracoes__PermitirInicializarBancoVazio=false` (trava o banco contra reinicializações acidentais)
 
-### Passo 4: Subir a API do Cliente A
+### Passo 4: Subir a API
+
+Você pode escolher a forma de execução:
+
+#### Opção A: Pelo VS Code (Depuração com F5)
+1. Pressione `F5` ou abra **Run and Debug** (`Ctrl+Shift+D`) e execute o perfil **`C#: App.Api (Host Local)`**.
+2. A API rodará no host conectando-se ao PostgreSQL na porta mapeada `5432`.
+
+#### Opção B: Pelo Docker Compose
 ```powershell
 docker compose --project-name boilerplate-a -f infra/compose.yaml --env-file infra/.env.local up -d api
 ```
@@ -103,6 +119,9 @@ curl http://localhost:8080/health/ready
 
 # Contrato OpenAPI exposto em I1
 curl http://localhost:8080/openapi/v1.json
+
+# Rota futura de autenticação (retorna 404 seguro em RFC 7807)
+curl -X POST http://localhost:8080/api/v1/auth/login
 ```
 
 ---
