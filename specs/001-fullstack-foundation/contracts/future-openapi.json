@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "boilerplate-react-dotnet-sdd - L2 Tenant Access API (planned)",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta de 30 minutos, CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
   },
   "x-increment": "I2",
@@ -323,6 +323,7 @@
           "instance": { "type": "string", "maxLength": 1000 },
           "code": {
             "type": "string",
+            "description": "Catálogo de plataforma (ADR 0003): estável, nunca reaproveitado nem com significado alterado. As rotas deste contrato emitem somente estes valores. Módulos de negócio estendem com códigos <MODULO>_<REGRA> em português, padrão ^[A-Z][A-Z0-9_]+$, declarados no próprio contrato com status 403/404/409/422.",
             "enum": [
               "INPUT_INVALID",
               "CSRF_INVALID",
@@ -341,6 +342,7 @@
           "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
           "errors": {
             "type": "object",
+            "description": "Somente em 400 INPUT_INVALID. Chave: caminho do campo com nomes JSON em camelCase, sem prefixo $. (ex.: tarefas[0].emailResponsavel), tanto para desserialização quanto para validação. Mensagens em pt-BR, sem ecoar o valor recebido.",
             "additionalProperties": { "type": "array", "items": { "type": "string" } }
           }
         }
@@ -360,7 +362,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "400: INPUT_INVALID, TENANT_REQUIRED ou CSRF_INVALID; entrada rejeitada antes de efeitos.",
+        "description": "400: INPUT_INVALID, TENANT_REQUIRED ou CSRF_INVALID; entrada rejeitada antes de efeitos. INPUT_INVALID cobre JSON malformado, campo desconhecido, tipo incompatível, nulo em campo obrigatório e regra de validação, com errors por campo e sem ecoar valores (ADR 0003).",
         "headers": { "Cache-Control": { "$ref": "#/components/headers/NoStore" } },
         "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
       },

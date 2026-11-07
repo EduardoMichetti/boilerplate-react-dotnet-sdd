@@ -1,19 +1,19 @@
 <!--
 Sync Impact Report
-- Alteração de versão: 2.1.0 -> 2.2.0 (MINOR: ampliação material de obrigações).
-- Princípio modificado: IX. Manutenibilidade e Padrão de Nomenclatura.
-  Acrescentadas regras de Id como chave técnica (UUID v7, nunca código de negócio,
-  `Codigo*`/`Numero*` separados, exceção de catálogo declarado no código), de
-  nomes no banco (PK `Id<Entidade>`, FK `FkId<Entidade>[Papel]`, colunas PascalCase,
-  constraints `pk_/fk_/ix_/uq_/ck_` minúsculas) e de padrão único de data/hora
-  (`DateTimeOffset` UTC, `timestamptz`, microssegundos, `TimeProvider`, sem relógio
-  do banco). Verificação ampliada com testes de modelo e de arquitetura.
+- Alteração de versão: 2.2.0 -> 2.3.0 (MINOR: ampliação material de obrigações).
+- Princípio modificado: V. API REST e contratos documentados.
+  Acrescentadas obrigações de tratamento de falhas por categoria (entrada malformada,
+  regra de negócio por resultado explícito, falha inesperada por exceção centralizada),
+  estabilidade e unicidade de códigos de erro publicados, desserialização estrita com
+  exceção isolada para payloads de terceiros e mensagens sem valores sensíveis.
+  Verificação ampliada com testes de contrato e de arquitetura correspondentes.
 - Seções adicionadas/removidas: nenhuma.
-- Impacto em artefatos: specs/001-fullstack-foundation (spec, plan, data-model,
-  research, quickstart, contratos) e ADR 0002 atualizados no mesmo conjunto. Projeto
-  em construção do zero: o esquema nasce de uma migration inicial única já com as
-  novas convenções; a configuração passa a usar `CodigoAplicacao`.
-- Pendências: aprovação explícita do mantenedor no pull request (Governance).
+- Impacto em artefatos: ADR 0003 (mecanismos concretos: FluentValidation,
+  `Resultado<T>`, códigos `<MODULO>_<REGRA>`, 400/409/422, JSON estrito);
+  specs/001-fullstack-foundation (plan.md bloco P1c, research D08, contrato futuro e
+  operations.md). Código I1 existente não viola as novas regras; implementação no L2.
+- Pendências: aprovação explícita do mantenedor no pull request (Governance) e
+  aprovação da dependência FluentValidation (Princípio X).
 - Escopo de sincronização: templates e comandos do Spec Kit consultam esta
   Constituição em tempo de execução e não foram modificados.
 - Este relatório é material temporário de revisão, não uma regra de governança;
@@ -129,11 +129,24 @@ não melhoria futura.
   ou tipo estável e identificador de correlação quando aplicável.
 - Erros e logs NÃO DEVEM expor secrets, strings de conexão, stack traces em produção
   ou dados de outros tenants. Falhas NÃO DEVEM ser convertidas em sucesso aparente.
+- Falhas DEVEM ser tratadas por categoria: entrada malformada é rejeitada antes de uso
+  com erro por campo; regra de negócio esperada é comunicada por resultado explícito na
+  assinatura do caso de uso; falha inesperada ou de infraestrutura é exceção tratada de
+  forma centralizada. Falha interna NÃO DEVE ser catalogada como erro de negócio.
+- Códigos de erro publicados DEVEM ser estáveis: NÃO DEVEM mudar de significado nem ser
+  reaproveitados, e DEVEM ser únicos e declarados uma única vez no código-fonte.
+- A desserialização de entrada DEVE ser estrita: campos desconhecidos, tipos
+  incompatíveis e nulos em campos obrigatórios DEVEM ser rejeitados. Exceção somente
+  para payloads de terceiros não controlados, isolada e verificável.
+- Mensagens de erro NÃO DEVEM interpolar valores de entrada sensíveis; o campo
+  afetado identifica a origem.
 - Mudanças incompatíveis DEVEM declarar consumidores afetados e estratégia de
   versionamento ou migração antes da publicação.
 
 **Verificação:** testes de contrato ou integração DEVEM conferir respostas válidas,
-entradas inválidas, autenticação, autorização e formato de erro; OpenAPI DEVE ser
+entradas inválidas, autenticação, autorização e formato de erro, incluindo rejeição
+de campos desconhecidos e ausência de valores de entrada ecoados; testes de
+arquitetura DEVEM verificar unicidade e padrão dos códigos de erro; OpenAPI DEVE ser
 atualizado no mesmo conjunto de alterações do contrato.
 
 ### VI. Segurança e menor privilégio
@@ -366,4 +379,4 @@ DEVEM permanecer como requisitos explícitos para a liberação correspondente.
   Sua atualização NÃO DEVE modificar esses artefatos nem executar intenções de
   implementação ou deploy sem solicitação própria.
 
-**Version**: 2.2.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-11-06
+**Version**: 2.3.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-11-07

@@ -242,6 +242,9 @@ Rejeitadas por privilégio excessivo e ausência de autenticação real do opera
 **Decision**: OpenAPI 3.0.3 em JSON, endpoints futuros versionados `/api/v1`, Problem Details
 com `code` e `traceId`, respostas sem redirecionar a páginas HTML.
 Sucesso documentado significa resultado real; indisponibilidade não retorna lista vazia.
+Categorias de falha, validação de entrada (FluentValidation), `Resultado<T>`, códigos
+`<MODULO>_<REGRA>`, status 400/409/422 e JSON estrito estão detalhados em
+[ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md).
 
 `openapi.json` descreve somente health checks I1. `future-openapi.json` documenta
 I2, não autoriza expor essas rotas em I1. Retirar `/me/tenants`; `/me` consulta

@@ -200,6 +200,10 @@ reavaliar o limite em memória, não acrescentar Redis preventivamente.
 
 Usar Problem Details existente com type/title/status/code e traceId hexadecimal de
 32 caracteres; sem redirect HTML, secrets, stack, senha/hash ou cookie.
+INPUT_INVALID inclui `errors` por campo (chaves camelCase sem `$.`) para JSON
+malformado, campo desconhecido, tipo incompatível e regra de validação, sem ecoar
+valores. As rotas L2 não emitem 422 nem códigos de módulo; categorias, catálogo e
+mecanismos em [ADR 0003](../../../docs/adr/0003-tratamento-de-erros-e-validacao.md).
 Respostas de acesso, antiforgery e respectivos erros: `Cache-Control: no-store`.
 Falha ao persistir revogação não apaga cookie nem confirma saída; 503 seguro.
 

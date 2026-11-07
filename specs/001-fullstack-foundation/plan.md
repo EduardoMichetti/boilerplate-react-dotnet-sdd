@@ -41,7 +41,10 @@ Não confundir SDK-base com a versão efetivamente selecionada no ambiente; regi
 OpenAPI nativo, Cookies, Antiforgery, Data Protection e Rate Limiting do framework.
 Identity continua com `IdentityUserContext<UsuarioAplicacao, Guid>` e concessões
 diretas; sem RoleManager, Redis, JWT, mediator, biblioteca de CLI ou provedor externo.
-Não há atualização de versões nem instalação de pacotes neste plano.
+Única dependência nova: `FluentValidation` e `FluentValidation.DependencyInjectionExtensions`
+`12.2.0` (Apache-2.0, `net8.0`+), para validação de entrada HTTP conforme
+[ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md); aprovação na
+revisão exigida pela Constituição X. Não há atualização das versões existentes.
 
 **Storage**: PostgreSQL `18.6`, banco exclusivo da instalação.
 `AcessoTenantDbContext` tem **uma** migration inicial com marcador, contas,
@@ -98,12 +101,12 @@ PASS refere-se ao **desenho**, nunca a execução ou liberação já comprovadas
 | II. Contratos explícitos | PASS | PASS | APIs de identidade e contexto sem acesso a módulos/DbContexts externos. |
 | III. Stack | PASS | PASS | Stack/pins existentes; mecanismos nativos; sem frontend nesta entrega. |
 | IV. Isolamento | PASS | PASS | Instalação fixa, marcador antes de dados de acesso, chave/cookie/sessão tenant-local, testes A/B. |
-| V. API | PASS | PASS | Contrato atual preservado; alvo L2 separado; Problem Details e nenhuma resposta HTML de autenticação. |
+| V. API | PASS | PASS | Contrato atual preservado; alvo L2 separado; Problem Details e nenhuma resposta HTML de autenticação. Categorias de falha, códigos estáveis e JSON estrito conforme ADR 0003 (bloco P1c). |
 | VI. Segurança | PASS condicionado a P0 | PASS condicionado a P0 | Runtime sem owner/DDL, cookies+CSRF, autorização a cada operação, sessão revogável e tooling separado. |
 | VII. Qualidade | PASS | PASS | Migration inicial única (banco novo, reaplicação, histórico desconhecido rejeitado); não há versão anterior publicada a atualizar. PostgreSQL real, revogação/concorrência e gates do backend. |
 | VIII. Infraestrutura | PASS condicionado a P0 | PASS condicionado a P0 | Compose local restrito, key ring privado persistente; HTTPS antes de acesso não local. Produção continua L4. |
 | IX. Manutenibilidade | PASS | PASS | Mecanismos nativos e ADR 0002; sem abstrações genéricas. Regras 2.2.0 de Id, FK, nomes de constraints e data/hora com exceções registradas e testes de modelo/arquitetura. |
-| X. Evolução | PASS | PASS | Construção do zero explicitada (nada publicado, sem dados); login só liberado com todos os controles; L3/L4 preservadas. A partir da primeira publicação, mudanças de esquema passam a ser aditivas. |
+| X. Evolução | PASS | PASS | FluentValidation é a única dependência nova, justificada na ADR 0003 (alternativa nativa `AddValidation()` avaliada). Construção do zero explicitada (nada publicado, sem dados); login só liberado com todos os controles; L3/L4 preservadas. A partir da primeira publicação, mudanças de esquema passam a ser aditivas. |
 
 ### P0 — pré-requisitos bloqueantes, sem exceção constitucional
 
@@ -231,7 +234,8 @@ as transições de store serão verificadas na implementação com o runtime uti
 
 ### Pipeline HTTP e autorização
 
-1. Tratar erros/correlação com o mecanismo existente; aceitar forwarded headers
+1. Tratar erros/correlação com o mecanismo existente, ampliado conforme
+   [Tratamento de erros e validação](#tratamento-de-erros-e-validação); aceitar forwarded headers
    somente de proxies explicitamente confiáveis. Limiter usa IP efetivo, não header livre.
 2. Separar health/OpenAPI/rotas não mapeadas do fluxo de sessão. `AllowAnonymous`
    sozinho não impede autenticação automática. Health ignora cookies e header tenant;
@@ -266,6 +270,31 @@ Após reativar, só sessões ainda válidas/não revogadas podem retomar;
 os 30 minutos continuam contando, sem reiniciar ou pausar.
 Marcador divergente ou dependência indisponível: 503 seguro; nunca tentar outro alvo.
 A ordem detalhada e os códigos constam em [operations.md](contracts/operations.md).
+
+### Tratamento de erros e validação
+
+Decisões em [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md);
+aplicam-se às rotas L2 e a todo módulo futuro.
+
+1. Três categorias de falha: entrada malformada (400 `INPUT_INVALID` + `errors`),
+   regra de negócio esperada (`Resultado`/`Resultado<T>` → 403/404/409/422) e falha
+   inesperada (exceção `Excecao*` → `ManipuladorExcecaoSeguro` → 500/503).
+2. `Erro`, `TipoErro`, `Resultado` e `Resultado<T>` em `Platform.Domain/Resultados`,
+   sem dependências. Catálogo por módulo `Erros<Modulo>`; o `TipoErro` define o status.
+3. JSON estrito: `UnmappedMemberHandling.Disallow`, `RespectNullableAnnotations`,
+   `RespectRequiredConstructorParameters` e `RouteHandlerOptions.ThrowOnBadRequest = true`
+   em todos os ambientes; `BadHttpRequestException` vira 400 sem ecoar valor nem
+   mensagem original. `JsonUnmappedMemberHandling.Skip` só em `*.Integracoes.*`.
+4. FluentValidation para DTOs `Requisicao*` em `Platform.Application`, aplicado por
+   filtro no grupo `/api/v1`; sem banco, relógio ou regras assíncronas.
+   Chaves de `errors` em camelCase sem `$.` (ex.: `tarefas[0].emailResponsavel`).
+5. `ConfiguracaoProblemDetails` ganha fábricas para 400 (validação/desserialização),
+   403, 404, 409 e 422. As rotas L2 continuam emitindo apenas os códigos de
+   plataforma de [operations.md](contracts/operations.md); 422 e códigos
+   `<MODULO>_<REGRA>` ficam disponíveis para módulos de negócio.
+6. Login/logout validam seus DTOs pela mesma via, sempre antes de qualquer lookup
+   de conta; a posição relativa ao limiter e ao `X-Tenant-Id` segue a ordem de
+   validação de [operations.md §4](contracts/operations.md#ordem-de-validação).
 
 ### Sessão e proteção
 
@@ -347,7 +376,8 @@ esses critérios futuros concluídos.
 | P0 — configuração/segredos/privilégios | L1 | Runtime/operador/owner distintos, bancos isolados e modo local/HTTPS explícito. |
 | P1a — fundações de modelo | P0 | `InstanteUtc`, `IdentificadorV7`, `TimeProvider` registrado, `IContextoOperacao`, `EntidadeAuditavel`/`IEntidadeAuditavel`/`IEntidadeVersionada`, `InterceptadorAuditoria` com token por entidade; código existente alinhado ao modelo (sem `DateTimeOffset.UtcNow` em `PermissaoUsuario`/preflight, validação de offset, sem `ConcedidaEm`, concessão sem `Versao`, FKs `FkIdUsuario`/`FkIdTenant`, colunas Identity e auxiliares mapeadas, PKs `Guid` com `ValueGeneratedNever`, `CodigoAplicacao` em código/env/Compose/testes); convenção central de nomes de constraints; testes de arquitetura (relógio, `Guid.NewGuid`/`CreateVersion7()` sem argumento, `ExecuteUpdate`) e de modelo (PK `Id*`, FK `FkId*`, UUID v7 com timestamp do relógio de teste, exceções em lista fechada, nomes de constraints ≤63, catálogo `CodigosPermissao`). |
 | P1b — migration | P1a | Migration de rascunho descartada; migration inicial única gerada do modelo completo; bancos A/B criados do zero; SC-009 e rejeição de histórico desconhecido. |
-| P2 — sessão e controles HTTP | P1 | Cookies/store, CSRF, limiter, autorização e saúde isolada. |
+| P1c — erros e validação (ADR 0003) | P0 | `Resultado`/`Resultado<T>`/`Erro` no Domain; `ConfiguracaoProblemDetails` com 400/403/404/409/422; JSON estrito com `ThrowOnBadRequest`; FluentValidation com filtro no grupo `/api/v1`; testes de contrato (formato, chaves camelCase, nenhum valor ecoado) e de arquitetura (validador por `Requisicao*`, validador sem I/O, padrão/unicidade de códigos, `Skip` só em `*.Integracoes.*`). Pode evoluir em paralelo com P1a/P1b. |
+| P2 — sessão e controles HTTP | P1, P1c | Cookies/store, CSRF, limiter, autorização e saúde isolada. |
 | P3 — operação restrita | P1 | Casos de uso autorizados/auditáveis sem endpoint administrativo. Pode evoluir em paralelo com P2. |
 | P4 — contratos e aceite | P2 e P3 | SC-002/003/005, regressões da base (SC-009), CI/documentação e consumidor independente. |
 
