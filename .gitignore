@@ -33,3 +33,6 @@ keyrings/
 Thumbs.db
 *.tmp
 *.swp
+
+# Cache do spec-kit CLI
+.specify/integrations/.cache/
