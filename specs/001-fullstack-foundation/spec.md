@@ -38,6 +38,9 @@ Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
 
 - Q: Se um novo login falhar ao salvar a nova sessão, a sessão anterior desse navegador deve continuar válida? → A: Sim. A troca é atômica: encerramento da sessão anterior e criação da nova são confirmados juntos. Falha preserva o estado e o prazo anteriores, sem desfazer bloqueios ou revogações concorrentes e sem confirmar novo acesso.
 - Q: Quando dois logins simultâneos tentarem substituir a mesma sessão do navegador, apenas um deve conseguir concluir a troca? → A: Sim. Apenas uma substituição conclui; a tentativa concorrente retorna erro explícito sem criar sessão adicional. Nova tentativa exige o contexto atual, sem limitar sessões independentes em outros dispositivos.
+- Q: Na L2, "alteração de senha" significa só a redefinição por operador autorizado ou também troca pelo próprio usuário via API? → A: Somente redefinição por operador (reset restrito que encerra todas as sessões da conta). Troca pelo próprio usuário fica para L3 ou posterior; recuperação por email/token não faz parte da feature sem novo plano.
+- Q: A sessão deve durar no máximo 30 minutos desde o login, sem renovação por atividade? → A: Sim, como padrão da fundação: prazo absoluto de 30 minutos contado da criação, sem sliding, remember-me ou refresh. O valor é configurável por produto derivado dentro de um limite máximo definido no plano; valor ausente usa o padrão e valor fora do limite impede a inicialização.
+- Q: Registros de sessões expiradas ou revogadas devem ser removidos automaticamente na L2? → A: Opção B. A revogação remove o ticket protegido; sessões vencidas ou revogadas há mais de N dias (retenção configurável, definida no plano) são removidas por comando operacional restrito e auditado, sem job em background na API. Agendamento externo fica para L4.
 
 ### Session 2026-11-06
 
@@ -391,6 +394,9 @@ publicação e restauração usando duas empresas e informações sintéticas.
   identidade, credenciais, sessões ou permissões das contas de B.
 - Fim de bloqueio temporário por tentativas inválidas: não reativar sessões anteriores;
   exigir novo login depois de invalidá-las quando o bloqueio for confirmado.
+- Limpeza de sessões concorrente com login, logout ou renovação: remover somente
+  sessões já expiradas ou revogadas além da retenção; sessão válida nunca é removida
+  e falha na limpeza não altera sessões nem é apresentada como concluída.
 - Restauração de A: incluir seus dados de acesso, invalidar sessões anteriores e
   revisar permissões recuperadas antes da liberação, sem restaurar ou alterar contas de B.
 - Empresa indicada no login: resolver e validar o alvo antes de verificar suas
@@ -477,6 +483,10 @@ publicação e restauração usando duas empresas e informações sintéticas.
   identidade, contexto ou dados; confirmação exige revogação persistida.
   Bloqueio da conta por tentativas inválidas DEVE invalidar todas as suas sessões
   existentes. O fim do bloqueio NÃO DEVE reativá-las; novo acesso exige novo login.
+  A sessão DEVE expirar em prazo absoluto contado da sua criação, padrão de 30 minutos,
+  sem renovação por atividade, remember-me ou refresh. Produtos derivados PODEM
+  configurar esse prazo dentro de um limite máximo definido no plano; valor fora
+  do limite DEVE impedir a inicialização com diagnóstico seguro (FR-003).
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
   operações de uso de uma empresa também DEVEM validar vínculo ativo. Administração
   técnica da própria instalação e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
@@ -583,6 +593,13 @@ publicação e restauração usando duas empresas e informações sintéticas.
   inclui aplicar essa base ao marcador ou às tabelas auxiliares de identidade.
   A operação NÃO DEVE modificar contas ou permissões de outro tenant, mesmo
   com email igual. Não é exigida tela administrativa nem autocadastro público.
+  Na L2, alteração e recuperação de senha ocorrem somente por esse reset restrito,
+  que encerra todas as sessões da conta; troca de senha pelo próprio usuário fica
+  para L3 ou posterior, e recuperação por email/token exige novo plano.
+  O procedimento restrito DEVE também remover sessões expiradas ou revogadas há
+  mais que a retenção configurada, com auditoria e sem afetar sessões válidas;
+  a API NÃO DEVE executar essa remoção em segundo plano. Revogação DEVE descartar
+  o ticket protegido da sessão; registro expirado nunca autoriza uso.
 - **FR-034**: O primeiro incremento DEVE entregar backend iniciado e executável,
   modelo persistível de usuários e acessos e migration versionada para criar sua
   estrutura na fonte de dados de cada tenant. DEVEM existir instruções para aplicar
@@ -688,6 +705,8 @@ promessas de capacidade para todos os produtos derivados.
   revogar a sessão sem liberar consultas ou dados dessa empresa.
   Após bloqueio da conta por tentativas inválidas e término desse bloqueio, zero
   sessões anteriores voltam a autorizar operações; somente novo login permite acesso.
+  Com o prazo padrão, sessão usada continuamente é negada a partir de 30 minutos
+  após sua criação; uso durante o prazo não o estende.
   Com duas sessões simultâneas da mesma conta, logout em uma DEVE preservar a outra;
   reset, desativação, bloqueio ou revogação operacional DEVEM invalidar ambas.
   Falha na troca de sessão em novo login DEVE confirmar zero novas sessões e
