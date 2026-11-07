@@ -23,7 +23,33 @@ Essa separação não adia os controles constitucionais aplicáveis ao backend:
 execução local por Docker Compose, testes de persistência/isolamento e checks mínimos
 de integração continuam obrigatórios.
 
+**Recorte vigente L2/I2**: planejamento sobre a L1/I1 entregue, sem reabrir seu
+histórico. L2 cobre entrada/saída HTTP, sessões revogáveis locais, consulta da
+própria identidade/contexto e manutenção restrita de contas/permissões com
+auditoria. Não inclui frontend, painel, módulo de negócio ou publicação real.
+SC-002/SC-003/SC-005 definem o aceite funcional da L2; SC-006/SC-008 acompanham
+os controles aplicáveis, e SC-009 permanece regressão da base, aplicada à migration
+inicial única do modelo completo (construção do zero, sem dados a preservar).
+Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
+
 ## Clarifications
+
+### Session 2026-11-07
+
+- Q: Se um novo login falhar ao salvar a nova sessão, a sessão anterior desse navegador deve continuar válida? → A: Sim. A troca é atômica: encerramento da sessão anterior e criação da nova são confirmados juntos. Falha preserva o estado e o prazo anteriores, sem desfazer bloqueios ou revogações concorrentes e sem confirmar novo acesso.
+- Q: Quando dois logins simultâneos tentarem substituir a mesma sessão do navegador, apenas um deve conseguir concluir a troca? → A: Sim. Apenas uma substituição conclui; a tentativa concorrente retorna erro explícito sem criar sessão adicional. Nova tentativa exige o contexto atual, sem limitar sessões independentes em outros dispositivos.
+
+### Session 2026-11-06
+
+- Q: É preciso preservar dados, migrations ou compatibilidade do que já foi executado? → A: Não. O projeto está em construção do zero: nada foi publicado e não há dados. O código existente é ponto de partida e pode ser alterado ou desfeito livremente; o esquema é criado por uma migration inicial única gerada do modelo completo. Todo registro nasce com autoria e data reais. SC-009 vale para essa migration inicial.
+
+### Session 2026-11-05
+
+- Q: Se a instalação da empresa estiver inativa, o usuário ainda deve conseguir encerrar a própria sessão? → A: Sim. Logout com sessão de origem identificada e proteção da requisição válida permanece permitido, sem liberar consultas ou dados da empresa.
+- Q: Quando uma conta é bloqueada por tentativas de senha incorreta, suas sessões anteriores devem voltar a funcionar depois dos 15 minutos de bloqueio? → A: Não. O bloqueio invalida todas as sessões da conta; depois dele, é necessário novo login, sem reativar sessões antigas.
+- Q: A mesma conta deve poder manter sessões simultâneas em dispositivos diferentes na instalação da empresa? → A: Sim. Sessões são independentes; logout encerra somente a sessão atual, enquanto reset, desativação, bloqueio ou revogação operacional encerram todas as sessões da conta.
+- Q: Ao reativar a instalação de uma empresa, as sessões anteriores à inativação podem voltar a funcionar se ainda estiverem dentro do prazo e não tiverem sido revogadas? → A: Sim. Inativação suspende o uso sem estender a validade; reativação permite somente sessões ainda válidas e não revogadas, sem restaurar acesso já encerrado.
+- Q: A auditoria das operações de contas e permissões deve identificar qual operador individual executou a ação, ou basta registrar um papel técnico compartilhado? → A: Registrar operador individual autenticado e correlação. Aplicar uma base auditável comum a contas, permissões e sessões, com autor/data de criação e última alteração e correlação; histórico de operações é imutável, sem ampliar para marcador ou tabelas auxiliares do Identity.
 
 ### Session 2026-10-15
 
@@ -69,7 +95,7 @@ são entregas desse recorte; checks de CI do backend permanecem obrigatórios an
 da integração. Nenhuma operação protegida pode ser exposta antes de seus controles de acesso.
 
 Operações de uso de uma empresa exigem empresa ativa e vínculo autorizado.
-Administração central, preparação e recuperação são operações técnicas privilegiadas:
+Administração técnica da própria instalação, preparação e recuperação são operações privilegiadas:
 exigem autorização específica e alvo validado, podem tratar estados não ativos quando
 necessário ao procedimento e não concedem acesso de usuário a dados de negócio.
 
@@ -149,6 +175,28 @@ NFR-005 e NFR-006.
    **Then** a estrutura permite cadastrar e consultar usuários e seus acessos em cada
    banco, sem frontend ou painel; email igual nos dois bancos não vincula os registros
    e aplicar novamente a versão vigente não duplica a estrutura nem perde dados.
+9. **Given** empresa inativa e sessão própria ainda válida, **When** o usuário solicita
+   encerramento com proteção da requisição válida, **Then** a sessão é revogada antes
+   da confirmação, sem permitir consulta de identidade, contexto ou dados da empresa.
+10. **Given** conta com sessões anteriores e bloqueio por tentativas inválidas,
+    **When** o bloqueio termina, **Then** somente um novo login pode estabelecer
+    acesso; nenhuma sessão anterior volta a funcionar, e as contas de B não mudam.
+11. **Given** conta com sessões em dois dispositivos da própria instalação,
+    **When** um deles efetua logout, **Then** somente essa sessão é encerrada;
+    a outra permanece válida, mas reset, desativação, bloqueio ou revogação
+    operacional invalidam ambas sem alterar contas de outro tenant.
+12. **Given** alteração de conta, permissão ou sessão com autor verificado,
+    **When** a alteração é persistida, **Then** registra quem/quando criou ou alterou
+    e a correlação, na mesma confirmação dos dados. Autoria anônima ou automática
+    não é atribuída a um usuário sem autenticação.
+13. **Given** sessão anterior válida no navegador e credenciais válidas para novo login,
+    **When** a troca de sessão falha, **Then** nenhum novo acesso é confirmado e a
+    sessão anterior mantém seu estado e prazo, sem desfazer revogações ou bloqueios
+    confirmados por outra operação.
+14. **Given** dois logins válidos concorrentes com a mesma sessão anterior,
+    **When** tentam substituí-la, **Then** somente uma troca conclui e a outra
+    retorna erro explícito sem criar sessão adicional; sessões independentes de
+    outros dispositivos não são afetadas.
 
 ---
 
@@ -187,7 +235,9 @@ cadastro comercial, painel administrativo ou módulo de negócio.
    outra empresa é alterada ou usada como alternativa.
 6. **Given** empresa ativa com usuários vinculados, **When** o operador a inativa,
    **Then** novas operações de uso dessa empresa são negadas e as demais continuam com seus
-   próprios controles de disponibilidade e autorização.
+   próprios controles de disponibilidade e autorização. A inativação não estende a
+   validade das sessões nem as revoga automaticamente; reativação permite somente
+   as ainda válidas e não revogadas, sem restaurar acesso já encerrado.
 
 ---
 
@@ -319,14 +369,28 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - Empresa inativada ou vínculo revogado durante uma sessão: validar o novo estado
   antes de cada nova operação protegida de uso da empresa; estado antigo da interface
   não concede acesso.
+- Empresa inativa com sessão própria ainda válida: permitir obter a proteção da
+  requisição e encerrar essa sessão, sem liberar consultas; falha de revogação
+  não pode ser apresentada como saída concluída.
+- Empresa reativada: aceitar somente sessões ainda válidas e não revogadas,
+  mantendo seu prazo original. Inativação não pausa a contagem da validade
+  nem desfaz logout, expiração ou revogação da conta.
 - Tentativas simultâneas de empresas diferentes, com identificadores de registros
   iguais: manter leitura, gravação e estado temporário isolados.
 - CPF, CNPJ ou email iguais em empresas distintas: não mesclar cadastros, vincular
   contas automaticamente ou impor unicidade global de dados próprios dos tenants.
 - Sessão autenticada em A usada para indicar B: negar o acesso; mudar o identificador
   da empresa não converte a sessão de A em uma sessão de B.
+- Falha ao substituir a sessão do navegador em novo login: não confirmar novo acesso
+  nem encerrar a sessão anterior pela troca incompleta; manter seu prazo e respeitar
+  bloqueios, expiração ou revogações confirmados independentemente.
+- Logins concorrentes com a mesma sessão anterior: permitir somente uma substituição;
+  a tentativa perdedora recebe erro explícito e não cria sessão adicional. Repetição
+  exige contexto atual, sem interferir em sessões independentes de outros dispositivos.
 - Alteração de senha, bloqueio, recuperação ou revogação de conta em A: não alterar
   identidade, credenciais, sessões ou permissões das contas de B.
+- Fim de bloqueio temporário por tentativas inválidas: não reativar sessões anteriores;
+  exigir novo login depois de invalidá-las quando o bloqueio for confirmado.
 - Restauração de A: incluir seus dados de acesso, invalidar sessões anteriores e
   revisar permissões recuperadas antes da liberação, sem restaurar ou alterar contas de B.
 - Empresa indicada no login: resolver e validar o alvo antes de verificar suas
@@ -408,15 +472,31 @@ publicação e restauração usando duas empresas e informações sintéticas.
   login anônimo NÃO DEVE enumerar contas ou empresas de outros tenants.
 - **FR-006**: A fundação DEVE permitir encerrar o acesso e rejeitar novas operações
   protegidas com autenticação expirada ou contexto de acesso revogado ou encerrado.
+  Empresa inativa NÃO DEVE impedir obter a proteção da requisição e revogar a própria
+  sessão ainda válida. Essa exceção permite somente encerrar acesso, não consultar
+  identidade, contexto ou dados; confirmação exige revogação persistida.
+  Bloqueio da conta por tentativas inválidas DEVE invalidar todas as suas sessões
+  existentes. O fim do bloqueio NÃO DEVE reativá-las; novo acesso exige novo login.
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
   operações de uso de uma empresa também DEVEM validar vínculo ativo. Administração
-  central e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
+  técnica da própria instalação e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
   sem conceder acesso de usuário por privilégio implícito; a ausência de autorização
   DEVE resultar em acesso negado.
 - **FR-008**: A sessão autenticada DEVE permanecer vinculada à conta e à instalação de
   origem. Para acessar outra empresa, a pessoa DEVE autenticar a conta própria na
   instalação dessa empresa; uma sessão emitida na instalação A NÃO DEVE ser aceita
   na instalação B, mesmo quando o email seja igual.
+  Na própria instalação, a conta DEVE poder manter sessões simultâneas independentes
+  em dispositivos diferentes. Novo login em outro dispositivo NÃO DEVE encerrar
+  as demais; logout encerra somente a sessão corrente. Reset, desativação, bloqueio
+  ou revogação operacional de acesso DEVEM encerrar todas as sessões da conta.
+  Ao substituir a sessão do navegador em novo login, criação da nova e encerramento
+  da anterior DEVEM ser confirmados juntos. Falha na troca NÃO DEVE encerrar a
+  anterior nem confirmar novo acesso; NÃO DEVE estender seu prazo ou desfazer
+  bloqueios e revogações confirmados por outra operação.
+  Dois logins concorrentes com a mesma sessão anterior NÃO DEVEM confirmar duas
+  substituições: somente uma conclui, e a tentativa perdedora DEVE retornar erro
+  explícito sem criar sessão adicional. Repetição exige o contexto atual.
 - **FR-009**: Cada instalação de cliente DEVE identificar a empresa de forma única por
   configuração segura do ambiente e marcador persistido no próprio banco da aplicação,
   sem banco apartado de catálogo central e sem concentrar dados ou contas de múltiplos clientes.
@@ -435,7 +515,12 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **FR-013**: Empresa ausente, desconhecida, inativa, não autorizada ou indisponível
   DEVE causar erro explícito em operações de uso dessa empresa, sem fallback para
   outra. Procedimentos técnicos somente podem tratar estados não ativos com alvo
-  validado e autorização específica, sem liberar acesso de usuário.
+  validado e autorização específica, sem liberar acesso de usuário. Obtenção da
+  proteção da requisição e encerramento da própria sessão seguem a exceção restrita
+  de FR-006 e NÃO constituem autorização de uso dos dados da empresa.
+  Inativação da instalação suspende o uso, sem revogar sessões automaticamente
+  ou estender seus prazos. Reativação permite somente sessões ainda válidas e
+  não revogadas; NÃO DEVE restaurar acesso encerrado, expirado ou revogado.
 - **FR-014**: A preparação do armazenamento DEVE registrar resultado por empresa;
   a empresa somente pode atender operações após preparação bem-sucedida e ativação.
 - **FR-015**: A evolução da estrutura persistida DEVE suportar criação inicial e
@@ -487,6 +572,15 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **FR-033**: Um operador autorizado DEVE conseguir preparar contas, desativá-las,
   redefinir seu acesso e conceder ou revogar permissões por procedimento restrito,
   com empresa-alvo explícita, verificação de autorização e resultado auditável.
+  Cada alteração DEVE ser atribuída a um operador individual autenticado, com
+  correlação para investigação; nome declarado livremente ou papel técnico
+  compartilhado NÃO DEVEM ser considerados prova de autoria individual.
+  Na L2, contas, permissões e sessões DEVEM compartilhar uma base auditável de
+  informações de autor/data de criação, autor/data da última alteração e correlação.
+  Autores de ações de usuário DEVEM ser verificados; alterações automáticas e
+  tentativas anônimas DEVEM ser distinguíveis, sem inventar identidade.
+  Histórico de operações DEVE permanecer imutável; o recorte NÃO
+  inclui aplicar essa base ao marcador ou às tabelas auxiliares de identidade.
   A operação NÃO DEVE modificar contas ou permissões de outro tenant, mesmo
   com email igual. Não é exigida tela administrativa nem autocadastro público.
 - **FR-034**: O primeiro incremento DEVE entregar backend iniciado e executável,
@@ -564,8 +658,13 @@ publicação e restauração usando duas empresas e informações sintéticas.
   opcional acrescentado por um produto, sem representar módulo de negócio entregue.
 - **Configuração de ambiente**: parâmetros necessários à execução, com distinção
   entre informação pública e sensível e sem credenciais reais em exemplos.
+- **Metadados de auditoria**: base comum dos registros de conta, permissão e sessão,
+  com autor/data de criação e última alteração e correlação. Distingue operador,
+  usuário verificado, sistema e ação anônima; não falsifica autoria ou data
+  e não contém senha, hash, ticket ou cópia de campos secretos.
 - **Registro de execução operacional**: empresa-alvo, tipo de preparação, atualização
-  ou recuperação, resultado, versão e referência de investigação, sem conteúdo secreto.
+  ou recuperação, operador individual autenticado, resultado, versão e referência
+  de investigação, sem conteúdo secreto.
 
 ## Success Criteria *(mandatory)*
 
@@ -585,6 +684,23 @@ promessas de capacidade para todos os produtos derivados.
   sem exposição ou alteração de informação protegida em casos negados. Com contas
   de mesmo email em dois tenants, alteração de senha, bloqueio, recuperação e
   revogação em A DEVEM produzir zero alteração na conta, sessões e permissões de B.
+  Com empresa inativa e sessão própria ainda válida, encerramento protegido DEVE
+  revogar a sessão sem liberar consultas ou dados dessa empresa.
+  Após bloqueio da conta por tentativas inválidas e término desse bloqueio, zero
+  sessões anteriores voltam a autorizar operações; somente novo login permite acesso.
+  Com duas sessões simultâneas da mesma conta, logout em uma DEVE preservar a outra;
+  reset, desativação, bloqueio ou revogação operacional DEVEM invalidar ambas.
+  Falha na troca de sessão em novo login DEVE confirmar zero novas sessões e
+  preservar o estado e prazo anteriores, respeitando bloqueios e revogações
+  confirmados independentemente.
+  Dois logins válidos concorrentes com a mesma sessão anterior DEVEM confirmar
+  exatamente uma substituição e zero sessões adicionais pela tentativa perdedora,
+  que recebe erro explícito; outras sessões independentes permanecem válidas.
+  Inativação/reativação da instalação DEVE preservar o prazo original: sessão ainda
+  válida e não revogada pode retomar; sessão expirada ou revogada permanece negada.
+  Criação/alteração de conta, permissão e sessão DEVE preservar os metadados de
+  auditoria e distinguir dois operadores individuais autenticados. Falha ao gravar
+  auditoria NÃO DEVE confirmar a alteração; nenhuma autoria é fictícia.
 - **SC-003**: em 200 operações sintéticas de leitura e gravação intercaladas entre
   duas empresas, 100 por empresa e pelo menos 20 simultâneas, ocorrem zero acessos
   ou alterações cruzadas, incluindo reutilização de recursos e falhas provocadas;

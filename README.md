@@ -25,7 +25,7 @@ O boilerplate é construído em 4 ciclos de entrega orientados a especificaçõe
 | Incremento | Escopo | Status |
 | :---: | :--- | :---: |
 | **I1** | **Fundação do Backend e Persistência:** Modelo de usuários/permissões, migrations versionadas, liveness/readiness seguro, Docker Compose local e guardrails de CI. | **Concluído** |
-| **I2** | **Autenticação e Sessão HTTP:** Login seguro por cookie (`__Host-bps-session`), antiforgery CSRF, proteção contra força bruta e contexto do tenant. | Planejado |
+| **I2 / L2** | **Autenticação e Sessão HTTP:** Cookie revogável, antiforgery CSRF, contexto e operação restrita de contas/permissões. | [Design L2](specs/001-fullstack-foundation/plan.md), implementação pendente |
 | **I3** | **Frontend Web Moderno:** Aplicação React 19 + TypeScript + Vite, telas de autenticação e consumo de contratos OpenAPI. | Planejado |
 | **I4** | **Deploy em Produção / Dokploy:** Orquestração com Dokploy na VPS, SSL automático, backups com retenção e rotinas operacionais. | Planejado |
 

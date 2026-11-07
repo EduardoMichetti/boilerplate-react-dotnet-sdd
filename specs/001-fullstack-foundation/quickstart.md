@@ -1,25 +1,27 @@
-# Quickstart: backend e migration de usuários/acesso — I1
+# Quickstart: validar a L1 e, após implementação, a L2
 
-**Date**: 2026-10-13
-**References**: [plano](plan.md), [pesquisa](research.md), [modelo](data-model.md),
-[contrato I1](contracts/openapi.json) e [operação](contracts/operations.md).
+**Date**: 2026-11-05
+**References**: [plano](plan.md), [modelo](data-model.md),
+[operações](contracts/operations.md), [API L1](contracts/openapi.json),
+[API alvo L2](contracts/future-openapi.json).
 
-O roteiro completo das seções 1 a 7 é para executar **depois da implementação de I1**.
-A Parada 1 entrega somente solution/projetos, manifests/lockfiles, configuração
-validada, porta de identidade, tratamento de erros e fixture PostgreSQL.
-Migrations, modelo de usuários, endpoints de saúde/OpenAPI, Compose e CI ainda não
-estão entregues. Não executar o roteiro completo como se I1 já estivesse concluído.
-O roteiro não depende de frontend, login HTTP, painel ou Platform.Tools.
+**Estado atual**: L1 entregue. Login, sessões, host `Platform.Operations` e perfil
+`operations` abaixo são **planejados**. Não executar a seção L2 como se já existisse.
+Este comando de planejamento não executa testes, migrations ou containers.
 
-## Checkpoint da Parada 1 — fases 1 e 2
+## 1. Pré-requisitos e regressão L1 disponível
 
-Pré-requisitos: SDK **10.0.401** instalado (o `global.json` não permite roll-forward),
-runtime ASP.NET Core/.NET 10.0.12 e Docker com engine Linux responsivo. O SDK inclui
-o runtime correspondente. Não são necessárias credenciais ou bases externas:
-a fixture cria dois bancos descartáveis e roles próprios com senhas aleatórias.
+- PowerShell na raiz do repositório, Git e Docker Linux/Compose v2 responsivo.
+- SDK conforme `global.json`: base 10.0.401, roll-forward `latestFeature`, sem preview.
+  Runtime/ASP.NET e pacotes permanecem na linha fixada do repositório.
+- Ferramentas locais/lockfiles existentes; integração cria PostgreSQL real descartável,
+  não usa configuração/dados de produção. Nenhuma senha padrão é necessária.
+
+Executar cada comando separadamente e interromper no primeiro erro:
 
 ```powershell
 dotnet --version
+docker info
 dotnet tool restore
 dotnet restore .\backend\Boilerplate.slnx --locked-mode
 dotnet build .\backend\Boilerplate.slnx --no-restore
@@ -27,206 +29,220 @@ dotnet format .\backend\Boilerplate.slnx --verify-no-changes --no-restore
 dotnet test --solution .\backend\Boilerplate.slnx --no-restore --minimum-expected-tests 1
 ```
 
-Interromper ao primeiro comando com erro. O formato em `.editorconfig` é verificado
-por `dotnet format`; corrigir com o mesmo comando sem `--verify-no-changes`.
-Domain permanece sem dependências HTTP/EF/Identity; Application depende somente de
-Domain e tipos nativos .NET. A validação de configuração não abre conexões: valida
-campos e sintaxe sem incluir valores privados nos erros; a prova do marcador e a
-validação específica Npgsql chegam nas próximas fases.
+Esperado na base L1: saúde/OpenAPI, erros seguros e persistência/migrations A/B.
+As cinco rotas L2 ainda não existem. Histórico e escopo das provas estão em
+[tasks.md](tasks.md); a execução acima, não este documento, gera nova evidência.
 
-Nesta parada, iniciar a API não comprova prontidão: saúde/OpenAPI e autenticação
-retornam 404 Problem Details. A fixture usa `postgres:18.6` fixado pelo digest registrado
-em `PostgresInstallationFixture`, não reutiliza containers/bases entre suítes e descarta
-o container ao finalizar. Seus testes verificam banco vazio, roles sem privilégios
-administrativos, runtime sem DDL/CREATE/TEMPORARY e negação de CONNECT entre A/B.
-Nenhuma migration ou conta padrão é criada.
+## 2. Preparação L2 — somente depois de implementar seus pré-requisitos
 
-## 1. Pré-requisitos e alvos
+1. Aplicar P0 de [plan.md](plan.md): roles runtime/operador/owner distintas com
+   grants reais, exemplos sem secrets utilizáveis e PostgreSQL sem exposição pública.
+   Se precisar de depuração, publicar somente no loopback; não usar owner na API.
+2. Copiar o exemplo atualizado para configurações privadas A/B. Os valores de
+   `IdTenant` e `IdAmbiente`, bancos/roles, portas API/PostgreSQL e volumes/redes
+   devem ser distintos. Não basta trocar o header/argumento de tenant.
+3. Manter key rings separados/persistentes e nomes Data Protection derivados
+   de aplicação/ambiente/tenant. Montar certificados/senhas por arquivos privados
+   em produção; sem secrets no Git, imagem ou build arguments.
+4. Para HTTP local, usar modo **Development + loopback** explicitamente e cookie
+   `bps-session`; fora disso, HTTPS e `__Host-bps-session`. O Compose L1 em
+   Production/HTTP não serve como validação dos cookies L2 sem esse ajuste.
+   Publicação da API restrita ao loopback do host; listener interno do container
+   pode usar sua interface de rede. Gateway Docker não precisa ser loopback.
+   Nenhum Host/header encaminhado livremente substitui esse isolamento.
+5. Configurar somente o perfil `operations` com segredo do operador de A ou B;
+   cada operador usa login PostgreSQL individual e segredo não compartilhado;
+   API não recebe esse segredo. Roles/grants são validados em volumes criados do
+   zero (§3); não há volumes L1 a atualizar nem upgrade L1→L2 a provar.
 
-- Git, Docker com engine Linux e Compose v2.
-- SDK 10.0.401, ferramenta local dotnet-ef 10.0.12 e lockfiles entregues.
-  O profile `migrations` usará imagem SDK com ferramentas/pacotes restaurados no build.
-- PostgreSQL 18.6 com volume nomeado em `/var/lib/postgresql`.
-- Banco vazio da instalação local (e segundo banco de validação para comprovar isolamento
-  SC-009), com owners de migration e runtime mínimo distintos. Não existe banco `platform_catalog`.
-- Configurações privadas aprovadas por instalação (`.env.local` para A e `.env.b.local`
-  para B) contêm `ApplicationId`, `EnvironmentId`, `TenantId` e conexões/secrets próprios.
-  Somente o tooling recebe `Migrations__AllowInitializeEmptyDatabase=true` para a
-  primeira inicialização do banco vazio aprovado; ausente/`false` nega essa inicialização
-  e valor inválido falha explicitamente.
-- Nenhuma credencial real/padrão em exemplos, migrations ou logs.
-
-A preparação inicial de bancos/papéis é pré-requisito do operador, documentado na
-implementação. Testes fazem isso com Testcontainers, não com banco/usuário de produção.
-Não é necessário criar uma suíte de cadastro/provisionamento comercial.
-
-## 2. Configuração e build
-
-PowerShell na raiz do repositório:
-
-```powershell
-Copy-Item .\infra\.env.example .\infra\.env.local
-Copy-Item .\infra\.env.example .\infra\.env.b.local
-```
-
-Preencher cada arquivo privado com as variáveis e arquivos de credenciais da respectiva
-instalação, usando os identificadores abaixo e bancos/roles próprios. Definir
-`TenantState=Inactive` durante DDL e aprovar explicitamente cada banco vazio somente no
-tooling. O exemplo versionado mantém `Migrations__AllowInitializeEmptyDatabase=false`;
-exemplos não contêm valores de senha utilizáveis. A API monta somente o secret runtime
-da própria instalação. A credencial owner de migration é montada apenas no profile
-`migrations`, assim como o sinal de inicialização. Arquivos privados e key rings ficam
-fora do Git/contexto de build.
+Depois de preparar arquivos privados, validar sem imprimir secrets:
 
 ```powershell
 $compose = '.\infra\compose.yaml'
 $localA = '.\infra\.env.local'
 $localB = '.\infra\.env.b.local'
-$environmentA = '11111111-1111-4111-8111-111111111111'
-$environmentB = '22222222-2222-4222-8222-222222222222'
 $tenantA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 $tenantB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+$ambienteA = '11111111-1111-4111-8111-111111111111'
+$ambienteB = '22222222-2222-4222-8222-222222222222'
 docker compose --project-name boilerplate-a -f $compose --env-file $localA config --quiet
 docker compose --project-name boilerplate-b -f $compose --env-file $localB config --quiet
-docker compose --project-name boilerplate-a -f $compose --env-file $localA build api migrations
-docker compose --project-name boilerplate-b -f $compose --env-file $localB build migrations
+docker compose --project-name boilerplate-a -f $compose --env-file $localA build api migrations operations
+docker compose --project-name boilerplate-b -f $compose --env-file $localB build api migrations operations
 docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d postgres
 docker compose --project-name boilerplate-b -f $compose --env-file $localB up -d postgres
 ```
 
-**Esperado**: configuração e imagens válidas, PostgreSQL saudável, targets vazios
-aprovados, volumes/redes independentes por projeto e roles runtime sem DDL/CONNECT a
-outros tenants. PostgreSQL não publica porta no host; somente a API A será exposta neste
-roteiro. Não imprimir o resultado completo de `compose config` com secrets ou usar
-`down -v` como rotina. Interromper o roteiro se qualquer comando falhar.
+Esses comandos pressupõem perfil/imagem `operations` implementados na L2.
+Não imprimir `compose config` completo, usar credencial de demonstração como secret
+ou apagar volumes para contornar falha. Interromper diante de erro.
 
-## 3. Aplicar migrations entregues
+## 3. Criar os bancos locais do zero e aplicar a migration inicial
 
-Migrations iniciais versionadas são geradas na implementação e revisadas; o usuário
-do boilerplate aplica essas versões, não gera uma migration nova a cada instalação.
-Serviço pontual `migrations` tem working directory na pasta `backend/src` da imagem
-Linux e EF local restaurado; nomes de pastas abaixo não dependem do separador do host.
+Ambiente **local de desenvolvimento**, sem dados: começar com volumes novos para que
+os scripts de banco/grants rodem (o `init-db.sql` só executa na criação do volume).
+Este comando só é aceitável aqui, em ambiente local descartável:
 
 ```powershell
-docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantA --environment-id $environmentA
-docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantB --environment-id $environmentB
+docker compose --project-name boilerplate-a -f $compose --env-file $localA down --volumes
+docker compose --project-name boilerplate-b -f $compose --env-file $localB down --volumes
 ```
 
-Cada comando usa a conexão e o owner do arquivo correspondente. Os argumentos de
-identidade apenas confirmam o alvo: não escolhem outro banco.
+Parar ambas as APIs/writers, definir `EstadoTenant=Inativo` nos arquivos privados.
+Banco novo vazio aprovado usa `Migracoes__PermitirInicializarBancoVazio=true` uma
+vez; reaplicações com marcador correto usam false.
 
-> **Observação sobre o log na primeira execução:**  
-> Ao inicializar um banco vazio, o log apresentará uma mensagem `Failed executing DbCommand (...) SELECT ... FROM foundation."__EFMigrationsHistory"`. Isso é esperado porque a tabela de histórico ainda não existe; o EF Core trata essa exceção internamente, cria a tabela e aplica a migração com sucesso (`Applying migration... Done.`).
+```powershell
+docker compose --project-name boilerplate-a -f $compose --env-file $localA stop api
+docker compose --project-name boilerplate-b -f $compose --env-file $localB stop api
+docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantA --environment-id $ambienteA
+docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile migrations run --rm migrations dotnet ef database update --project Platform.Infrastructure --startup-project App.Api --context AcessoTenantDbContext -- --tenant-id $tenantB --environment-id $ambienteB
+```
 
-Após inicializar, remover `Migrations__AllowInitializeEmptyDatabase` ou voltar a `false` em ambos os arquivos e alterar `EstadoTenant=Ativo`; marcador correto permite reaplicação sem autorização de banco vazio.
+Esperado: marcador criado e tabelas de contas, permissões, sessões e auditoria
+vazias, com colunas `Id*`/`FkId*` e constraints `pk_/fk_/ix_/uq_/ck_` no padrão.
+Reaplicar em manutenção não duplica nem perde dados. Histórico com migration fora
+da cadeia conhecida é rejeitado como versão desconhecida.
+Runtime tentando DDL e alvo A apontando a B falham.
+Não gerar migration por cliente nem chamar migration pelo endpoint HTTP.
 
-Para executar EF nativamente no Windows, usar `Push-Location .\backend\src`, os
-mesmos nomes de projetos e configuração privada de tooling, retornando depois
-com `Pop-Location`. Não passar paths Windows para o processo Linux do container.
+## 4. Preparar contas/permissões sem painel
 
-**Esperado**:
+Com perfil e host L2 implementados, criar conta sintética por instalação.
+Entrar senhas **diferentes** e privadas no prompt sem eco; não incluí-las no comando.
+Guardar os `idUsuario` retornados, não inferi-los de um exemplo.
 
-- Não existe banco `platform_catalog` nem `CatalogDbContext`.
-- Cada banco possui marcador do próprio cliente/ambiente (`TenantDatabaseIdentity`) e tabelas Identity/concessões.
-- UseSeeding/UseAsyncSeeding não criam usuário, senha ou permissões padrão.
-- Não há migration automática no startup da API, mesmo se alguma estiver pendente.
-- Target ausente, UUID/ambiente divergente, banco existente sem marcador ou role
-  insuficiente falha explicitamente, sem fallback ou correção silenciosa.
+```powershell
+docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile operations run --rm operations conta criar --id-tenant $tenantA --id-ambiente $ambienteA --email acesso@example.invalid --nome-exibicao "Teste A"
+docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile operations run --rm operations conta criar --id-tenant $tenantB --id-ambiente $ambienteB --email acesso@example.invalid --nome-exibicao "Teste B"
+$idUsuarioA = Read-Host 'Id de usuario retornado na instalacao A'
+$idUsuarioB = Read-Host 'Id de usuario retornado na instalacao B'
+docker compose --project-name boilerplate-a -f $compose --env-file $localA --profile operations run --rm operations permissao conceder --id-tenant $tenantA --id-ambiente $ambienteA --id-usuario $idUsuarioA --codigo foundation.context.read
+docker compose --project-name boilerplate-b -f $compose --env-file $localB --profile operations run --rm operations permissao conceder --id-tenant $tenantB --id-ambiente $ambienteB --id-usuario $idUsuarioB --codigo foundation.context.read
+```
 
-## 4. Iniciar o backend e confirmar superfície mínima
-
-Concluídas as migrations, definir `TenantState=Active` no arquivo privado de A.
-A API não recebe a credencial owner nem o sinal de inicialização.
+Esperado: resultado JSON/exit code conforme [operations.md](contracts/operations.md)
+e auditoria persistida da operação, sem senha/hash/conexão. Operador sem papel
+autorizado não muda nada; API/runtime não pode executar esse procedimento.
+Ativar A/B (`EstadoTenant=Ativo`) e iniciar:
 
 ```powershell
 docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d api
-Invoke-RestMethod 'http://localhost:8080/health/live'
-Invoke-RestMethod 'http://localhost:8080/health/ready'
-Invoke-RestMethod 'http://localhost:8080/openapi/v1.json'
+docker compose --project-name boilerplate-b -f $compose --env-file $localB up -d api
+$origemA = 'http://localhost:8080'
+$origemB = 'http://localhost:8081'
+Invoke-RestMethod "$origemA/health/live"
+Invoke-RestMethod "$origemA/health/ready"
+Invoke-RestMethod "$origemB/health/ready"
 ```
 
-**Esperado**: status `alive`, `ready` e contrato com somente as duas operações I1.
-Rotas de login, usuários, `/me`, `/me/tenants` e `/context` retornam 404; não há
-painel ou página web. Falha de configuração ou divergência do marcador do banco da
-instalação retorna 503 seguro em readiness, não em liveness.
+Origens HTTP acima só para o modo local aprovado. HTTPS usa origem/certificado
+confiável configurados, sem desabilitar validação TLS.
 
-## 5. Executar testes e gates de I1
+## 5. Consumidor independente — SC-005
 
-Os testes de integração preparam seus próprios targets e usuários sintéticos,
-com Identity/UserManager para hashing e validação de senhas. Não usar SQL com senha
-em texto puro ou migration de contas padrão para facilitar demonstração.
+Usar cliente HTTP com cookie jar e os contratos, sem frontend nem código interno.
+Exemplo PowerShell para A, em sessão local privada. Não habilitar transcript/log
+de requisições com corpo/cookie e não salvar o corpo de login em arquivo:
 
 ```powershell
-dotnet tool restore
-dotnet restore .\backend\Boilerplate.slnx --locked-mode
-dotnet build .\backend\Boilerplate.slnx --no-restore
-dotnet format .\backend\Boilerplate.slnx --verify-no-changes --no-restore
-dotnet test --solution .\backend\Boilerplate.slnx --no-restore --minimum-expected-tests 1
+$cabecalhosA = @{ 'X-Tenant-Id' = $tenantA }
+$csrf = Invoke-RestMethod "$origemA/api/v1/auth/antiforgery" -Headers $cabecalhosA -SessionVariable sessaoA
+$credencial = Get-Credential -UserName 'acesso@example.invalid' -Message 'Senha sintetica da conta A'
+$corpo = @{
+    email = $credencial.UserName
+    password = $credencial.GetNetworkCredential().Password
+} | ConvertTo-Json -Compress
+$cabecalhosA['X-CSRF-TOKEN'] = $csrf.requestToken
+try {
+    $login = Invoke-RestMethod "$origemA/api/v1/auth/login" -Method Post -Headers $cabecalhosA -WebSession $sessaoA -ContentType 'application/json' -Body $corpo
+} finally {
+    Remove-Variable corpo, credencial
+}
+$csrf = Invoke-RestMethod "$origemA/api/v1/auth/antiforgery" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA
+$cabecalhosA['X-CSRF-TOKEN'] = $csrf.requestToken
+Invoke-RestMethod "$origemA/api/v1/me" -Headers $cabecalhosA -WebSession $sessaoA
+Invoke-RestMethod "$origemA/api/v1/context" -Headers $cabecalhosA -WebSession $sessaoA
+Invoke-WebRequest "$origemA/api/v1/auth/logout" -Method Post -Headers $cabecalhosA -WebSession $sessaoA -UseBasicParsing
+```
+
+Não prosseguir se uma chamada falhar. Esperado: token CSRF, login 200 com
+`tenantId/expiresAt`, identidade/contexto somente A e logout 204.
+O replay do cookie capturado **somente na fixture de teste** antes do logout
+retorna 401 depois do commit. Não copiar cookies reais para arquivos de evidência.
+Remover objetos de credenciais limita sua retenção local, não promete zerar memória.
+
+Repetir com B em outro jar. Portas no mesmo hostname não isolam cookies:
+usar jars separados mesmo em localhost; o teste cruzado reenvia deliberadamente
+cookie de A para B e deve falhar. Headers/respostas não contêm conexão ou senha.
+O documento servido em `/openapi/v1.json` deve corresponder ao contrato promovido
+L2, sem `x-planned-only=true` e sem operações ausentes da implementação.
+
+## 6. Matriz de aceite L2
+
+| Cenário | Resultado exigido |
+|---|---|
+| Login correto A/B, mesmo email e senhas distintas | Sessões independentes; senha A não autentica B; nova chave a cada login. |
+| Header ausente/inválido/duplicado | 400 Problem Details, antes de lookup indevido. |
+| Login divergente/inativo, email desconhecido/senha errada/conta bloqueada | 401 AUTH_INVALID genérico; sem enumeração nem sessão emitida. |
+| Cookie A em B e header divergente em A | 401 para cookie não autenticável; 403 para header divergente válido fora do login; zero dados cruzados. |
+| CSRF ausente/inválido/de identidade anterior | 400 CSRF_INVALID em login/logout; token novo após mudança de identidade. |
+| Falta/revogação da concessão | `/context` 403 já na próxima operação; `/me` próprio continua sujeito à sessão válida. |
+| Logout e replay / Renew concorrente | Revogação persistida antes de 204; replay 401; sem ressurreição ou extensão de prazo. |
+| Novo login com sessão anterior e falha injetada no commit | 503; nenhuma sessão nova; a anterior continua válida com o mesmo `ExpiraEm`. Revogação/lockout confirmados por outra operação durante a tentativa permanecem. |
+| Dois logins concorrentes com a mesma sessão anterior (barreira) | Exatamente uma troca conclui (200); a outra recebe 409 SESSION_CONFLICT sem `Set-Cookie`; uma única sessão nova no banco; sessões de outros jars intactas. Repetição com novo GET antiforgery funciona. |
+| Concorrência por entidade | Conta usa `ConcurrencyStamp` (sem `Versao`); concessão simultânea/retirada simultânea gera conflito explícito no host; falhas de senha concorrentes não perdem contagem. |
+| Duas sessões da mesma conta em jars distintos | Novo login/logout em uma não invalida a outra. Reset/desativação/lockout/revogação operacional invalidam ambas, sem efeito em B. |
+| Expiração absoluta | Aos 30 minutos, 401; `TimeProvider` evita espera real no teste. |
+| Reset/desativação/revogação em A | Próxima operação A nega; conta/sessões/concessões B permanecem idênticas. |
+| Lockout | Quinta falha bloqueia por 15 minutos e revoga todas as sessões da conta atomicamente, inclusive sob concorrência. Após o bloqueio, cookie anterior continua 401; novo login funciona; conta B independente. |
+| Rate limit | Sexto pedido na janela de um minuto: 429 + Retry-After; IP forjado não contorna. Testar separadamente do lockout. |
+| Instalação inativa após autenticar | `/me` e `/context` retornam 409 com sessão válida; login 401 genérico. Obter CSRF e encerrar sessão própria ainda válida continua permitido, com 204 somente após commit. |
+| Reativação da instalação | Sessão dentro do prazo original e não revogada retoma. Sessão expirada/revogada não retoma; tempo inativo conta nos 30 minutos. |
+| Banco/marker/key ring indisponível | 503 seguro; nunca 200, identidade vazia ou 401 silencioso por erro de banco. |
+| Falha no commit do logout | Não confirmar 204 nem apagar cookie como se a revogação estivesse concluída. |
+| Health com cookies válidos/inválidos | Nenhum lookup de sessão; liveness sem banco/chaves e readiness sem dados de conta. |
+| Restart da API | Sessão ainda dentro do prazo funciona com mesmo key ring/banco; sem estender expiração. |
+| Operação sem autorização/auditoria indisponível | Não zero, sem mutação; sucesso somente com auditoria e commit. |
+| Dois operadores individuais autorizados | Auditoria distingue seus logins autenticados e correlações. Nome/role informado em argumento livre não pode substituir a identidade verificada. |
+| Base auditável de contas/permissões/sessões | Novos registros têm autor/data/correlação de criação. Alterações preservam criação e registram última alteração atomicamente; histórico operacional permanece imutável. |
+| Autores não autenticados | Tentativa inválida é anônima, ação automática é sistema; email/Id enviado não forja autor. |
+| Migration/roles | Banco novo e reaplicação sem perda; histórico desconhecido rejeitado; runtime sem DDL e operador sem acesso a outro banco. |
+| Convenções de modelo | PK `Id*` UUID v7 com timestamp igual ao `InstanteOperacao` do relógio de teste, sem geração pelo provider; FK `FkId*`; constraints minúsculas ≤63 caracteres; instantes UTC em microssegundos; exceções (marcador, concessão, tabelas auxiliares Identity vazias) em lista fechada; nenhum relógio estático, `Guid.NewGuid()`/`CreateVersion7()` sem argumento nem `ExecuteUpdate` em entidade auditável. |
+| Histórico de versão incompatível | ID de migration desconhecida bloqueia runtime/readiness e tooling, mesmo sem pendentes. Não apagar histórico para obter aprovação. |
+| Development HTTP em Docker | Requisição pelo loopback do host chega normalmente via gateway Docker; modo não fica publicado para acesso remoto. HTTPS continua obrigatório fora do recorte local. |
+
+### SC-003 — prova quantitativa, exclusivamente no host de teste
+
+Executar **200 operações sintéticas**, 100 por instalação, com leituras e gravações
+intercaladas e IDs locais iguais. Usar os mesmos controles de sessão/permissão e
+persistência da L2; endpoint/entidade sintética não é distribuído na API.
+Uma barreira e contadores medem **pico efetivo >=20**, com A e B sobrepostos.
+Conferir commits válidos, consultas, rollback/falha provocada em A e ausência de
+alteração em B. Negar todas ou apenas lançar 200 tarefas não satisfaz o critério.
+Não aplicar o limiter de login às operações do cenário: autenticar antes da carga.
+
+Registrar quantitativos/pico/resultados e correlações sem dados secretos.
+SC-002 exige todos os casos da matriz aplicável; SC-005 usa só contratos publicados.
+
+## 7. Gates e evidências
+
+Reexecutar os comandos da seção 1 após implementar L2. Além deles:
+
+```powershell
 dotnet package list .\backend\Boilerplate.slnx --vulnerable --include-transitive --format json
 gitleaks git --redact --exit-code 1 .
 ```
 
-MTP usa `--solution`/`--project`, sem adaptador VSTest. Scans usam versões fixadas,
-checksum e histórico completo; auditoria NuGet requer interpretação de severidade,
-pois somente listar achados não bloqueia por si só. Falha/ausência de resultado não aprova.
+Usar o scanner fixado/checksum e os critérios de bloqueio do workflow existente;
+listar vulnerabilidades sem interpretar severidade não prova aprovação.
+Zero testes, scan ausente/inconclusivo ou falha de gate nunca aprova.
+Exercícios negativos controlados de compilação/formatação/acesso/persistência/
+isolamento/scans devem falhar sem adicionar secrets reais ou dependência vulnerável.
+Registrar bloqueio real dos checks obrigatórios; configuração de proteção exige
+permissão do mantenedor e não é presumida por existir YAML.
 
-| Prova de I1 | Resultado exigido |
-|------------|-------------------|
-| Migration inicial | Estrutura de acesso criada nos dois bancos reais. |
-| Reaplicação | Mesma versão aplicada novamente, sem duplicação nem perda de registros. |
-| Conta local | Mesmo email em A/B, contas e hashes independentes; unicidade dentro de cada banco. |
-| Persistência | Consulta e alteração corretas, FK/grants, commit e rollback, sem mocks substituindo PostgreSQL. |
-| Concorrência mínima | Barreira comprova operação de A sobreposta a operação de B (pico >=2), com IDs/emails iguais e credenciais runtime próprias; resultados válidos persistem somente no alvo e falha/rollback em A não altera B. Não exige a carga completa de SC-003. |
-| Inicialização autorizada | Sem marcador, sinal ausente/`false` nega antes de DDL; valor inválido falha; `true` só inicializa banco vazio aprovado. Estrutura sem marcador ou identidade divergente bloqueia mesmo com aprovação; reaplicação correta funciona com sinal desligado. |
-| Target errado | A apontando a B é bloqueado antes de DDL/acesso a contas; B não sofre mudança. |
-| Role runtime | Credencial de A não conecta a B nem executa DDL. |
-| API mínima | Contrato I1 corresponde à API; rotas futuras ausentes, sem sucesso simulado. |
-| Saúde | Liveness independente de catálogo/cookies; readiness não derruba todos por falha de um tenant. |
-| Arquitetura | Domain sem HTTP/EF/Identity; referências sem ciclos e fixtures não distribuídas. |
-| Secrets | Nenhuma senha/ticket/conexão em log, imagem, Git ou resposta. |
-
-Registrar IDs/quantidade de testes executados; uma execução com zero testes falha.
-Checks pertinentes devem bloquear integração em GitHub Actions com permissões
-mínimas e sem secrets de produção. Não exige pipeline de frontend ou deploy.
-
-### Prova negativa dos gates — SC-006 no backend
-
-Após uma execução válida, usar alterações controladas em branch descartável para
-provocar, separadamente, falha de compilação/tipos C#, formatação e testes de
-persistência/isolamento. Exercitar o secret scan com credencial fictícia reconhecível
-pelo scanner e a política de auditoria com relatório NuGet sintético de severidade
-alta/crítica; não adicionar dependência vulnerável nem secret real.
-Também comprovar falha explícita para scan indisponível e execução com zero testes.
-
-Registrar o check afetado, evidência de falha e bloqueio de integração pelos checks
-obrigatórios de branch protection/ruleset. A aplicação dessa proteção exige permissão
-do mantenedor; sua ausência não pode ser registrada como bloqueio comprovado.
-Descartar somente as alterações do exercício e confirmar novamente a execução válida,
-sem desativar checks ou manter fixtures negativas no código distribuído.
-
-## 6. Aceite SC-009
-
-1. Comprovar estrutura e persistência separadas em A/B.
-2. Para reaplicar, parar a API A com `docker compose --project-name boilerplate-a -f $compose --env-file $localA stop api` e definir `TenantState=Inactive` no alvo; repetir os comandos da seção 3 com o sinal de inicialização desligado e confirmar dados/quantidades preservados. Reativar A e repetir a seção 4.
-3. Demonstrar backend vivo/pronto sem frontend, painel ou módulo de negócio.
-4. Registrar resultados dos testes e ausência de credenciais padrão.
-
-I1 só está concluído após essa prova, não por existir um projeto ou uma migration.
-
-## 7. Validação posterior, fora do aceite I1
-
-- **I2**: seguir [contrato futuro](contracts/future-openapi.json); login requer
-  tenant, cookies e CSRF. Usar contas separadas, mesmo email e senhas diferentes.
-  Sessão A com header B falha sem tocar B; logout/revogação/expiração/stamp/epoch
-  invalidam acesso. Não há `/me/tenants` nem identidade global.
-- **I2**: SC-002/SC-005 e isolamento runtime SC-003, com 200 operações, 100 por tenant
-  e pico observado >=20, incluindo resultados válidos e efeitos corretos.
-- **I3**: interface, SC-001 e módulos sintéticos opcionais SC-004, sem domínio comercial.
-- **I4**: Dokploy, persistência pós-restart, backup externo de catálogo e tenants;
-  restauração local renova epoch/revoga sessões/revisa concessões sem alterar outro tenant.
-  SC-007 e metas RPO/RTO/retenção/responsáveis antes de produção.
-- **Transversal**: SC-006/SC-008 acompanham as superfícies entregues; não esperar
-  o frontend para conferir documentação, compilação, testes e scans do backend.
-
-Este guia não afirma execução de aplicação, testes, migration, container ou deploy
-durante o planejamento.
+Evidências: revisão testada/SDK selecionado, suites/quantidades, migration inicial,
+matriz SC-002, 200/100/100/pico SC-003, consumidor SC-005, gates SC-006 e docs SC-008.
+L3/L4 (frontend, módulos opcionais, publicação e recuperação real) não são
+executadas nem declaradas concluídas neste roteiro.

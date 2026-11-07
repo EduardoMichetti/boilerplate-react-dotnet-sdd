@@ -1,6 +1,6 @@
 # Research: Fundação full-stack reutilizável
 
-**Date**: 2026-10-13
+**Date**: 2026-11-05 (esclarecimentos L2; decisões iniciais de 2026-10-13 preservadas)
 **Project**: `boilerplate-react-dotnet-sdd`
 **Context**: [spec.md](spec.md), [plan.md](plan.md) e
 [Constituição](../../.specify/memory/constitution.md).
@@ -8,9 +8,11 @@
 Esta pesquisa registra decisões do desenho, justificativas e alternativas.
 Não implementa bibliotecas, serviços ou infraestrutura. Autenticação por cookie
 e indicação de tenant por header foram confirmadas pelo usuário.
-Revisão atual: I1 é somente backend e migration de usuários/acesso. Autenticação HTTP,
-frontend e operação ampliada são posteriores. A matriz de versões anterior é preservada;
-esta revisão não é uma atualização de dependências.
+L1/I1 está entregue; a revisão atual planeja L2/I2, sem implementar autenticação.
+D01–D13 preservam a pesquisa inicial, não um retrato atualizado da implementação.
+D14–D18 prevalecem nas decisões refinadas de L2 e usam os nomes efetivos do código.
+A matriz anterior é histórica; esta revisão não verifica nem atualiza versões
+frontend. Para backend, manifests/lockfiles atuais são a fonte dos pins.
 
 ## D01 — Matriz de versões e compatibilidade
 
@@ -98,8 +100,8 @@ Senha é validada e hasheada por Identity, nunca por implementação criptográf
 
 I2 acrescenta AuthSession no mesmo banco, com cookie e `ITicketStore`.
 StoreAsync devolve referência tenant/epoch/session; o handler nativo protege essa
-referência no cookie e a desprotege antes de RetrieveAsync. Só então o adapter
-resolve o target pelo tenant protegido, nunca pelo header não confiável.
+referência no cookie e a desprotege antes de RetrieveAsync. O adapter valida a
+referência contra a instalação fixa; não resolve conexões por tenant/header.
 O ticket persistido também é protegido por Data Protection.
 
 Verificar sessão, validade do usuário e security stamp em cada operação protegida;
@@ -188,8 +190,8 @@ e proteção contra configuração cruzada.
 ## D06 — Identidade da instalação, validação de header e recursos scoped
 
 **Decision**: I1 tooling exige `TenantId`/`EnvironmentId` explícitos e conexão da instalação.
-Em I2, a instância conhece seu próprio `TenantId` pela configuração segura do ambiente; o header
-`X-Tenant-Id` (quando enviado) deve coincidir exatamente com o `TenantId` da instalação e com o
+Em I2, a instância conhece seu próprio `IdTenant` pela configuração segura do ambiente; o header
+`X-Tenant-Id` obrigatório nas cinco rotas de acesso deve coincidir com o `IdTenant` da instalação e com o
 marcador do banco antes de qualquer verificação de credenciais ou sessão. Qualquer divergência é
 negada imediatamente (403/401 conforme a operação), sem tentar selecionar outro banco.
 O contexto autorizado só existe após validar usuário, sessão e permissão no banco da instalação.
@@ -285,7 +287,7 @@ e custo sem benefício presente.
 **Decision**: I1 usa Compose API/PostgreSQL com perfil pontual EF migrations.
 Key ring e certificados de sessão passam a ser necessários somente ao implementar I2.
 Nessa fase, key ring persistente, protegido por permissões e certificado externo
-em produção. `SetApplicationName` distingue produto e ambiente; nunca compartilhar
+em produção. `SetApplicationName` distingue produto, ambiente e tenant; nunca compartilhar
 as chaves entre produtos derivados. Rotação preserva certificados necessários
 à leitura de chaves ainda válidas.
 
@@ -323,8 +325,7 @@ existe banco de catálogo central.
 Cada produto define frequência, retenção, RPO, RTO e responsáveis antes de produção.
 Downgrade de aplicação não executa downgrade de dados automaticamente.
 
-**Rationale**: restaurar um banco errado pode violar isolamento; restaurar catálogo
-antigo pode reconectar targets/estados obsoletos, e restaurar tenant pode reativar
+**Rationale**: restaurar um banco errado pode violar isolamento; restaurar tenant pode reativar
 sessões ou concessões antigas. O boilerplate não conhece carga
 e necessidades de retenção de todos os produtos derivados.
 
@@ -393,10 +394,359 @@ Rejeitadas por isolamento, drift do modelo, privilégio ou escopo.
 [EF seeding/locking](https://learn.microsoft.com/en-us/ef/core/modeling/data-seeding),
 [migration deployment](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying).
 
-## Fechamento da pesquisa
+## Revisão L2 — 2026-11-04
 
-Matriz consolidada com suporte e compatibilidade verificados; escolhas de segurança
-confirmadas, propriedade tenant-local e limites de I1 definidos, alternativas registradas.
-Não há esclarecimentos pendentes para iniciar
-a fase 1. Pins auxiliares, digests e lockfiles são entregas de implementação, não
-decisões arquiteturais adiadas. Não há ampliação para módulos de negócio ou serviços externos.
+### D14 — Base entregue e fronteira incremental
+
+**Decision**: usar L1/I1 como base entregue, com `AcessoTenantDbContext`,
+`UsuarioAplicacao`, `PermissaoUsuario`, `IdentidadeBancoTenant`,
+`IdAplicacao/IdAmbiente/IdTenant`, `EstadoTenant` e `StringsConexao:BancoApp`
+(`IdAplicacao` renomeado para `CodigoAplicacao` em D19).
+Não traduzir tipos herdados Identity nem renomear propriedades JSON já previstas.
+SDK-base 10.0.401 com `rollForward=latestFeature`, pacotes backend fixados no
+repositório e migration L1 de 2026-11-02 são a referência efetiva.
+L2 adiciona migration; não recria estrutura, tarefas L1 ou contas.
+
+**Rationale**: os documentos iniciais descreviam antes da implementação.
+Planejar sobre nomes antigos ou prometer SDK sem roll-forward produziria comandos
+e tarefas incompatíveis com a base atual.
+Leitura do Compose/exemplo não permite presumir runtime distinto do owner;
+P0 do plano exige separação real e modo local/HTTPS antes de expor login.
+
+**Alternatives considered**: reimplementar L1, renomear seu código para inglês,
+considerar todo comentário de exemplo como controle comprovado ou atualizar a stack.
+Rejeitadas por escopo, regressão ou ausência de evidência.
+
+**Revisão 2026-11-07 (substitui a premissa de preservação acima)**: vale a decisão
+de construção do zero de D19. O código L1 é ponto de partida alterável, não base
+preservada: a migration L1 de 2026-11-02 é descartada e regenerada como migration
+inicial única; não há contas, hashes, concessões, volumes ou senhas L1 a manter nem
+upgrade L1→L2 a testar. Continuam válidos: SDK/pacotes fixados como referência,
+nomes Identity herdados, nomes JSON já contratados e o histórico de [tasks](tasks.md).
+
+**Sources**: [tasks L1](tasks.md),
+[SDK](../../global.json), [pacotes](../../Directory.Packages.props),
+[API](../../backend/src/App.Api/Program.cs),
+[Compose](../../infra/compose.yaml).
+Isto é inspeção documental/de código, não reexecução das provas L1.
+
+### D15 — Cookie nativo, store local e corridas de revogação
+
+**Decision**: usar Cookies + `ITicketStore` nativos. Adapter HTTP na API com
+escopo por chamada e porta própria de persistência em Application/Infrastructure.
+Sessão L2 persiste ticket protegido, epoch, prazos, revogação e versão no banco
+local. Data Protection protege tanto o cookie-referência quanto os bytes do ticket.
+Não adicionar cache de sessão ou capturar DbContext scoped nas options.
+
+Retrieve confere sessão, conta ativa/lockout/stamp, epoch e expiração em cada
+operação. Concessões são verificadas no banco na autorização. Desabilitar sliding
+expiration; 30 minutos absolutos, sem refresh. Renew não faz upsert, não estende
+prazo e só atualiza linha ainda ativa/versão esperada. Logout persiste revogação
+antes de confirmar; erro de banco não é retornado como `null` ou logout concluído.
+
+No login válido com sessão anterior, revogá-la antes de SignIn para gerar chave
+nova. O handler pode reutilizar chave existente ao chamar SignIn; não presumir
+rotação automática. Corridas de login/desativação e Renew/logout exigem transação,
+updates condicionais e testes determinísticos, inclusive zero linhas atualizadas.
+Esclarecimento de 2026-11-05: sessões simultâneas por conta são permitidas.
+Rotação por login/logout limita-se ao cookie recebido; outras sessões permanecem
+válidas. Reset/desativação/lockout/revogação operacional revogam todas as da conta.
+Callbacks de rejeição/renew não podem reativar referência revogada.
+Esclarecimento de 2026-11-05: instalação inativa não bloqueia GET antiforgery nem
+logout de sessão própria ainda válida; o token permite somente sua revogação,
+não consultar dados. `/me` e `/context` continuam bloqueados.
+Inativação da instalação suspende uso, não revoga sessões nem muda epoch/prazos.
+Após reativar, somente sessões ainda válidas e não revogadas podem retomar,
+mantendo a contagem da expiração durante o período inativo.
+
+**Rationale**: usar criptografia/protocolo do framework evita implementação própria;
+store persistente elimina a validade de replay após revogação. Revogação sem intervalo
+atende à próxima operação após commit. Escopos e referências validadas impedem
+dependência circular da autenticação ou seleção de outro banco.
+
+**Alternatives considered**: JWT sem estado, cookie só assinado, validação periódica
+de stamp, sliding expiration, upsert no Renew e store em Redis.
+Rejeitadas por atraso de revogação, risco de ressurreição ou serviço desnecessário.
+
+**Sources**:
+[Cookie authentication .NET 10](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie?view=aspnetcore-10.0),
+[ITicketStore .NET 10](https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.authentication.cookies.iticketstore?view=aspnetcore-10.0),
+[handler — source browser](https://source.dot.net/Microsoft.AspNetCore.Authentication.Cookies/CookieAuthenticationHandler.cs.html).
+Source browser é evidência auxiliar, não fonte fixada ao binário 10.0.12.
+Comportamento exato de Store/Retrieve/Renew/Remove e sign-in/sign-out será comprovado
+nos testes com os pacotes efetivamente utilizados; não há execução nesta pesquisa.
+
+### D16 — CSRF JSON, limitação de login e saúde isolada
+
+**Decision**: `IAntiforgery.GetAndStoreTokens` no GET de token e
+`ValidateRequestAsync` explícito nos POSTs JSON de login/logout.
+Após mudança de identidade, consumidor faz outro GET para obter novo token.
+Não depender de validação implícita de formulários/minimal APIs, SameSite ou CORS.
+Usar headers/cookies existentes no contrato, sem frontend nesta entrega.
+
+Rate limiter nativo por IP efetivo/instalação: janela fixa de um minuto, cinco
+pedidos, fila zero e 429/Retry-After. Identity: cinco falhas de senha por conta,
+15 minutos de lockout, habilitado em toda conta desde a criação (revisão
+2026-11-07: não há contas L1 preservadas); testar atualização concorrente.
+Esclarecimento de 2026-11-05: confirmar lockout revoga todas as sessões da conta
+e muda stamp atomicamente. Fim do bloqueio exige novo login, sem retomada de
+cookies antigos; nenhuma conta/sessão da outra instalação é alterada.
+Forwarded headers somente de proxies explicitamente confiáveis.
+Uma réplica por instalação; escala horizontal exigiria outra decisão de limite.
+
+Pipeline de saúde e OpenAPI fica fora do middleware que autentica cookies.
+Somente `AllowAnonymous` não prova ausência de Retrieve.
+Liveness não acessa banco/chaves; readiness confere identidade/versão e
+round-trip de proteção de chaves, sem consultar contas/sessões.
+
+**Rationale**: login também exige CSRF; token de identidade anterior não serve para
+logout autenticado. Rate limiting e lockout tratam riscos distintos e devem ser
+testados separadamente. Health não pode disparar acesso a sessão arbitrária.
+
+**Alternatives considered**: JSON considerado imune a CSRF, token único antes/depois
+de login, confiar em X-Forwarded-For livre, limiter global entre clientes ou
+`AllowAnonymous` como única barreira de health. Rejeitadas por contrato e isolamento.
+
+**Sources**:
+[Antiforgery .NET 10](https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0),
+[Rate limiting .NET 10](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit?view=aspnetcore-10.0),
+[Forwarded headers .NET 10](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer?view=aspnetcore-10.0),
+[Health checks .NET 10](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks?view=aspnetcore-10.0).
+Não extrapolar mecanismos automáticos documentados apenas para versões posteriores.
+
+### D17 — Key ring por instalação e upgrade aditivo
+
+**Decision**: volume persistente privado por instalação, nome lógico Data Protection
+derivado de aplicação/ambiente/tenant e certificado X.509 externo para proteção em
+repouso em produção. Não adicionar contexto EF/banco de chaves.
+Cookie `__Host-bps-session` só em HTTPS; exceção Development HTTP localhost usa
+`bps-session`, falhando fora desse escopo. Preservar key ring em restart; rotação
+mantém certificados necessários às chaves ainda válidas.
+
+Migration L2 aditiva cria sessões e auditoria vazias e prepara lockout para contas
+existentes; manter hash/conta/concessão/marcador/epoch L1.
+Atualização exige preflight e manutenção com owner. Testar banco vazio, L1→L2 e
+reaplicação; não presumir que alterar init scripts atualiza um volume já existente.
+Revisão de consistência de 2026-11-05: runtime exige cadeia de migrations conhecida
+completa; tooling aceita seu prefixo válido. Histórico com IDs desconhecidos
+bloqueia, mesmo sem pendentes. Ticket expirado pode permanecer armazenado até
+limpeza, mas nunca autoriza uso; revogação remove o ticket.
+Development HTTP em Docker é delimitado pela publicação no loopback do host,
+não por presumir que o endereço remoto interno do gateway é loopback.
+
+**Rationale**: nome lógico sozinho não substitui chaves/arquivos isolados.
+Persistir key ring em diretório explícito exige definir proteção em repouso,
+não presumir criptografia automática. Upgrade real passa a ser obrigação agora
+que existe um estado anterior entregue.
+
+**Alternatives considered**: key ring efêmero/compartilhado, novo serviço/banco de
+chaves, cookies inseguros em Production para facilitar Compose e recriar a migration
+inicial. Rejeitadas por perda de sessão, isolamento ou perda de dados.
+
+**Revisão 2026-11-06 (substitui a parte de migration acima)**: o projeto está em
+construção do zero; nada foi publicado e não há dados. O esquema é criado por uma
+migration inicial única com o modelo completo e as convenções de D19, e os bancos
+locais são criados do zero. A parte de key ring/cookies desta decisão permanece válida.
+
+**Sources**:
+[Data Protection configuration .NET 10](https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/configuration/overview?view=aspnetcore-10.0),
+[Key encryption at rest](https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/implementation/key-encryption-at-rest?view=aspnetcore-10.0),
+[EF migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying).
+
+### D18 — Procedimento de contas restrito e auditável
+
+**Decision**: host console mínimo `Platform.Operations` com comandos fechados,
+perfil Compose pontual e casos de uso reutilizados de Application/Infrastructure.
+Não é servidor administrativo. Usa `UserManager`, senha lida sem eco,
+configuração privada e argumentos de identidade para confirmar o alvo.
+Role operacional local distinta de runtime/owner, autenticada pelo PostgreSQL
+e permitida pela configuração protegida do processo; ACL do ambiente autoriza
+o operador a usar seu segredo. `--actor`/flag não autentica ninguém.
+Esclarecimento de 2026-11-05: login de operação é individual e não compartilhado,
+atribuído a um único operador. A auditoria grava esse login autenticado com a
+correlação; uma credencial técnica compartilhada não comprova autoria pessoal.
+O recorte auditável comum abrange contas, permissões e sessões, com criação e
+última alteração atribuídas e correlacionadas. Base pura `EntidadeAuditavel` e
+contrato `IEntidadeAuditavel` em Domain; permissões/sessões herdam a base, usuário
+Identity implementa o contrato sem trocar sua classe-base.
+Infrastructure compartilha mapeamento/preenchimento (mecanismo em D19) e obtém
+autoria de contexto confiável. Ações anônimas/automáticas são distintas; todo
+registro nasce com autoria e data reais. Histórico operacional é imutável e não herda base mutável.
+Não ampliar a base para marcador/tabelas auxiliares Identity nem armazenar diff
+de campos secretos. Alternativa de dupla herança no usuário é impossível em C#;
+refatorar Identity ou criar framework genérico de histórico foi rejeitado por escopo.
+
+Registrar resultado em `RegistroOperacaoAcesso`; alterações bem-sucedidas e auditoria
+na mesma transação. Revogar sessões/stamp ao desativar/redefinir/revogar acesso.
+Recuperação L2 é reset pelo operador, sem email/self-service.
+Senha nova/reset: 12–128 caracteres com validadores Identity definidos no contrato;
+não elevar retroativamente o requisito de senha existente no login.
+Sem bootstrap privilegiado por HTTP, seed padrão, CRUD de papéis ou catálogo.
+
+**Rationale**: FR-033 entra no recorte L2 e agora tem consumidor concreto.
+Um host pontual é menor que painel/API administrativa e mais verificável que
+SQL manual para hash/stamp/lockout. A auditoria participa do resultado, não é
+stdout descartável apresentado como prova durável.
+
+**Alternatives considered**: adiar FR-033 à produção, editar tabelas/senhas por SQL,
+criar conta padrão, usar owner na operação rotineira ou expor endpoints de gestão.
+Rejeitadas por recorte, controles incompletos e privilégio excessivo.
+
+**Sources**: FR-033/SC-002 de [spec.md](spec.md),
+[Identity configuration .NET 10](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-configuration?view=aspnetcore-10.0),
+[ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md).
+
+### D19 — Preenchimento de auditoria, data/hora e identificadores (2026-11-06)
+
+**Decision**:
+- **Auditoria**: porta `IContextoOperacao` (Application) com `IdOperacao`, tipo/autor
+  e `InstanteOperacao`, uma implementação por host; `InterceptadorAuditoria`
+  (`SaveChangesInterceptor`, Infrastructure) preenche criação/alteração e incrementa
+  `Versao` onde ela existe (token por entidade em D20). Entidades auditáveis só são alteradas rastreadas; `ExecuteUpdate`/
+  `ExecuteDelete` proibidos nelas, com teste de arquitetura. Corridas em Renew/logout
+  e revogações são resolvidas por `Versao` como token de concorrência.
+- **Sem campos duplicados**: permissão usa `CriadoEm` da base como instante da
+  concessão (sem `ConcedidaEm`); sessão usa `CriadoEm` como emissão, sem `EmitidaEm`.
+  `RevogadaEm` permanece como estado da sessão.
+- **Construção do zero**: nada publicado nem dados; o código existente é ponto de
+  partida alterável. O esquema nasce de uma migration inicial única gerada do modelo
+  completo (a migration de rascunho atual é descartada). `CriadoEm` é sempre
+  obrigatório; não há exceção de relógio.
+- **Sem exclusão lógica na base**: estados próprios (`EstaAtivo`, `RevogadaEm`) e
+  exclusão física auditada da concessão atendem a L2.
+- **Data/hora**: `DateTimeOffset` UTC em `timestamptz`, normalizado para
+  microssegundos por `InstanteUtc` (Domain, puro); instante atual somente de
+  `TimeProvider`, lido uma vez por operação; sem `now()`/default do banco, sem
+  exceções. APIs de relógio estáticas
+  barradas por teste de arquitetura. Fuso de exibição fica na interface.
+- **Identificadores**: Constituição 2.2.0. `Id*` é chave técnica opaca, UUID v7
+  gerado no servidor; código de negócio é coluna `Codigo*`/`Numero*` própria.
+  `CodigoPermissao` na PK da concessão é exceção registrada (catálogo fechado no
+  código-fonte, não de env/Key Vault). Campos que guardam login/identidade textual
+  deixam de usar o prefixo `Id` (`LoginOperador`, `AutorCriacao`, `AutorAlteracao`);
+  configuração `IdAplicacao` passa a `CodigoAplicacao` (mesmo valor).
+- **Nomes no banco**: PK `Id<Entidade>`; FK `FkId<Entidade>[Papel]` só na
+  persistência (Domain/Application/DTO usam `IdUsuario`); colunas PascalCase;
+  tabelas snake_case; constraints/índices `pk_/fk_/ix_/uq_/ck_` em minúsculas, até
+  63 caracteres, por convenção central e teste. Propriedades Identity `Id`/`UserId`
+  não são renomeáveis (declaradas nas classes-base e usadas pelo `UserStore`); suas
+  colunas são mapeadas para `IdUsuario`/`FkIdUsuario`.
+
+**Rationale**: o plano dizia “preenchimento compartilhado” sem mecanismo, e as
+transições de sessão tendiam a `ExecuteUpdate`, que ignora interceptores e deixaria
+a auditoria desatualizada sem erro. O código L1 chamava `DateTimeOffset.UtcNow`
+diretamente (inicializador de `PermissaoUsuario` e preflight), o que impede controlar
+o relógio em teste e faz a validação de `default` nunca disparar. .NET guarda
+100 ns e o PostgreSQL microssegundos, o que quebra comparações após gravar e ler.
+Misturar relógio do banco e da aplicação torna `agora >= ExpiraEm` inconsistente.
+UUID v7 mantém os Ids atuais (`Guid`), não é enumerável e é ordenável para índice.
+
+**Alternatives considered**:
+- `ExecuteUpdate` via extensão que inclui colunas de auditoria: rejeitada, dois
+  caminhos de auditoria para manter; o SELECT extra é irrelevante no volume de sessões.
+- Ter `ConcedidaEm` e `CriadoEm` lado a lado: rejeitada pelo mantenedor (mesmo
+  significado em dois campos).
+- `BaseEntity` com `Id int`, `CreatedBy` livre e `Deleted bool` (modelo de outro
+  projeto): rejeitada; PK composta/Guid, autoria tipada e conflito do soft delete
+  com Identity/PK.
+- `DateHelper` estático com `UtcNow` e conversão para America/Sao_Paulo: rejeitado;
+  não testável, fallback silencioso para UTC sem `tzdata`, e conversão de exibição
+  não pertence ao backend. `Microsoft.Extensions.TimeProvider.Testing` dispensado
+  para não adicionar pacote; uma implementação de teste mínima basta.
+- Catálogo `access.permissoes` com `IdPermissao`: rejeitado por ora, pois duplicaria
+  a fonte da verdade (código) sem consumidor; revisitar se permissões virarem dado
+  cadastrável.
+- `bigint` identity como Id padrão: rejeitado; enumerável se exposto e divergente
+  dos UUIDs já usados.
+- Migrations incrementais sobre o rascunho atual: rejeitada pelo mantenedor; sem
+  dados nem publicação, só acrescentaria renames e exceções sem benefício.
+- FK com o mesmo nome da PK referenciada (`IdUsuario`): preterida pelo mantenedor em
+  favor de `FkIdUsuario`, que torna a FK explícita na coluna.
+- Colunas em snake_case: preterida; o mantenedor prefere PascalCase igual à
+  propriedade C#, aceitando aspas em SQL manual (o host operacional evita SQL manual).
+- Nome de configuração indicando a origem (ex.: prefixo de Key Vault): rejeitado;
+  a mesma chave vem de fontes diferentes por ambiente, e segredo é definido pela
+  lista documentada, não pelo nome.
+
+**Sources**: [Constituição IX](../../.specify/memory/constitution.md),
+[TimeProvider](https://learn.microsoft.com/en-us/dotnet/standard/datetime/timeprovider-overview),
+[EF Core interceptors](https://learn.microsoft.com/en-us/ef/core/logging-events-diagnostics/interceptors),
+[ExecuteUpdate e ChangeTracker](https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete),
+[Npgsql date/time](https://www.npgsql.org/doc/types/datetime.html).
+
+### D20 — Tabelas auxiliares Identity, concorrência por entidade, relógio dos UUIDs e troca de sessão (2026-11-07)
+
+**Decision**:
+- **Tabelas auxiliares Identity** (`reivindicacoes_usuario`, `logins_usuario`,
+  `tokens_usuario`): permanecem no modelo como **exceção registrada** às regras de PK.
+  `IdentityUserClaim<Guid>.Id` é `int` declarado na classe-base; logins e tokens têm
+  PK composta textual definida pelo framework. Renomear colunas não muda esse tipo.
+  Mapeamento: `Id` da reivindicação → coluna `IdReivindicacaoUsuario` (int identity,
+  sem UUID v7), `UserId` → `FkIdUsuario`, constraints na convenção central. Nenhum
+  fluxo L2 lê ou grava essas tabelas: login usa verificação de senha sem fábrica de
+  claims, reset usa `UserManager` sem token persistido e não há login externo/2FA.
+  Runtime e operador não recebem INSERT/UPDATE/DELETE nelas; teste prova que
+  continuam vazias após a suíte e o teste de modelo as trata como exceção listada.
+  Não recebem base auditável. Usá-las exige novo plano.
+- **Concorrência por entidade** (o token é escolhido pelo dono da escrita):
+
+  | Entidade | Token | Escrita | Interceptor |
+  |---|---|---|---|
+  | `UsuarioAplicacao` | `ConcurrencyStamp` nativo | somente `UserManager` | Preenche metadados; não toca em `ConcurrencyStamp` nem cria `Versao`. Mudança apenas de `ConcurrencyStamp` não é alteração efetiva. |
+  | `PermissaoUsuario` | nenhum (imutável) | INSERT/DELETE | Rejeita `Modified`. Alteração não existe; retirada é DELETE com evento em `RegistroOperacaoAcesso`. |
+  | `SessaoAutenticacao` | `Versao` int64 | store e casos de uso | Preenche metadados e incrementa `Versao` (contrato `IEntidadeVersionada`). |
+  | `RegistroOperacaoAcesso` | nenhum | INSERT | Rejeita `Modified`/`Deleted`. |
+
+  `IdentityResult` com `ConcurrencyFailure` e `DbUpdateConcurrencyException` são
+  falha segura. Exceção única: na contagem de falhas de senha, que não pode perder
+  tentativas, o caso de uso recarrega a conta e reavalia senha/lockout até três vezes;
+  esgotado, 503 sem sessão. Concessão concorrente duplicada (violação de PK) ou
+  retirada concorrente (zero linhas no DELETE) é conflito explícito, não no-op.
+- **Relógio dos UUIDs**: `Guid.CreateVersion7()` sem argumento lê o relógio do
+  sistema e é proibido. Todo `Id*` gerado usa `IdentificadorV7.Gerar(instante)`
+  (helper puro em Domain sobre `Guid.CreateVersion7(DateTimeOffset)`, exige offset
+  zero) com o `InstanteOperacao` da operação; o timestamp do UUID coincide com
+  `CriadoEm` em milissegundos. PKs `Guid` são `ValueGeneratedNever()`: o gerador do
+  provider (que também usaria o relógio do sistema) fica desligado. `UsuarioAplicacao.Id`
+  é atribuído pelo caso de uso antes de `CreateAsync`. `SecurityStamp`/
+  `ConcurrencyStamp` continuam gerados pelo Identity: são carimbos aleatórios, não `Id*`.
+  Teste de arquitetura barra `Guid.NewGuid()` e `Guid.CreateVersion7()` sem argumento
+  no código de produção.
+- **Troca de sessão no login** (clarificação de 2026-11-07): uma unidade de trabalho
+  por requisição revoga a sessão anterior com `Versao` esperada e insere a nova;
+  commit antes de emitir `Set-Cookie`. `StoreAsync` participa da mesma unidade pelo
+  escopo da requisição; o login nunca chama `RenewAsync` com a chave anterior.
+  Conflito de `Versao` na sessão anterior (outro login, logout, Renew ou revogação
+  concorrente) faz rollback e retorna **409 SESSION_CONFLICT**, sem cookie novo e sem
+  alterar a anterior; repetir exige novo GET antiforgery. Falha de persistência faz
+  rollback e retorna 503 DEPENDENCY_UNAVAILABLE. Login sem sessão anterior válida não
+  tem disputa a perder.
+
+**Rationale**: o modelo afirmava UUID v7 em todas as PKs, mas o Identity impõe tipos
+nas tabelas auxiliares; registrar a exceção é mais seguro que remover entidades das
+quais o `UserOnlyStore` depende. Um `Versao` paralelo ao `ConcurrencyStamp` criaria dois
+tokens com semânticas diferentes na mesma linha, e `Versao` em concessão imutável não
+protege nada. Gerar UUID com relógio próprio contradiz a fonte única de D19. 409 separa
+a disputa perdida de credencial inválida (401) e de dependência indisponível (503).
+
+**Alternatives considered**:
+- Ignorar as entidades auxiliares no `OnModelCreating`: rejeitada; métodos do store e
+  `UserClaimsPrincipalFactory` falhariam em tempo de execução sem contrato documentado.
+- Store Identity próprio só com usuário: rejeitada por escopo (abstração nova sem consumidor).
+- `Versao` também em usuário/permissão por uniformidade: rejeitada (token duplicado ou inútil).
+- Repetição automática da troca de sessão: rejeitada; a clarificação exige contexto atual.
+- 401 para a disputa perdida: rejeitada; o consumidor não distinguiria credencial inválida.
+
+**Sources**: clarificações 2026-11-07 de [spec.md](spec.md),
+[Identity model customization](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/customize-identity-model?view=aspnetcore-10.0),
+[Guid.CreateVersion7(DateTimeOffset)](https://learn.microsoft.com/en-us/dotnet/api/system.guid.createversion7),
+[EF Core concurrency](https://learn.microsoft.com/en-us/ef/core/saving/concurrency).
+
+## Fechamento da pesquisa L2
+
+Não há esclarecimentos técnicos pendentes. Decisões acima permitem a Phase 1 sem
+atualizar a stack ou ampliar para frontend/negócio/deploy.
+Valores privados, caminhos de certificado e proxies reais são configuração do
+ambiente de validação/produção, não escolhas arquiteturais silenciosamente assumidas.
+P0 do plano permanece gate obrigatório de implementação; pesquisa/desenho não
+equivalem a testes, scans, migrations ou liberação executados.

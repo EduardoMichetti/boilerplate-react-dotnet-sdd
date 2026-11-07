@@ -1,12 +1,13 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "boilerplate-react-dotnet-sdd - Future Tenant Access API",
+    "title": "boilerplate-react-dotnet-sdd - L2 Tenant Access API (planned)",
     "version": "1.1.0",
-    "description": "Contrato futuro I2, não disponível nem implementado em I1. Contas, permissões e sessões ficam no banco do próprio tenant. Login exige tenant explícito; sessão não concede acesso a outro tenant. Cookie de produção __Host-bps-session; somente Development em localhost usa bps-session. Sem cadastro público, painel ou listagem global de tenants."
+    "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta de 30 minutos, CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
   },
   "x-increment": "I2",
   "x-planned-only": true,
+  "x-baseline-increment": "I1-delivered",
   "servers": [
     { "url": "/", "description": "Mesma origem do frontend; consumidores independentes configuram a origem publicada." }
   ],
@@ -25,7 +26,7 @@
         "operationId": "getAntiforgeryToken",
         "tags": ["Authentication"],
         "summary": "Obter token de requisição antiforgery",
-        "description": "Emite cookie antiforgery HttpOnly e retorna o token X-CSRF-TOKEN. Não autentica nem enumera tenants. Header é validado sintaticamente; com sessão válida, seu tenant deve coincidir. Obter novo token após login. Resposta não cacheável.",
+        "description": "Emite cookie antiforgery HttpOnly e retorna o token para X-CSRF-TOKEN. Exige um header válido coincidente com a instalação antes de lookup; divergência retorna 403. Não exige instalação ativa, para permitir encerrar a própria sessão sem liberar consultas. Não autentica nem enumera tenants. Com sessão válida emite token da identidade corrente; cookie inválido/expirado é anônimo, sem mascarar falha de dependência. Obter novo token em outro GET após login/logout. Resposta não cacheável.",
         "security": [],
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" }
@@ -53,7 +54,7 @@
         "operationId": "login",
         "tags": ["Authentication"],
         "summary": "Autenticar identidade previamente preparada pelo operador",
-        "description": "Exige X-Tenant-Id coincidente com o TenantId configurado na instalação. Valida estado ativo da instalação e identidade do seu banco (TenantDatabaseIdentity) antes de verificar somente as credenciais locais; não existe catálogo central nem busca em outros bancos. Tenant divergente/inativo, usuário bloqueado/desabilitado e senha incorreta têm AUTH_INVALID genérico, sem enumeração. Valida CSRF. Não retorna token de autenticação ou conexão. Limite inicial: cinco requisições por minuto por IP confiável na instalação e lockout Identity local.",
+        "description": "Exige X-Tenant-Id coincidente com IdTenant da instalação. Valida instalação ativa e marcador IdentidadeBancoTenant antes das credenciais locais; não existe catálogo nem busca em outros bancos. Tenant divergente/inativo, usuário desconhecido/bloqueado/desativado e senha incorreta têm AUTH_INVALID genérico. Valida explicitamente CSRF JSON da identidade corrente. Com sessão anterior válida, a troca é atômica: revogação da anterior (versão esperada) e criação da nova referência são confirmadas na mesma transação antes do sucesso. Se outro login, logout ou revogação concorrente alterar a sessão anterior, responde 409 SESSION_CONFLICT; falha de persistência responde 503. Em ambos a sessão anterior mantém estado e prazo, nenhuma sessão é criada e repetir exige novo GET antiforgery. Não retorna token de autenticação ou conexão. Limite: cinco requisições/minuto/IP efetivo/instalação, janela fixa, fila zero; Identity bloqueia conta por 15 minutos após cinco falhas. Confirmar bloqueio revoga todas as sessões e muda stamp atomicamente; após o prazo, exigir novo login, sem restaurar cookies antigos. Login aceita 1–128 caracteres; senha fora da política de criação resulta em AUTH_INVALID, sem revelar a política.",
         "security": [],
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" },
@@ -67,7 +68,7 @@
         },
         "responses": {
           "200": {
-            "description": "Sessão de servidor criada, com expiração absoluta inicial de 30 minutos.",
+            "description": "Nova sessão de servidor criada, com expiração absoluta de 30 minutos. Sessões em outros clientes/dispositivos da mesma conta permanecem válidas; somente a sessão do cookie recebido é substituída.",
             "headers": {
               "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" },
               "Cache-Control": { "$ref": "#/components/headers/NoStore" }
@@ -78,6 +79,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/InvalidCredentials" },
+          "409": { "$ref": "#/components/responses/SessionConflict" },
           "429": { "$ref": "#/components/responses/TooManyRequests" },
           "503": { "$ref": "#/components/responses/ServiceUnavailable" },
           "default": { "$ref": "#/components/responses/UnexpectedError" }
@@ -89,14 +91,14 @@
         "operationId": "logout",
         "tags": ["Authentication"],
         "summary": "Revogar a sessão corrente e eliminar seu cookie",
-        "description": "Exige header igual ao tenant da referência de sessão protegida. Revoga somente no banco de origem antes de responder; replay falha. Nunca resolve outro banco a partir de header divergente. Sessão inválida retorna 401 e falha de persistência 503, sem confirmar saída.",
+        "description": "Exige header coincidente, sessão local válida e CSRF JSON da identidade corrente; não exige foundation.context.read nem instalação ativa. Encerramento da própria sessão permanece permitido com empresa inativa, sem liberar consultas. Confirma commit da revogação antes de remover cookie/responder. Replay falha; Renew concorrente não recria registro/ticket nem estende prazo. Header divergente nunca seleciona banco. Sessão inválida retorna 401; falha de persistência retorna 503, sem confirmar saída ou apagar cookie como sucesso.",
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" },
           { "$ref": "#/components/parameters/CsrfToken" }
         ],
         "responses": {
           "204": {
-            "description": "Sessão revogada; sem corpo.",
+            "description": "Somente a sessão corrente revogada; outras sessões da mesma conta permanecem válidas. Sem corpo.",
             "headers": {
               "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" },
               "Cache-Control": { "$ref": "#/components/headers/NoStore" }
@@ -105,7 +107,6 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/AuthenticationRequired" },
           "403": { "$ref": "#/components/responses/AccessDenied" },
-          "409": { "$ref": "#/components/responses/TenantUnavailable" },
           "503": { "$ref": "#/components/responses/ServiceUnavailable" },
           "default": { "$ref": "#/components/responses/UnexpectedError" }
         }
@@ -116,7 +117,7 @@
         "operationId": "getCurrentUser",
         "tags": ["Identity"],
         "summary": "Consultar identidade e validade da própria sessão",
-        "description": "Consulta somente a conta no banco do tenant da sessão protegida. Exige header coincidente, sessão/epoch/stamp válidos e conta habilitada. Não usa identidade central nem procura a mesma pessoa em outros tenants.",
+        "description": "Autoriza somente leitura da própria conta vinculada à sessão local. Exige header coincidente, sessão/epoch/stamp/prazo válidos e conta ativa não bloqueada, conferidos a cada operação. Não exige foundation.context.read, identidade central ou busca da pessoa em outros tenants.",
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" }
         ],
@@ -142,7 +143,7 @@
         "operationId": "getTenantContext",
         "tags": ["TenantContext"],
         "summary": "Consultar o próprio contexto de acesso no tenant validado",
-        "description": "Exige foundation.context.read local. Valida cookie protegido e coincidência do header antes de lookup; confirma banco/ambiente, sessão, usuário, epoch, stamp e concessão atuais no tenant de origem. Header não escolhe outro banco. Não é um CRUD de negócio.",
+        "description": "Exige foundation.context.read vigente no banco, não uma claim permanente do login. Confere header antes de lookup e marcador/versão antes dos dados de acesso; valida cookie protegido, sessão, conta ativa não bloqueada, epoch, stamp e prazo a cada operação. Revogação da concessão vale na próxima operação após commit. Header não escolhe outro banco; não é CRUD de negócio.",
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" }
         ],
@@ -168,7 +169,7 @@
         "operationId": "getLiveness",
         "tags": ["Health"],
         "summary": "Verificar que o processo está vivo",
-        "description": "Não inicia autenticação nem consulta catálogo ou bancos de tenants. Não expõe versão interna, conexão, stack ou configuração.",
+        "description": "Fora do pipeline de autenticação, ignora cookies e header tenant. Não consulta banco, sessão ou key ring. Não expõe versão interna, conexão, stack ou configuração.",
         "security": [],
         "responses": {
           "200": {
@@ -186,7 +187,7 @@
         "operationId": "getReadiness",
         "tags": ["Health"],
         "summary": "Verificar disponibilidade da fundação",
-        "description": "Valida configuração da instalação, identidade/versão do banco configurado (TenantDatabaseIdentity) e key ring de I2. Isolado do middleware de sessão; não consulta contas e ignora cookies recebidos.",
+        "description": "Valida configuração da instalação, IdentidadeBancoTenant e cadeia de migrations conhecida completa do banco local, sem pendentes ou IDs desconhecidos, além de round-trip de proteção do key ring persistente L2 com certificado em produção. Banco de versão futura desconhecida ou key ring indisponível retorna 503. Fora do middleware de sessão; não consulta contas, ignora cookies/header tenant e nunca roda migrations.",
         "security": [],
         "responses": {
           "200": {
@@ -207,7 +208,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "__Host-bps-session",
-        "description": "Referência tenant/epoch/session protegida pelo handler nativo, HttpOnly, Secure, SameSite=Lax, Path=/ e sem Domain. Store tenant-local; não reutilizável em outro tenant. Somente Development em localhost usa bps-session sem Secure."
+        "description": "Referência tenant/epoch/session protegida pelo handler nativo, HttpOnly, Secure, SameSite=Lax, Path=/ e sem Domain. Store/ticket/key ring tenant-local. Expiração absoluta de 30 minutos, sem sliding/refresh. Somente Development HTTP localhost usa bps-session sem Secure. Portas no mesmo host não isolam cookies; consumidores locais A/B usam jars separados."
       }
     },
     "parameters": {
@@ -330,6 +331,7 @@
               "TENANT_REQUIRED",
               "TENANT_ACCESS_DENIED",
               "TENANT_UNAVAILABLE",
+              "SESSION_CONFLICT",
               "NOT_FOUND",
               "DEPENDENCY_UNAVAILABLE",
               "RATE_LIMITED",
@@ -378,7 +380,12 @@
         "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
       },
       "TenantUnavailable": {
-        "description": "409: TENANT_UNAVAILABLE; tenant de origem da sessão válida deixou de ser Active. Nunca usado para enumerar tenants no login anônimo.",
+        "description": "409: TENANT_UNAVAILABLE em /me e /context; instalação de origem da sessão válida está inativa. Não bloqueia logout ou obtenção de CSRF nem enumera tenants no login anônimo. Inativação não revoga sessões, pausa ou estende prazos; após reativar, somente sessões ainda válidas e não revogadas podem retomar.",
+        "headers": { "Cache-Control": { "$ref": "#/components/headers/NoStore" } },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+      },
+      "SessionConflict": {
+        "description": "409: SESSION_CONFLICT somente no login; a sessão anterior deste cookie foi substituída, encerrada ou revogada por operação concorrente. Nenhuma sessão nova é criada nem cookie de sessão emitido; a anterior não é alterada por esta tentativa. Repetir exige novo GET antiforgery com o contexto atual.",
         "headers": { "Cache-Control": { "$ref": "#/components/headers/NoStore" } },
         "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
       },

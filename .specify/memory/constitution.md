@@ -1,21 +1,21 @@
 <!--
 Sync Impact Report
-- Alteração de versão: modelo não ratificado -> 1.0.0 (adoção inicial).
-- Princípios modificados: nenhum princípio anterior ratificado; os cinco espaços do
-  modelo foram substituídos pelos dez princípios fornecidos pelo projeto:
-  I. Arquitetura modular; II. Reutilização e contratos explícitos;
-  III. Stack tecnológica; IV. Multi-tenancy com isolamento obrigatório;
-  V. API REST e contratos documentados; VI. Segurança e menor privilégio;
-  VII. Qualidade proporcional ao risco; VIII. Infraestrutura reproduzível;
-  IX. Manutenibilidade; X. Evolução controlada.
-- Seções adicionadas: conteúdo dos princípios, Restrições e critérios de qualidade,
-  Fluxo de desenvolvimento e resolução de conflitos, e regras de Governance.
-- Seções removidas: nenhuma; hierarquia do modelo ativo preservada.
-- Referência utilizada: Resumo.md; nomes de diretórios e possibilidades futuras
-  permanecem propostas, não funcionalidades obrigatórias.
-- Pendências e placeholders adiados: nenhum.
-- Escopo de sincronização: somente esta Constituição; templates e comandos
-  dependentes a consultam em tempo de execução e não foram modificados.
+- Alteração de versão: 2.1.0 -> 2.2.0 (MINOR: ampliação material de obrigações).
+- Princípio modificado: IX. Manutenibilidade e Padrão de Nomenclatura.
+  Acrescentadas regras de Id como chave técnica (UUID v7, nunca código de negócio,
+  `Codigo*`/`Numero*` separados, exceção de catálogo declarado no código), de
+  nomes no banco (PK `Id<Entidade>`, FK `FkId<Entidade>[Papel]`, colunas PascalCase,
+  constraints `pk_/fk_/ix_/uq_/ck_` minúsculas) e de padrão único de data/hora
+  (`DateTimeOffset` UTC, `timestamptz`, microssegundos, `TimeProvider`, sem relógio
+  do banco). Verificação ampliada com testes de modelo e de arquitetura.
+- Seções adicionadas/removidas: nenhuma.
+- Impacto em artefatos: specs/001-fullstack-foundation (spec, plan, data-model,
+  research, quickstart, contratos) e ADR 0002 atualizados no mesmo conjunto. Projeto
+  em construção do zero: o esquema nasce de uma migration inicial única já com as
+  novas convenções; a configuração passa a usar `CodigoAplicacao`.
+- Pendências: aprovação explícita do mantenedor no pull request (Governance).
+- Escopo de sincronização: templates e comandos do Spec Kit consultam esta
+  Constituição em tempo de execução e não foram modificados.
 - Este relatório é material temporário de revisão, não uma regra de governança;
   DEVE ser removido antes do commit da Constituição.
 -->
@@ -213,8 +213,44 @@ saúde; antes da produção, DEVEM existir evidências de publicação e restaur
   Termos artificiais como `Inquilino` (no lugar de `Tenant`), `Instantaneo` (no lugar de
   `Snapshot`) ou `ContextoBanco` (no lugar de `DbContext`) NÃO DEVEM ser utilizados.
 - Identificadores DEVEM sempre iniciar pelo prefixo **`Id`** (ex.: `IdTenant`, `IdAmbiente`,
-  `IdUsuario`, `IdAplicacao`). Para registros singleton, DEVE-SE utilizar `IdUnico` e
+  `IdUsuario`, `IdSessao`). Para registros singleton, DEVE-SE utilizar `IdUnico` e
   `IdUnicoPadrao`.
+- Na persistência, a PK de cada tabela DEVE se chamar `Id<Entidade>` e a coluna de
+  chave estrangeira DEVE se chamar `FkId<Entidade>[Papel]` (ex.: `FkIdUsuario`,
+  `FkIdUsuarioResponsavel`). Referência sem constraint de FK mantém `Id*`. O prefixo
+  `Fk` NÃO DEVE vazar para Domain, Application ou DTOs. Propriedades herdadas de
+  frameworks que não podem ser renomeadas (ex.: Identity `Id`/`UserId`) DEVEM ter a
+  coluna mapeada para o padrão.
+- Tabelas usam snake_case; colunas usam o nome PascalCase da propriedade. Constraints
+  e índices DEVEM usar minúsculas com prefixo do tipo (`pk_`, `fk_`, `ix_`, `uq_`,
+  `ck_`), aplicados por convenção central e com até 63 caracteres.
+- **Id é chave técnica, nunca código de negócio.** Campos `Id*` persistidos DEVEM ser
+  substitutos opacos, gerados pelo sistema, imutáveis e sem significado de negócio;
+  servem para chave primária, chave estrangeira e correlação técnica. NÃO DEVEM ser
+  digitados ou escolhidos pelo usuário, derivados de dados de negócio, reutilizados,
+  nem apresentados na interface como código, número ou referência de negócio.
+- O tipo padrão de `Id*` persistido é **UUID v7** (`Guid` gerado no servidor, ordenável
+  no tempo, verificado por teste). Inteiro somente para `IdUnico` de singleton ou para
+  tabela interna justificada no plano que nunca seja exposta fora do backend.
+- Códigos e números visíveis ao usuário (ex.: código do produto, número do pedido)
+  DEVEM ser colunas próprias `Codigo*`/`Numero*`, com unicidade e validação explícitas
+  no banco da instalação; chaves estrangeiras DEVEM referenciar `Id*`, nunca
+  `Codigo*`/`Numero*`. A API PODE transportar `Id*` como referência opaca entre
+  sistemas, mas busca e exibição de negócio usam o código próprio.
+- Exceção única: código **declarado no código-fonte** em catálogo fechado (ex.:
+  código de permissão), sem tabela de catálogo, PODE compor a chave de tabela de
+  associação. Esse código DEVE ser único no catálogo, ter formato validado no banco,
+  ser rejeitado quando desconhecido e NUNCA ser reutilizado ou renomeado sem migration
+  de dados. Toda exceção DEVE ser registrada no plano.
+- **Data e hora seguem um padrão único.** Instantes persistidos ou trafegados DEVEM ser
+  `DateTimeOffset` em UTC (offset zero), gravados em `timestamptz` e normalizados para
+  precisão de microssegundos. O instante atual DEVE vir exclusivamente de `TimeProvider`
+  injetado; `DateTime.Now`, `DateTime.UtcNow`, `DateTimeOffset.Now`,
+  `DateTimeOffset.UtcNow` e `DateTime.Today` NÃO DEVEM ser usados em código de produção.
+  Colunas NÃO DEVEM obter o instante por `now()`/default do banco, nem consultas
+  comparar com o relógio do banco; o instante da aplicação é passado como parâmetro.
+  `DateOnly` só representa data de calendário sem hora. Conversão para fuso de
+  exibição pertence à interface, não ao backend ou à persistência.
 - Classes de exceção DEVEM utilizar o prefixo **`Excecao`** em português (ex.:
   `ExcecaoIsolamentoTenant`, `ExcecaoConfiguracaoInstalacao`), sem o sufixo `Exception`.
 - A configuração de conexões de banco DEVE utilizar de forma padronizada e exclusiva a
@@ -234,6 +270,9 @@ saúde; antes da produção, DEVEM existir evidências de publicação e restaur
 
 **Verificação:** a revisão DEVE conferir legibilidade, aderência ao Português Técnico e
 às regras de nomenclatura (`Id*`, `Excecao*`, `StringsConexao`, descrições de campos),
+testes de modelo que provem PK em `Id*`, FK em `FkId*` (ou exceção registrada),
+UUID v7 e nomes de constraints/índices no padrão,
+teste de arquitetura que barre APIs de relógio proibidas em código de produção,
 limites de responsabilidade e ADRs necessários, sem aceitar complexidade sem justificativa.
 
 ### X. Evolução controlada
@@ -327,4 +366,4 @@ DEVEM permanecer como requisitos explícitos para a liberação correspondente.
   Sua atualização NÃO DEVE modificar esses artefatos nem executar intenções de
   implementação ou deploy sem solicitação própria.
 
-**Version**: 2.1.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-11-02
+**Version**: 2.2.0 | **Ratified**: 2026-10-12 | **Last Amended**: 2026-11-06

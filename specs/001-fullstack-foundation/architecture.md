@@ -2,7 +2,7 @@
 
 Este desenho consolida o plano da fundação no modelo **single-tenant por deploy
 (1 instalação de backend + 1 banco PostgreSQL exclusivo da própria aplicação por cliente)**
-e diferencia o primeiro incremento (I1) da arquitetura evolutiva. Não existe banco apartado
+e diferencia a L1/I1 entregue da L2/I2 planejada. Não existe banco apartado
 de catálogo central (`platform_catalog`).
 
 ## Arquitetura evolutiva (implantação dedicada por cliente)
@@ -12,10 +12,11 @@ flowchart LR
     UserA[Usuário do Cliente A] -->|I3: mesma origem| WebA[Frontend web - Cliente A<br/>React + TypeScript]
     WebA -->|I2+: HTTPS / REST| ApiA
     ConsumerA[Consumidor independente] -->|I2+: HTTPS / REST| ApiA
-    Operator[Operador autorizado] -->|procedimento restrito| OpsA[Migrations e operações<br/>via tooling controlado]
+    Operator[Operador autorizado] -->|manutenção restrita| OpsA[Migrations via EF CLI]
+    Operator -->|L2: identidade individual| AccessOpsA[Platform.Operations<br/>sem servidor HTTP]
 
     subgraph StackA[Instalação dedicada — Cliente A no Dokploy / VPS]
-        EnvA[Variáveis de ambiente / Secrets no Dokploy<br/>TenantId, EnvironmentId, ConnectionStrings__AppDb]
+        EnvA[Variáveis de ambiente / Secrets no Dokploy<br/>IdTenant, IdAmbiente, StringsConexao__BancoApp]
         subgraph BackendA[Backend: monólito modular ASP.NET Core]
             ApiA[App.Api<br/>transporte, composição e health checks]
             AppA[Platform.Application<br/>casos de uso e portas]
@@ -27,13 +28,14 @@ flowchart LR
             InfraA -. implementa portas .-> AppA
             InfraA --> DomainA
         end
-        DbA[(Banco exclusivo do Cliente A<br/>TenantDatabaseIdentity + contas + permissões + dados)]
+        DbA[(Banco exclusivo do Cliente A<br/>IdentidadeBancoTenant + contas + permissões + dados)]
     end
 
     EnvA -. injeta segredos no container .-> ApiA
     ApiA --> InfraA
     InfraA -->|valida marcador do banco e opera| DbA
     OpsA -->|credencial owner apenas no tooling| DbA
+    AccessOpsA -->|credencial individual sem DDL| DbA
 
     subgraph StackB[Instalação dedicada — Cliente B no Dokploy / VPS]
         EnvB[Variáveis de ambiente / Secrets do Cliente B]
@@ -61,9 +63,9 @@ flowchart LR
 - **Segredos por cliente no Dokploy / VPS (ou cofre externo)**: cada cliente é uma
   aplicação/stack separada no Dokploy, onde suas variáveis de ambiente e segredos são
   configurados e injetados apenas nos containers daquele cliente.
-- **Isolamento total de runtime e banco**: o backend do Cliente A não conhece a conexão
-  nem o banco do Cliente B. Antes de operar, valida o marcador `TenantDatabaseIdentity`
-  gravado no seu banco contra o `TenantId` e `EnvironmentId` da sua configuração.
+- **Isolamento total de runtime e banco**: O backend do Cliente A não conhece a conexão
+  nem o banco do Cliente B. Antes de operar, valida o marcador `IdentidadeBancoTenant`
+  gravado no seu banco contra o `IdTenant` e `IdAmbiente` da sua configuração.
 - **Contas locais ao banco da instalação**: cada cliente possui suas contas, credenciais,
   permissões e sessões no próprio banco. Email igual em dois clientes não compartilha conta.
 - **Migrations fora do startup**: a API não aplica migrations no startup. O tooling executa
@@ -78,27 +80,56 @@ flowchart LR
     Compose --> Pg[(Banco PostgreSQL da instalação)]
 
     Operator[Operador autorizado] --> Tool[EF CLI / profile migrations]
-    Tool -->|preflight + migration em TenantAccessDbContext| Pg
+    Tool -->|preflight + migration em AcessoTenantDbContext| Pg
 
-    Api -->|readiness: valida configuração e marcador TenantDatabaseIdentity| Pg
+    Api -->|readiness: valida configuração e marcador IdentidadeBancoTenant| Pg
     Api -. sem endpoints de conta,<br/>login ou negócio em I1 .-> NoRoutes[Sem superfície de usuário]
 
     CI[Checks mínimos antes da integração] --> Tests[Testes unitários,<br/>contratuais e de integração]
     Tests -->|PostgreSQL real descartável<br/>simulando 2 instalações A e B| TestPg[(PostgreSQL de teste<br/>via Testcontainers)]
 ```
 
-I1 entrega backend executável, `TenantAccessDbContext` com marcador da instalação e
+I1 entrega backend executável, `AcessoTenantDbContext` com marcador da instalação e
 modelo/migrations de usuários e permissões, execução local via Docker Compose, testes
 com PostgreSQL real (validando duas bases independentes A e B) e checks de backend.
 Não inclui banco de catálogo central, frontend, login HTTP, painel, endpoints de conta
 ou módulo de negócio.
 
+## L2/I2 — design sobre a base entregue
+
+O [plano vigente](plan.md) adiciona cinco operações de acesso HTTP, store de sessão
+no próprio banco, autorização atual e host operacional pontual. Nada abaixo é
+implementado pelo comando de planejamento.
+
+```mermaid
+flowchart LR
+    Consumer[Consumidor com cookie jar e CSRF] --> Http[App.Api - Access<br/>login, logout, me, context, antiforgery]
+    Http --> Cases[Platform.Application - Access<br/>casos de uso e portas]
+    Cases --> Adapter[Platform.Infrastructure<br/>Identity e persistência local]
+    Adapter --> Db[(PostgreSQL da instalação<br/>contas, concessões, sessões e auditoria)]
+    Http --> Keys[Data Protection<br/>key ring privado da instalação]
+    Operator[Operador autorizado] --> Host[Platform.Operations<br/>processo pontual, sem HTTP]
+    Host --> Cases
+    Probe[Health e OpenAPI<br/>fora do lookup de sessão] --> Ready[Readiness<br/>marcador, versão e proteção de chaves]
+    Ready --> Db
+    Ready --> Keys
+```
+
+Runtime API, operador de acesso e owner de migrations têm credenciais distintas.
+P0 bloqueia login se essa separação não estiver efetiva, inclusive na configuração
+local. O host operacional não entra na imagem da API. O esquema nasce de uma
+migration inicial única com o modelo completo.
+Contas/permissões/sessões compartilham metadados auditáveis; operador tem identidade
+individual, e o histórico operacional permanece imutável. Usuário mantém a herança
+Identity e implementa o contrato comum; entidades próprias herdam `EntidadeAuditavel`.
+Ver [ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md).
+
 ## Evolução prevista
 
 | Incremento | Acréscimo principal |
 |---|---|
-| I1 — atual | Backend, marcador da instalação, persistência e migrations de usuários/acesso, Compose e validação de backend. |
-| I2 — posterior | Login/logout e contexto na instalação do cliente, sessão revogável e procedimento restrito de contas/permissões. |
+| L1 / I1 — entregue | Backend, marcador da instalação, persistência e migrations de usuários/acesso, Compose e validação de backend. |
+| L2 / I2 — design atual | Login/logout e contexto na instalação do cliente, sessão revogável e procedimento restrito de contas/permissões. |
 | I3 — posterior | Frontend web e validação da extensão modular. |
 | I4 — antes de produção | Publicação de instâncias por cliente no Dokploy/VPS, backup externo e recuperação. |
 

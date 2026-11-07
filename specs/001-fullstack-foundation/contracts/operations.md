@@ -1,167 +1,276 @@
-# Contracts: migration inicial e acesso futuro
+# Contracts: EF/health e operação restrita L2
 
-**Date**: 2026-10-13
-**Status**: design, não interfaces implementadas.
-**References**: [API I1](openapi.json), [API futura I2](future-openapi.json),
-[modelo](../data-model.md), [plano](../plan.md) e [quickstart I1](../quickstart.md).
+**Date**: 2026-11-05
+**Status**: EF/health L1 entregues; autenticação e host operacional abaixo são
+contratos planejados, não comandos/endpoints já disponíveis.
+**References**: [plano](../plan.md), [modelo](../data-model.md),
+[API entregue L1](openapi.json), [API alvo L2](future-openapi.json),
+[quickstart](../quickstart.md).
 
-## 1. Fronteira do primeiro incremento
+## 1. Compatibilidade e configuração
 
-I1 entrega backend e migrations de estrutura de usuários/acesso. HTTP expõe apenas
-health checks e o contrato I1; `/api/v1/auth/*`, `/me`, `/context` e cadastro de usuários
-não são mapeados. Rotas ausentes retornam 404 Problem Details, nunca simulam sucesso.
-`/openapi/v1.json` publica somente as operações efetivamente entregues.
+Durante o planejamento, `openapi.json` e `/openapi/v1.json` continuam descrevendo L1.
+Na implementação L2, promover o contrato de sete operações (cinco de acesso +
+dois health checks) junto com os endpoints e testes. Não publicar contrato fictício.
+`/api/v1/me/tenants`, cadastro público e rotas de negócio continuam ausentes/404.
 
-Não há Platform.Tools obrigatório, painel, autocadastro, cobrança ou fluxo comercial.
-Não interpretar os contratos futuros como tarefas necessárias ao aceite SC-009.
+Nomes efetivos de configuração: `CodigoAplicacao`,
+`IdAmbiente`, `IdTenant`, `NomeExibicaoTenant`, `EstadoTenant`, `StringsConexao:BancoApp`.
+No ambiente usar `StringsConexao__BancoApp`. Identificadores de CLI confirmam o alvo
+privado; nunca escolhem conexão ou outro banco.
+Erro de configuração tem diagnóstico seguro, sem imprimir valores privados.
 
-## 2. Contrato EF CLI — I1
+## 2. EF CLI — contrato existente L1, reutilizado em L2
 
-Ferramenta local `dotnet-ef` 10.0.12, contexto/factory explícitos e migrations
-versionadas. Factories ficam em Infrastructure; API é startup project técnico,
-sem iniciar web host nem aplicar DDL no startup.
+Ferramenta local `dotnet-ef 10.0.12`; contexto `AcessoTenantDbContext`,
+project `Platform.Infrastructure`, startup técnico `App.Api`.
+Argumentos após `--`: `--tenant-id UUID --environment-id UUID`.
+Os nomes desses argumentos existentes não mudam com a nomenclatura interna.
 
-| Contexto | Argumentos extras após `--` | Target e finalidade |
-|----------|----------------------------|---------------------|
-| `TenantAccessDbContext` | `--tenant-id UUID --environment-id UUID` | Banco exclusivo configurado para a instalação daquele cliente/ambiente (sem `CatalogDbContext`). |
+1. Operador fornece banco/roles/configuração privada; instalar bancos não é função da API.
+2. Parar writers/API, colocar `EstadoTenant=Inativo` e usar owner de migrations.
+3. Factory/preflight valida configuração, argumentos, role/banco e marcador antes de DDL.
+   Histórico deve ser um prefixo válido da cadeia conhecida; migration de versão
+   desconhecida bloqueia upgrade, mesmo sem pendentes, sem apagar histórico.
+4. Marcador divergente ou estrutura sem marcador: falhar antes de alteração.
+5. Somente banco vazio aprovado admite
+   `Migracoes__PermitirInicializarBancoVazio=true`; ausente/false nega e valor
+   inválido falha. Marcador correto permite aplicar/reaplicar com false.
+6. Usar lock EF, migration versionada e callbacks idempotentes do marcador,
+   sem conta/senha/padrão e sem corrigir identidade automaticamente.
+7. Remover aprovação após inicialização, validar versão/dados, só então reativar.
 
-Gerar migrations de acesso em `TenantAccessDbContext`. Aplicar via EF CLI no profile
-Compose `migrations`, com credenciais owner daquele banco, não com o role usado pela API.
-Nenhum argumento aceita senha, conexão livre, path enviado por HTTP ou tenant padrão.
-Os argumentos de identidade devem coincidir com a configuração privada; não selecionam
-conexão nem banco. A/B exigem configurações e credenciais próprias, nunca a mesma conexão
-com apenas `--tenant-id` trocado.
+O esquema é criado por uma migration inicial única com o modelo completo
+([data-model §8](../data-model.md#8-migration-inicial-e-validação)); não se executa
+`Migrate`/`EnsureCreated` no startup. Bancos locais de desenvolvimento podem ser
+criados do zero a qualquer momento, pois não têm dados. Em banco com dados de
+cliente, apagar volume ou histórico para contornar falha de migration/preflight é
+proibido: a falha é investigada e corrigida.
+Exit code EF 0 significa conclusão; qualquer falha é não zero, sem fallback.
 
-### Preflight e inicialização
+## 3. Identidades técnicas e pré-requisitos L2
 
-1. Validar configuração de tooling (`ApplicationId`, `EnvironmentId`, `TenantId`) e conexão do banco-alvo.
-2. Exigir janela de manutenção/instância inativa para aplicar DDL.
-3. Conectar com owner do alvo, verificar banco/role e marcador (`TenantDatabaseIdentity`) **antes** de DDL.
-4. Marcador errado, ambiente divergente ou estrutura existente sem marcador:
-   falhar sem aplicar migration, corrigir identidade ou selecionar outro banco.
-5. Inicialização somente com banco vazio conhecido e aprovação explícita por
-   `Migrations:AllowInitializeEmptyDatabase=true` na configuração privada de tooling;
-   nunca adotar banco arbitrário existente.
-6. Aplicar migration com lock nativo EF em janela sem writers/DDL concorrentes.
-7. UseSeeding/UseAsyncSeeding inicializam marcador técnico apenas para alvo novo
-   aprovado; marcador correto existente é no-op. Não criar contas ou senhas.
+| Identidade | Privilégios necessários | Proibido |
+|---|---|---|
+| API runtime | CONNECT/USAGE locais; SELECT marcador/histórico/permissões; DML de usuários para Identity/lockout e sessões. | Owner, DDL, superuser, CREATEDB/CREATEROLE, conexão a B ou alteração de marcador/auditoria operacional. |
+| Operador de acesso | CONNECT local; leitura de marcador/contas/permissões; DML de contas/concessões/sessões; INSERT de auditoria. | DDL, modificar identidade/epoch, UPDATE/DELETE de auditoria, conexão a outro tenant. |
+| Owner de migrations | DDL/grants do alvo em manutenção. | Montagem na API ou uso rotineiro para FR-033. |
+| Provisionador | Criar/restringir banco e roles por procedimento técnico. | Identidade do servidor web. |
 
-O callback ocorre depois da migration; preflight é obrigatório para não alterar
-estrutura errada antes de detectar divergência. EF lock não autentica operador
-nem torna atômicas alterações concorrentes feitas fora desse processo.
+Revogar CONNECT de PUBLIC e conceder somente aos roles daquela instalação.
+Sem permissão pública de criação de schema. Configuração exemplificada com owner
+no runtime não atende ao contrato, mesmo que o arquivo diga “runtime”.
+Separar secrets efetivamente; testes tentam DDL/conexão cruzada com runtime e
+tentam executar operações de conta com papel runtime (deve negar no host).
 
-`Migrations__AllowInitializeEmptyDatabase` é a variável de ambiente correspondente.
-Ausência ou `false` nega inicialização sem marcador antes de DDL; valor inválido falha
-explicitamente. `true` só vale para a identidade e o banco aprovados nessa configuração,
-com argumentos correspondentes e todas as verificações de preflight satisfeitas.
-Marcador divergente ou estrutura existente sem marcador sempre bloqueia, mesmo com
-`true`. Marcador correto permite aplicar/reaplicar sem autorização de inicialização.
-Após inicializar, remover o sinal ou voltar a `false`; ele nunca é montado na API.
-Testes devem cobrir ausência, `false`, valor inválido, aprovação válida, alvo divergente
-e reaplicação com marcador correto e sinal desligado.
+O host verifica `session_user=current_user` e papel exato configurado em
+`OperacaoAcesso:PapelAutorizado`, além dos grants mínimos. Não aceita SET ROLE,
+`--actor`, username declarado ou cookie como prova de autorização.
+Cada operador possui login PostgreSQL individual e segredo próprio, provisionados
+pelo responsável do ambiente; não compartilhar o login entre pessoas. O papel
+autenticado identifica esse operador no registro, sem nome fornecido no comando.
+O acesso ao processo/segredo é autorizado por ACL do SO/orquestrador por instalação.
+Não substituir isso por uma flag booleana `--authorized`.
 
-Migrations não criam bancos/papéis automaticamente: o operador fornece esses
-pré-requisitos em procedimento documentado. Testcontainers faz isso em testes,
-sem exigir suíte de provisionamento de produção.
+## 4. Contrato HTTP L2
 
-EF CLI reporta sucesso com exit code 0; qualquer preflight, migration ou seeding
-falho retorna não zero, diagnóstico seguro e alvo/correlação sem secrets.
-Não fabricar relatório JSON ou exit codes de uma CLI administrativa que não existe.
+### Ordem de validação
 
-### Privilégios
+- Health/OpenAPI não fazem lookup de conta/sessão, mesmo com cookies enviados.
+- Nas cinco operações L2 exigir um único `X-Tenant-Id`, UUID não vazio.
+  Ausência: 400/TENANT_REQUIRED. Formato, duplicação ou lista: 400/INPUT_INVALID.
+- Tenant divergente no login: 401/AUTH_INVALID sem verificar conta.
+  Nas demais rotas: 403/TENANT_ACCESS_DENIED sem lookup de sessão/credencial.
+  Header nunca altera a conexão configurada.
+- Conferir configuração/marcador/versão do banco local antes de dados de acesso.
+  Divergência ou falha de dependência: 503/DEPENDENCY_UNAVAILABLE.
+  Runtime exige cadeia de migrations conhecida completa, sem pendentes nem
+  IDs desconhecidos; “nenhuma pendente” sozinho não valida uma versão futura.
+- Login em instalação inativa: 401/AUTH_INVALID sem verificar senha.
+  Em `/me` e `/context`, sessão ausente/inválida é 401; sessão válida com
+  instalação inativa é 409/TENANT_UNAVAILABLE. Logout e GET antiforgery não exigem
+  instalação ativa: somente obter o token e revogar a própria sessão ainda válida,
+  sem consultas de dados. Não é enumeração de tenants.
+- Conta desativada, bloqueada, stamp/epoch inválidos ou sessão expirada/revogada
+  não autorizam nova operação: 401/AUTH_REQUIRED.
+- Permissão ausente em `/context`: 403/TENANT_ACCESS_DENIED.
 
-| Identidade | Permissão | Onde é usada |
-|------------|-----------|--------------|
-| Runtime da instalação | CONNECT ao próprio banco; SELECT marcador/histórico; DML de acesso local conforme necessidade. | API da instalação e testes runtime; autenticação HTTP só I2. |
-| Owner de migration | DDL no banco-alvo da instalação, com grants controlados. | Somente processo EF tooling (`migrations`). |
-| Instalador | Criação restrita de bancos/papéis. | Pré-requisito local/instalação, nunca API. |
+Limite de login é aplicado antes do processamento de credenciais; uma requisição
+limitada retorna 429 sem provar a validade de headers/corpo/conta.
+Demais erros seguem a ordem acima; toda entrada externa é validada antes de uso.
+Falha de dependência nunca é convertida em 401 silencioso ou lista vazia.
 
-Revogar CONNECT de PUBLIC nos bancos da aplicação e conceder somente aos roles
-correspondentes; remover criação pública de schema. Runtime não é superuser,
-owner, CREATEDB ou CREATEROLE e não recebe CONNECT a outros bancos.
-Owner/provisionador não é montado na API nem reaproveitado em seus testes runtime.
+### Jornada
 
-## 3. Configuração
+1. GET `/api/v1/auth/antiforgery` com tenant: obter requestToken e cookie CSRF
+   HttpOnly, sem autenticar ou enumerar contas. Com cookie válido, token corresponde
+   à identidade corrente; cookie inválido/expirado é tratado como anônimo nesse GET.
+2. POST `/api/v1/auth/login` com `email`, `password`, tenant e `X-CSRF-TOKEN`.
+   Validar explicitamente o antiforgery JSON. Se houver sessão corrente válida,
+   o CSRF deve corresponder a ela; após validar credenciais, trocar a sessão desse
+   cookie numa única transação: revogar a anterior com `Versao` esperada e inserir a
+   nova chave, nunca reutilizá-la; commit antes do `Set-Cookie`. Conflito de
+   `Versao` (outra troca, logout, Renew ou revogação concorrente): rollback,
+   409/SESSION_CONFLICT, sem cookie novo. Falha de persistência: rollback, 503.
+   Nos dois casos a anterior mantém estado e prazo; repetir exige novo GET
+   antiforgery. Sessões em outros dispositivos/clientes da mesma conta permanecem válidas.
+3. Obter novo token CSRF em **outro GET** após login (nova identidade).
+4. GET `/api/v1/me`: somente a própria conta e validade da sessão.
+   GET `/api/v1/context`: também exige `foundation.context.read` atual.
+5. POST `/api/v1/auth/logout`: exige sessão e CSRF correntes. Revogar no banco,
+   confirmar commit e depois remover cookie/responder 204. Replay passa a 401.
+   Instalação inativa não bloqueia esse encerramento; GET antiforgery continua
+   disponível para obter o token necessário sem expor identidade/contexto.
+6. Obter CSRF anônimo novo antes de um novo login depois do logout.
 
-| Configuração prevista | Uso e proteção |
-|-----------------------|----------------|
-| `ApplicationId` / `EnvironmentId` | Identidade confiável do produto e ambiente da instalação. |
-| `TenantId` / `TenantDisplayName` / `TenantState` | Identidade e estado da empresa atendida por aquela instalação (via variáveis de ambiente no Dokploy/Compose). |
-| `ConnectionStrings:AppDb` / arquivo de credencial runtime | Conexão runtime exclusiva ao banco da instalação (sem DDL); secret privado no Dokploy/ambiente. |
-| Credencial de migration (tooling) | Credencial owner do banco da instalação; montada somente no profile `migrations`. |
-| `Migrations:AllowInitializeEmptyDatabase` | Booleano privado exclusivo do tooling; ausente equivale a `false`. Autoriza apenas inicialização vazia aprovada, sem dispensar validação do alvo. |
-| `KeyRingPath` / `ProtectionCertificateFile` | Apenas I2; key ring persistente e proteção em repouso em produção. |
+Inativar a instalação não revoga sessões nem renova epoch/prazo. Enquanto inativa,
+consultas continuam bloqueadas; após reativar, apenas sessões ainda válidas e não
+revogadas podem retomar. Expiração conta inclusive durante a inativação.
+Não confundir essa suspensão com desativação/bloqueio da conta, que revoga sessões.
 
-Conexões são validadas com parsing seguro; o servidor nunca aceita string de conexão
-ou path vindo do consumidor HTTP. Todos os arquivos privados e segredos ficam fora do
-Git e do contexto de build; no Dokploy ficam nas variáveis/secrets da aplicação daquele
-cliente na VPS (ou em cofre externo); `.env.example` só indica parâmetros fictícios.
+Payloads, formatos, limites e nomes JSON camelCase estão em `future-openapi.json`;
+não renomeá-los para coincidir com nomes das classes internas.
+Sem JWT, localStorage, refresh, listagem de tenants, cadastro ou reset por HTTP.
+Não aceitar campos extras, senha/corpo vazio, tenant/lista/secret no payload ou
+tipos incompatíveis; responder 400 Problem Details sem ecoar valores sensíveis.
 
-## 4. Contrato de autenticação — somente I2
+### Cookies, store e autorização
 
-1. Obter antiforgery com header do tenant, preservando cookie e requestToken.
-2. Login com `X-Tenant-Id`, email/senha e CSRF; validar alvo antes de consultar
-   somente suas credenciais. Tenant desconhecido/inativo e login inválido produzem
-   AUTH_INVALID genérico, sem consultar ou listar contas de outro banco.
-3. Sessão emitida é tenant-local; obter novo CSRF após login.
-4. `/me` e `/context` exigem header coincidente com o tenant protegido no cookie.
-   Cookie inválido não autoriza lookup; header divergente não seleciona outro banco.
-5. Logout revoga somente a sessão de origem antes da resposta; replay permanece negado.
+- Produção: `__Host-bps-session`, HttpOnly, Secure, SameSite=Lax, Path `/`, sem
+  Domain. CSRF usa cookie separado com mesmas proteções de transporte.
+- Development HTTP somente localhost: `bps-session`, sem prefixo `__Host-`;
+  cookies/host/mode incompatíveis causam erro, não fallback.
+  Compose publica API somente em loopback do host. O listener pode usar a interface
+  interna do container; não rejeitar o gateway Docker por não ser loopback nem
+  usar Host/X-Forwarded-For livre como prova de acesso local. Sem exposição remota
+  desse modo; para acesso não local, exigir HTTPS.
+- Mesmo host com portas diferentes não isola cookies. Na validação A/B usar
+  cookie jars separados e reenviar cookie de A a B deliberadamente no teste cruzado.
+  Em publicação, usar hosts por instalação, nunca Domain compartilhado.
+- ITicketStore usa referência `IdTenant/EpocaAcesso/IdSessao` protegida pelo handler
+  nativo; ticket persistido também é protegido. Sem DbContext global/scoped capturado.
+- SetApplicationName inclui produto/ambiente/tenant; volume/key ring por instalação,
+  certificado externo obrigatório em produção e permissões mínimas dos arquivos.
+- Sessão absoluta de 30 minutos; sem sliding expiration ou renovação de prazo.
+  Retrieve verifica registro, conta/lockout/stamp/epoch e prazos em cada operação.
+- Permitir sessões simultâneas da mesma conta em clientes/cookie jars distintos,
+  sem identificação física do dispositivo. Login rotaciona somente a sessão do
+  cookie recebido; logout revoga só a atual. Reset/desativação/lockout/revogação
+  operacional afetam todas as sessões da conta no banco local.
+- Renew só atualiza registro ainda ativo com versão esperada. Nunca upsert,
+  reativação ou INSERT após revogação. Corrida/logout tem teste determinístico.
+- Validação de principal rejeitado não pode deixar refresh pendente reemitir
+  autorização. Configuração sem sliding e testes dos callbacks nativos são obrigatórios.
+- Concessões lidas atualmente no banco; `/me` e logout têm autorização de recurso
+  próprio explícita, não uma política que libera qualquer usuário autenticado.
 
-Chave ITicketStore contém TenantId/AccessEpoch/SessionId dentro da proteção nativa.
-Store não mantém DbContext/tenant mutável global, resolve apenas o alvo protegido
-e cria scope por chamada. Não pesquisar email/sessionId em todos os bancos.
+### Política de senha e proteção de tentativas
 
-SameSite não substitui CSRF. Cookie HttpOnly/Secure/Path `/`/sem Domain em produção,
-30 minutos absolutos, sem token em localStorage, JWT próprio ou refresh.
-Todas as respostas de conta/contexto e erros usam `Cache-Control: no-store`.
-Renew não faz upsert, reativa sessão ou altera ExpiresAt. Logout 503 não confirma saída.
+Usar PasswordHasher/validadores do Identity, sem hash próprio.
+Preparação/reset exigem 12–128 caracteres; habilitar as regras nativas de
+maiúscula, minúscula, dígito e não alfanumérico. Login aceita 1–128 caracteres:
+senha fora da política resulta em 401 genérico após a verificação, sem revelar a
+política por um 400 de validação (não há senhas L1 a preservar).
+Não exigir email confirmado enquanto não há fluxo de confirmação aprovado.
 
-Email igual em A/B significa duas contas. Para usar B, autenticar a conta de B,
-cancelar operações/desconsiderar respostas antigas de A e estabelecer novo contexto.
-Retirar `/api/v1/me/tenants`; essa rota retorna 404, não uma lista vazia fingida.
+Habilitar lockout em toda conta desde a criação: cinco falhas por conta,
+15 minutos; login válido só zera contagem quando a conta não está bloqueada.
+Confirmar lockout, revogar todas as sessões da conta e mudar stamp na mesma
+transação. Ao terminar o bloqueio, somente novo login permite acesso;
+cookies anteriores continuam inválidos mesmo dentro dos 30 minutos originais.
+Concorrência não pode perder contagens nem sobrescrever revogação: conflito de
+`ConcurrencyStamp` na contagem recarrega a conta e reavalia até três vezes; esgotado, 503.
+Rate limiter nativo: cinco requisições/minuto/IP efetivo/instalação,
+janela fixa e fila zero; rejeição 429/RATE_LIMITED com Retry-After.
+Forwarded headers só de proxies explicitamente conhecidos; nunca confiar em
+X-Forwarded-For livre. Uma réplica por instalação; escala horizontal exigiria
+reavaliar o limite em memória, não acrescentar Redis preventivamente.
 
-| Status I2 | Significado |
-|-----------|-------------|
-| 400 | Corpo/header/CSRF inválido. |
-| 401 | Credencial/tenant de login inválidos genericamente ou sessão inválida. |
-| 403 | Header divergente ou concessão local ausente; sem lookup em outro tenant. |
-| 409 | Tenant de origem de sessão válida está inativo. |
-| 429 | Rate limit de login, com Retry-After. |
-| 503 | Dependência indisponível, sem conexão exposta ou sucesso aparente. |
-| 500 | Falha inesperada segura com code/traceId. |
+### Erros e cache
 
-JSON camelCase, UUID não vazio e datas UTC. Erros seguem Problem Details, inclusive
-binding/JSON/CSRF. Health é isolado de lookup de sessão e catálogo em liveness;
-AllowAnonymous sozinho não é evidência desse isolamento.
+| HTTP | code |
+|---|---|
+| 400 | INPUT_INVALID, TENANT_REQUIRED, CSRF_INVALID |
+| 401 | AUTH_INVALID (login genérico) ou AUTH_REQUIRED (sessão) |
+| 403 | TENANT_ACCESS_DENIED |
+| 409 | TENANT_UNAVAILABLE, somente `/me` e `/context` com sessão válida e origem inativa; SESSION_CONFLICT, somente no login que perde a troca da mesma sessão anterior |
+| 429 | RATE_LIMITED + Retry-After |
+| 503 | DEPENDENCY_UNAVAILABLE |
+| 500 | INTERNAL_ERROR |
 
-## 5. Administração e recuperação — posteriores
+Usar Problem Details existente com type/title/status/code e traceId hexadecimal de
+32 caracteres; sem redirect HTML, secrets, stack, senha/hash ou cookie.
+Respostas de acesso, antiforgery e respectivos erros: `Cache-Control: no-store`.
+Falha ao persistir revogação não apaga cookie nem confirma saída; 503 seguro.
 
-FR-033 é procedimento técnico restrito por tenant, não requisito de painel ou
-suíte de comandos em I1. Criação/reset usam UserManager e entrada de senha protegida;
-desativação/revogação alteram somente a conta/concessão local e invalidam sessões.
-Não manter usuário global ou gestão de várias empresas pela mesma identidade.
+## 5. Host operacional L2 — FR-033
 
-FR-029 a FR-032 são gates antes de produção: backup externo por catálogo/tenant,
-manifesto de alvo/ambiente/versão/checksum, restauração validada sem tráfego e
-recuperação que trate aplicação e dados. Não executar rollback destrutivo automático.
-Dump/restore inclui contas e permissões do próprio tenant; sessão antiga não volta
-a ser utilizável após restauração: revogar registros e renovar AccessEpoch.
+Executável planejado `Platform.Operations`, sem servidor HTTP, publicado apenas
+no perfil pontual Compose `operations`. Não faz migrations nem cria banco/roles.
+Comandos abaixo são **contrato futuro**, ainda indisponível:
 
-Catálogo não contém identidades de acesso. Sua restauração exige reconciliar
-bindings e estados com os bancos, não restaurar contas globais ou varrer sessões.
-Backup externo criptografado, RPO/RTO, retenção, responsáveis e testes de restauração
-são definidos antes de produção. `pg_restore` usa no-owner/no-acl/exit-on-error,
-com reaplicação dos grants mínimos do alvo.
+```text
+conta criar --id-tenant UUID --id-ambiente UUID --email EMAIL --nome-exibicao NOME
+conta desativar --id-tenant UUID --id-ambiente UUID --id-usuario UUID
+conta reativar --id-tenant UUID --id-ambiente UUID --id-usuario UUID
+conta redefinir-senha --id-tenant UUID --id-ambiente UUID --id-usuario UUID
+conta revogar-sessoes --id-tenant UUID --id-ambiente UUID --id-usuario UUID
+permissao conceder --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read
+permissao revogar --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read
+```
 
-## 6. Evidências por incremento
+UUIDs não vazios; parâmetros desconhecidos/duplicados falham. Conta é sempre local.
+`criar` usa UserManager e não concede permissão automaticamente. A senha e sua
+confirmação são lidas por prompt sem eco; nunca argumento/env de linha de comando,
+stdout, arquivo versionado ou exemplo com senha pronta.
+Testes exercitam o caso de uso com entrada sintética, sem depender de console interativo.
 
-- I1: dois bancos reais, email igual em contas independentes, unicidade local,
-  FK de TenantId, commit/rollback, reaplicação e role de A sem acesso ao banco B.
-- I1: marcador errado bloqueia **antes** de DDL; migration sem seeding de usuários;
-  readiness sem dependência de todos os tenants; API não oferece login/cadastro.
-- I2: header divergente não toca B; replay pós-logout, expiração/stamp/epoch, CSRF,
-  bloqueio/reset/revogação em A sem efeito em B; contrato futuro sem enumeração.
-- I3/I4: módulos opcionais de teste, frontend, publicação e restauração independentes.
+Preflight exige configuração/argumentos/marcador/versão/papel correspondentes.
+Não exige estado Ativo para uma manutenção autorizada; não concede acesso de usuário
+enquanto a instalação estiver inativa. Papel runtime/owner ou alvo divergente nega
+antes de mutação de conta. O operador possui somente segredo da própria instalação.
 
-Contratos/documentação não afirmam que essas evidências já foram executadas.
+Desativar/reset/revogar-sessoes atualizam stamp e revogam sessões na mesma transação
+da auditoria; reativar não ressuscita sessões nem remove lockout sem procedimento
+explícito. Reset autorizado remove lockout/contagem, redefine senha via UserManager
+e exige novo login. Recuperação L2 é esse reset restrito, não envio de email/token.
+Concessão duplicada/revogação ausente são no-op auditado; conflito concorrente real
+é erro explícito, não sobrescrita silenciosa: violação de PK em concessão simultânea,
+zero linhas no DELETE de retirada simultânea ou `ConcurrencyFailure` do `UserManager`
+geram `resultado=falha`, código `CONFLITO_CONCORRENTE` e saída não zero, sem repetição
+automática. Código de permissão desconhecido falha.
+
+Resultado em stdout: um objeto JSON com `idOperacao`, `idTenant`, `idAmbiente`,
+`idUsuario` (quando conhecido), `loginOperador` autenticado individual,
+`operacao`, `resultado`, `codigo`, `registradaEm`.
+Sem email/nome/senha/ticket/conexão. `resultado` é `sucesso`, `negado` ou `falha`;
+exit code 0 somente para sucesso persistido/auditado. Qualquer falha/negação retorna
+não zero e diagnóstico seguro correlacionado em stderr. A ACL/journal protegido
+do processo guarda falhas anteriores à possibilidade de auditoria no banco.
+Se INSERT da auditoria falha, rollback da alteração e saída não zero.
+
+Contas, permissões e sessões compartilham os [metadados auditáveis](../data-model.md):
+autor/data de criação e última alteração e UUID de correlação `IdOperacao`.
+O host fornece autoria pelo login individual autenticado; backend fornece usuário
+somente após validar identidade/credenciais. Ação anônima ou automática não é
+atribuída ao usuário declarado na entrada. Campos de auditoria não são recebidos
+em payloads/argumentos e não são expostos nos DTOs HTTP já contratados.
+Preencher dados e metadados na mesma transação; preservar os de criação.
+RegistroOperacaoAcesso permanece imutável e separado, sem snapshots de secrets.
+No-op de concessão/revogação mantém metadados da entidade, mas gera evento
+operacional. Todo registro nasce com criação completa (autor, data e correlação).
+O preenchimento é central (`IContextoOperacao` + `InterceptadorAuditoria`), com um
+único `InstanteOperacao` do `TimeProvider` por comando, compartilhado com
+`registradaEm`. Alterações do host são rastreadas e salvas com o token da entidade
+(`ConcurrencyStamp` na conta via `UserManager`, `Versao` na sessão; concessão é só
+INSERT/DELETE); `ExecuteUpdate`/`ExecuteDelete` não são usados em entidades auditáveis.
+`idOperacao` e demais `Id*` gerados são UUID v7 do `InstanteOperacao` do comando.
+
+## 6. Recuperação e produção — L4 preservada
+
+Backup externo é do **banco de cada instalação**, incluindo acesso; não existe
+backup/restauração de catálogo central. Validar origem/destino, renovar epoch,
+invalidar sessões e revisar permissões antes de reabrir após restauração.
+Não usar rollback destrutivo automático ou presumir que reverter imagem desfaz DDL.
+RPO/RTO/retenção/responsáveis e teste de restauração são gates antes de produção.
+L2 prepara as verificações de epoch e persistência de chaves, mas não executa deploy.
