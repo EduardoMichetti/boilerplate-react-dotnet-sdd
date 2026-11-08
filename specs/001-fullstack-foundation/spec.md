@@ -34,6 +34,12 @@ Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
 
 ## Clarifications
 
+### Session 2026-11-08
+
+- Q: Qual deve ser o limite máximo configurável para o prazo absoluto da sessão em produtos derivados (o padrão continua 30 minutos)? → A: Opção B. Faixa permitida de 5 a 480 minutos (8 horas), limites inclusivos; padrão de 30 minutos quando ausente; valor fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro.
+- Q: Por quantos dias, por padrão, sessões vencidas ou revogadas devem ser mantidas antes que o comando de limpeza possa removê-las? → A: Opção B. Retenção padrão de 30 dias, configurável em dias inteiros de 1 a 365; contada a partir da expiração (sessão vencida) ou da revogação (sessão revogada); valor fora da faixa impede a execução do comando com diagnóstico seguro.
+- Q: Como a execução da limpeza de sessões deve ficar registrada no histórico imutável de operações? → A: Opção A. Um registro por execução (inclusive sem remoções ou com falha), atribuído ao operador individual autenticado, com retenção aplicada, instante de corte, quantidade removida, resultado e correlação; sem identificadores de sessões ou contas removidas e sem autoria "Sistema".
+
 ### Session 2026-11-07
 
 - Q: Se um novo login falhar ao salvar a nova sessão, a sessão anterior desse navegador deve continuar válida? → A: Sim. A troca é atômica: encerramento da sessão anterior e criação da nova são confirmados juntos. Falha preserva o estado e o prazo anteriores, sem desfazer bloqueios ou revogações concorrentes e sem confirmar novo acesso.
@@ -485,8 +491,10 @@ publicação e restauração usando duas empresas e informações sintéticas.
   existentes. O fim do bloqueio NÃO DEVE reativá-las; novo acesso exige novo login.
   A sessão DEVE expirar em prazo absoluto contado da sua criação, padrão de 30 minutos,
   sem renovação por atividade, remember-me ou refresh. Produtos derivados PODEM
-  configurar esse prazo dentro de um limite máximo definido no plano; valor fora
-  do limite DEVE impedir a inicialização com diagnóstico seguro (FR-003).
+  configurar esse prazo em minutos inteiros entre 5 e 480 (8 horas), inclusive;
+  valor ausente usa o padrão, e valor fora da faixa ou não inteiro DEVE impedir a
+  inicialização com diagnóstico seguro (FR-003). O prazo é fixado na criação de
+  cada sessão; alterar a configuração não muda o prazo de sessões já emitidas.
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
   operações de uso de uma empresa também DEVEM validar vínculo ativo. Administração
   técnica da própria instalação e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
@@ -597,7 +605,13 @@ publicação e restauração usando duas empresas e informações sintéticas.
   que encerra todas as sessões da conta; troca de senha pelo próprio usuário fica
   para L3 ou posterior, e recuperação por email/token exige novo plano.
   O procedimento restrito DEVE também remover sessões expiradas ou revogadas há
-  mais que a retenção configurada, com auditoria e sem afetar sessões válidas;
+  mais que a retenção configurada, com auditoria e sem afetar sessões válidas.
+  A retenção padrão é de 30 dias, configurável em dias inteiros de 1 a 365, contada
+  da expiração ou da revogação; valor fora da faixa DEVE impedir a limpeza com
+  diagnóstico seguro. Cada execução DEVE gerar exatamente um registro imutável,
+  atribuído ao operador individual autenticado, com retenção aplicada, instante de
+  corte, quantidade removida, resultado e correlação, inclusive quando nada for
+  removido ou houver falha; o registro NÃO DEVE listar sessões ou contas removidas;
   a API NÃO DEVE executar essa remoção em segundo plano. Revogação DEVE descartar
   o ticket protegido da sessão; registro expirado nunca autoriza uso.
 - **FR-034**: O primeiro incremento DEVE entregar backend iniciado e executável,
@@ -679,9 +693,10 @@ publicação e restauração usando duas empresas e informações sintéticas.
   com autor/data de criação e última alteração e correlação. Distingue operador,
   usuário verificado, sistema e ação anônima; não falsifica autoria ou data
   e não contém senha, hash, ticket ou cópia de campos secretos.
-- **Registro de execução operacional**: empresa-alvo, tipo de preparação, atualização
-  ou recuperação, operador individual autenticado, resultado, versão e referência
-  de investigação, sem conteúdo secreto.
+- **Registro de execução operacional**: empresa-alvo, tipo de preparação, atualização,
+  recuperação ou limpeza de sessões, operador individual autenticado, resultado, versão
+  e referência de investigação, sem conteúdo secreto. Na limpeza, inclui retenção
+  aplicada, instante de corte e quantidade removida, sem ids de sessões ou contas.
 
 ## Success Criteria *(mandatory)*
 
@@ -706,7 +721,9 @@ promessas de capacidade para todos os produtos derivados.
   Após bloqueio da conta por tentativas inválidas e término desse bloqueio, zero
   sessões anteriores voltam a autorizar operações; somente novo login permite acesso.
   Com o prazo padrão, sessão usada continuamente é negada a partir de 30 minutos
-  após sua criação; uso durante o prazo não o estende.
+  após sua criação; uso durante o prazo não o estende. Prazos configurados de 5 e
+  480 minutos são aceitos; configuração ausente usa 30 minutos; 4, 481 ou valor
+  não inteiro impedem a inicialização sem expor secrets.
   Com duas sessões simultâneas da mesma conta, logout em uma DEVE preservar a outra;
   reset, desativação, bloqueio ou revogação operacional DEVEM invalidar ambas.
   Falha na troca de sessão em novo login DEVE confirmar zero novas sessões e
@@ -720,6 +737,10 @@ promessas de capacidade para todos os produtos derivados.
   Criação/alteração de conta, permissão e sessão DEVE preservar os metadados de
   auditoria e distinguir dois operadores individuais autenticados. Falha ao gravar
   auditoria NÃO DEVE confirmar a alteração; nenhuma autoria é fictícia.
+  Com retenção padrão, a limpeza remove 100% das sessões vencidas ou revogadas há
+  mais de 30 dias e 0% das sessões válidas ou encerradas há 30 dias ou menos;
+  cada execução, inclusive sem remoções ou com falha, gera exatamente um registro
+  atribuído ao operador que a executou.
 - **SC-003**: em 200 operações sintéticas de leitura e gravação intercaladas entre
   duas empresas, 100 por empresa e pelo menos 20 simultâneas, ocorrem zero acessos
   ou alterações cruzadas, incluindo reutilização de recursos e falhas provocadas;
