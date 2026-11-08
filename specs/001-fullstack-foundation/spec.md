@@ -38,6 +38,7 @@ Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
 
 - Q: Qual deve ser o limite máximo configurável para o prazo absoluto da sessão em produtos derivados (o padrão continua 30 minutos)? → A: Opção B. Faixa permitida de 5 a 480 minutos (8 horas), limites inclusivos; padrão de 30 minutos quando ausente; valor fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro.
 - Q: Por quantos dias, por padrão, sessões vencidas ou revogadas devem ser mantidas antes que o comando de limpeza possa removê-las? → A: Opção B. Retenção padrão de 30 dias, configurável em dias inteiros de 1 a 365; contada a partir da expiração (sessão vencida) ou da revogação (sessão revogada); valor fora da faixa impede a execução do comando com diagnóstico seguro.
+- Q: Retenção inválida ou operador não autorizado em `sessao limpar` contam como execução que gera registro? → A: Não. A execução auditável começa após operador individual autenticado e alvo validado; antes disso o comando encerra com diagnóstico seguro, sem registro e sem efeito (`/speckit-analyze`, mantenedor).
 - Q: Como a execução da limpeza de sessões deve ficar registrada no histórico imutável de operações? → A: Opção A. Um registro por execução (inclusive sem remoções ou com falha), atribuído ao operador individual autenticado, com retenção aplicada, instante de corte, quantidade removida, resultado e correlação; sem identificadores de sessões ou contas removidas e sem autoria "Sistema".
 
 ### Session 2026-11-07
@@ -492,7 +493,7 @@ publicação e restauração usando duas empresas e informações sintéticas.
   A sessão DEVE expirar em prazo absoluto contado da sua criação, padrão de 30 minutos,
   sem renovação por atividade, remember-me ou refresh. Produtos derivados PODEM
   configurar esse prazo em minutos inteiros entre 5 e 480 (8 horas), inclusive;
-  valor ausente usa o padrão, e valor fora da faixa ou não inteiro DEVE impedir a
+  valor ausente ou vazio usa o padrão, e valor fora da faixa ou não inteiro DEVE impedir a
   inicialização com diagnóstico seguro (FR-003). O prazo é fixado na criação de
   cada sessão; alterar a configuração não muda o prazo de sessões já emitidas.
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
@@ -608,7 +609,9 @@ publicação e restauração usando duas empresas e informações sintéticas.
   mais que a retenção configurada, com auditoria e sem afetar sessões válidas.
   A retenção padrão é de 30 dias, configurável em dias inteiros de 1 a 365, contada
   da expiração ou da revogação; valor fora da faixa DEVE impedir a limpeza com
-  diagnóstico seguro. Cada execução DEVE gerar exatamente um registro imutável,
+  diagnóstico seguro. Execução auditável começa com operador individual autenticado
+  e alvo validado; retenção inválida ou login não autorizado encerram antes, sem
+  registro e sem efeito. Cada execução DEVE gerar exatamente um registro imutável,
   atribuído ao operador individual autenticado, com retenção aplicada, instante de
   corte, quantidade removida, resultado e correlação, inclusive quando nada for
   removido ou houver falha; o registro NÃO DEVE listar sessões ou contas removidas;

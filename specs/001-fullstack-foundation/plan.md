@@ -349,7 +349,7 @@ encerrados é o comando restrito `sessao limpar` (abaixo).
 Identity valida senha/hash e lockout: cinco falhas por conta, 15 minutos de bloqueio,
 com atualização concorrente segura. Ao confirmar o bloqueio, revogar todas as
 sessões da conta e atualizar stamp na mesma transação; fim do bloqueio só permite
-novo login, nunca retomada de sessão antiga. Limiter nativo por IP/instalação: cinco pedidos
+novo login, nunca retomada de sessão antiga. Limiter nativo por IP efetivo (uma instalação por deploy): cinco pedidos
 de login/minuto, janela fixa, fila zero, 429/Retry-After. Login inválido não enumera
 email/tenant; não criar contas ou permissões por startup/login.
 
