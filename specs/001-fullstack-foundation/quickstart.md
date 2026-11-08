@@ -193,12 +193,16 @@ L2, sem `x-planned-only=true` e sem operações ausentes da implementação.
 | Dois logins concorrentes com a mesma sessão anterior (barreira) | Exatamente uma troca conclui (200); a outra recebe 409 SESSION_CONFLICT sem `Set-Cookie`; uma única sessão nova no banco; sessões de outros jars intactas. Repetição com novo GET antiforgery funciona. |
 | Concorrência por entidade | Conta usa `ConcurrencyStamp` (sem `Versao`); concessão simultânea/retirada simultânea gera conflito explícito no host; falhas de senha concorrentes não perdem contagem. |
 | Duas sessões da mesma conta em jars distintos | Novo login/logout em uma não invalida a outra. Reset/desativação/lockout/revogação operacional invalidam ambas, sem efeito em B. |
-| Expiração absoluta | Aos 30 minutos, 401; `TimeProvider` evita espera real no teste. |
+| Expiração absoluta | Sem configuração, aos 30 minutos da criação, 401 (29:59 ainda autoriza); `TimeProvider` evita espera real no teste. |
+| Prazo configurável (`Sessao__PrazoAbsolutoMinutos`) | `5` e `480` iniciam a API e expiram exatamente nesse prazo; `4`, `481`, `0`, `30.5` e texto impedem a inicialização com diagnóstico que cita a chave/faixa, sem secrets. Sessão emitida com 30, API reiniciada com 5: a sessão mantém o `ExpiraEm` original. |
+| `sessao limpar`, retenção padrão | Fixture com sessões ativa, expirada e revogada em 30d+1µs, exatamente 30d e menos de 30d antes do agora: removidas somente as encerradas há mais de 30 dias; ativa e as demais intactas, inclusive com login/logout/Renew concorrentes. Um registro `Sucesso` com retenção, corte, quantidade, operador e correlação, sem ids de sessões/contas. |
+| `sessao limpar`, sem elegíveis / falha | Sem elegíveis: `sucesso`, `QuantidadeRemovida=0` e um registro. Falha injetada: rollback (nenhuma removida), um registro `Falha`, saída não zero. Dois operadores distintos aparecem com seus logins. |
+| `sessao limpar`, retenção inválida | `OperacaoAcesso__RetencaoSessoesDias` `0`, `366` ou não inteiro: não zero antes de conectar, `RETENCAO_INVALIDA`, nada removido; `1` e `365` aceitos. Runtime não consegue DELETE em sessões e a API não tem job de limpeza. |
 | Reset/desativação/revogação em A | Próxima operação A nega; conta/sessões/concessões B permanecem idênticas. |
 | Lockout | Quinta falha bloqueia por 15 minutos e revoga todas as sessões da conta atomicamente, inclusive sob concorrência. Após o bloqueio, cookie anterior continua 401; novo login funciona; conta B independente. |
 | Rate limit | Sexto pedido na janela de um minuto: 429 + Retry-After; IP forjado não contorna. Testar separadamente do lockout. |
 | Instalação inativa após autenticar | `/me` e `/context` retornam 409 com sessão válida; login 401 genérico. Obter CSRF e encerrar sessão própria ainda válida continua permitido, com 204 somente após commit. |
-| Reativação da instalação | Sessão dentro do prazo original e não revogada retoma. Sessão expirada/revogada não retoma; tempo inativo conta nos 30 minutos. |
+| Reativação da instalação | Sessão dentro do prazo original e não revogada retoma. Sessão expirada/revogada não retoma; tempo inativo conta no prazo fixado na emissão. |
 | Banco/marker/key ring indisponível | 503 seguro; nunca 200, identidade vazia ou 401 silencioso por erro de banco. |
 | Falha no commit do logout | Não confirmar 204 nem apagar cookie como se a revogação estivesse concluída. |
 | Health com cookies válidos/inválidos | Nenhum lookup de sessão; liveness sem banco/chaves e readiness sem dados de conta. |
@@ -206,7 +210,7 @@ L2, sem `x-planned-only=true` e sem operações ausentes da implementação.
 | Operação sem autorização/auditoria indisponível | Não zero, sem mutação; sucesso somente com auditoria e commit. |
 | Dois operadores individuais autorizados | Auditoria distingue seus logins autenticados e correlações. Nome/role informado em argumento livre não pode substituir a identidade verificada. |
 | Base auditável de contas/permissões/sessões | Novos registros têm autor/data/correlação de criação. Alterações preservam criação e registram última alteração atomicamente; histórico operacional permanece imutável. |
-| Autores não autenticados | Tentativa inválida é anônima, ação automática é sistema; email/Id enviado não forja autor. |
+| Autores não autenticados | Tentativa inválida é anônima; nenhum fluxo L2 grava autoria Sistema (limpeza é do operador); email/Id enviado não forja autor. |
 | Migration/roles | Banco novo e reaplicação sem perda; histórico desconhecido rejeitado; runtime sem DDL e operador sem acesso a outro banco. |
 | Convenções de modelo | PK `Id*` UUID v7 com timestamp igual ao `InstanteOperacao` do relógio de teste, sem geração pelo provider; FK `FkId*`; constraints minúsculas ≤63 caracteres; instantes UTC em microssegundos; exceções (marcador, concessão, tabelas auxiliares Identity vazias) em lista fechada; nenhum relógio estático, `Guid.NewGuid()`/`CreateVersion7()` sem argumento nem `ExecuteUpdate` em entidade auditável. |
 | Histórico de versão incompatível | ID de migration desconhecida bloqueia runtime/readiness e tooling, mesmo sem pendentes. Não apagar histórico para obter aprovação. |

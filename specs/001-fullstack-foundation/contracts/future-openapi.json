@@ -3,7 +3,7 @@
   "info": {
     "title": "boilerplate-react-dotnet-sdd - L2 Tenant Access API (planned)",
     "version": "1.2.0",
-    "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta de 30 minutos, CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
+    "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
   },
   "x-increment": "I2",
   "x-planned-only": true,
@@ -68,7 +68,7 @@
         },
         "responses": {
           "200": {
-            "description": "Nova sessão de servidor criada, com expiração absoluta de 30 minutos. Sessões em outros clientes/dispositivos da mesma conta permanecem válidas; somente a sessão do cookie recebido é substituída.",
+            "description": "Nova sessão de servidor criada, com expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480). Sessões em outros clientes/dispositivos da mesma conta permanecem válidas; somente a sessão do cookie recebido é substituída.",
             "headers": {
               "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" },
               "Cache-Control": { "$ref": "#/components/headers/NoStore" }
@@ -208,7 +208,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "__Host-bps-session",
-        "description": "Referência tenant/epoch/session protegida pelo handler nativo, HttpOnly, Secure, SameSite=Lax, Path=/ e sem Domain. Store/ticket/key ring tenant-local. Expiração absoluta de 30 minutos, sem sliding/refresh. Somente Development HTTP localhost usa bps-session sem Secure. Portas no mesmo host não isolam cookies; consumidores locais A/B usam jars separados."
+        "description": "Referência tenant/epoch/session protegida pelo handler nativo, HttpOnly, Secure, SameSite=Lax, Path=/ e sem Domain. Store/ticket/key ring tenant-local. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), sem sliding/refresh. Somente Development HTTP localhost usa bps-session sem Secure. Portas no mesmo host não isolam cookies; consumidores locais A/B usam jars separados."
       }
     },
     "parameters": {

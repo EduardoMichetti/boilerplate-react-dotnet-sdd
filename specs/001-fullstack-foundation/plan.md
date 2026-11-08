@@ -1,6 +1,6 @@
 # Implementation Plan: L2 — autenticação e acesso local ao tenant
 
-**Branch Git**: `main` | **Date**: 2026-11-05 | **Spec**: [spec.md](spec.md)
+**Branch Git**: `main` | **Date**: 2026-11-05 | **Revisão**: 2026-11-08 (clarificações de prazo de sessão e limpeza) | **Spec**: [spec.md](spec.md)
 **Feature Context**: `001-fullstack-foundation`, resolvido por `.specify/feature.json`.
 O campo `BRANCH` retornado pelo setup é esse contexto, não uma troca de branch Git.
 **Input**: “em specs\001-fullstack-foundation planejar l2 com a l1 entregue”.
@@ -26,7 +26,7 @@ conta global, escolha de banco por header, frontend, painel ou módulo de negóc
 A L3 continua responsável pela interface e extensão modular; L4, pela publicação
 Dokploy/VPS, backups e restauração.
 
-O design é orientado por [research.md](research.md) (revisão L2 D14–D20),
+O design é orientado por [research.md](research.md) (revisão L2 D14–D21),
 [data-model.md](data-model.md), [operações](contracts/operations.md) e
 [ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md).
 
@@ -92,8 +92,11 @@ Procedimentos operacionais têm alvo explícito e autorização própria, não c
 
 *GATE: conferir antes da pesquisa e depois do design.*
 
-Constituição: [constitution.md](../../.specify/memory/constitution.md).
+Constituição: [constitution.md](../../.specify/memory/constitution.md), versão 2.3.0
+(as convenções de nomes, Id e data/hora citadas como “2.2.0” permanecem vigentes).
 PASS refere-se ao **desenho**, nunca a execução ou liberação já comprovadas.
+Reavaliação 2026-11-08 (D21): prazo configurável e `sessao limpar` mantêm todos os
+princípios em PASS e não exigem dependência nova nem exceção — ver notas por linha.
 
 | Princípio | Pré-pesquisa | Pós-design | Evidência / gate de implementação |
 |---|---|---|---|
@@ -102,11 +105,21 @@ PASS refere-se ao **desenho**, nunca a execução ou liberação já comprovadas
 | III. Stack | PASS | PASS | Stack/pins existentes; mecanismos nativos; sem frontend nesta entrega. |
 | IV. Isolamento | PASS | PASS | Instalação fixa, marcador antes de dados de acesso, chave/cookie/sessão tenant-local, testes A/B. |
 | V. API | PASS | PASS | Contrato atual preservado; alvo L2 separado; Problem Details e nenhuma resposta HTML de autenticação. Categorias de falha, códigos estáveis e JSON estrito conforme ADR 0003 (bloco P1c). |
-| VI. Segurança | PASS condicionado a P0 | PASS condicionado a P0 | Runtime sem owner/DDL, cookies+CSRF, autorização a cada operação, sessão revogável e tooling separado. |
-| VII. Qualidade | PASS | PASS | Migration inicial única (banco novo, reaplicação, histórico desconhecido rejeitado); não há versão anterior publicada a atualizar. PostgreSQL real, revogação/concorrência e gates do backend. |
+| VI. Segurança | PASS condicionado a P0 | PASS condicionado a P0 | Runtime sem owner/DDL, cookies+CSRF, autorização a cada operação, sessão revogável e tooling separado. Prazo limitado a 480 min e validado na inicialização; DELETE de sessões só para o operador individual; registro de limpeza sem ids de sessões/contas. |
+| VII. Qualidade | PASS | PASS | Migration inicial única (banco novo, reaplicação, histórico desconhecido rejeitado); não há versão anterior publicada a atualizar. PostgreSQL real, revogação/concorrência e gates do backend. Limites 5/480 vs 4/481 e retenção 1/365 vs 0/366, fronteira do corte, falha injetada na limpeza e um registro por execução. |
 | VIII. Infraestrutura | PASS condicionado a P0 | PASS condicionado a P0 | Compose local restrito, key ring privado persistente; HTTPS antes de acesso não local. Produção continua L4. |
-| IX. Manutenibilidade | PASS | PASS | Mecanismos nativos e ADR 0002; sem abstrações genéricas. Regras 2.2.0 de Id, FK, nomes de constraints e data/hora com exceções registradas e testes de modelo/arquitetura. |
+| IX. Manutenibilidade | PASS | PASS | Mecanismos nativos e ADR 0002; sem abstrações genéricas. Regras 2.2.0 de Id, FK, nomes de constraints e data/hora com exceções registradas e testes de modelo/arquitetura. Novos nomes em Português Técnico (`PrazoAbsolutoMinutos`, `RetencaoSessoesDias`, `InstanteCorte`, `ck_sessoes_autenticacao_prazo`); corte calculado do `TimeProvider`; delete rastreado, sem `ExecuteDelete`. |
 | X. Evolução | PASS | PASS | FluentValidation é a única dependência nova, justificada na ADR 0003 (alternativa nativa `AddValidation()` avaliada). Construção do zero explicitada (nada publicado, sem dados); login só liberado com todos os controles; L3/L4 preservadas. A partir da primeira publicação, mudanças de esquema passam a ser aditivas. |
+
+**ADRs após 2026-11-08.** [ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md)
+continua atendida: expiração absoluta sem sliding/refresh, revogação na próxima
+operação, host operacional sem HTTP e auditoria atômica; a ADR recebeu revisão
+substituindo “30 minutos” por prazo configurável (padrão 30) e registrando a limpeza
+por operador, sem job. [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md)
+não muda: nenhuma rota, status ou código HTTP novo; configuração inválida é falha
+de inicialização (não Problem Details) e `sessao limpar` usa resultado/código
+estável do host (`RETENCAO_INVALIDA`, `CONFLITO_CONCORRENTE`), sem exceção como
+fluxo de regra esperada.
 
 ### P0 — pré-requisitos bloqueantes, sem exceção constitucional
 
@@ -220,7 +233,8 @@ convenção central no `OnModelCreating`, validadas por teste de modelo.
 
 ## Phase 0 — pesquisa e decisões
 
-Revisão [D14–D20](research.md#revisão-l2--2026-11-04) resolve os pontos de integração:
+Revisão [D14–D21](research.md#revisão-l2--2026-11-04) resolve os pontos de integração
+(D21: prazo de sessão configurável e limpeza auditada, clarificações de 2026-11-08):
 pipeline cookie/CSRF, revogação sob corrida, persistência de chaves, autorização do
 operador, (D19) mecanismo de auditoria, padrão de data/hora, identificadores,
 nomes no banco e migration inicial única e (D20) tabelas auxiliares Identity,
@@ -267,7 +281,7 @@ Logout de sessão própria ainda válida permanece permitido, com CSRF, e só co
 204 após revogação persistida; GET antiforgery não exige instalação ativa.
 Inativação da instalação suspende consultas, mas não revoga sessões ou muda epoch.
 Após reativar, só sessões ainda válidas/não revogadas podem retomar;
-os 30 minutos continuam contando, sem reiniciar ou pausar.
+o prazo fixado na emissão continua contando, sem reiniciar ou pausar.
 Marcador divergente ou dependência indisponível: 503 seguro; nunca tentar outro alvo.
 A ordem detalhada e os códigos constam em [operations.md](contracts/operations.md).
 
@@ -317,11 +331,20 @@ Sessões em outros clientes/dispositivos da mesma conta permanecem independentes
 novo login rotaciona apenas a referência do cookie corrente; logout revoga somente
 essa sessão. Reset, desativação, lockout e revogação operacional revogam todas
 as sessões da conta, sem afetar outro tenant.
-Expiração absoluta de 30 minutos, sem sliding expiration, remember-me ou refresh.
+Expiração absoluta, sem sliding expiration, remember-me ou refresh. Prazo em
+`Sessao:PrazoAbsolutoMinutos` (clarificação 2026-11-08,
+[D21](research.md#d21--prazo-de-sessão-configurável-e-limpeza-auditada-de-sessões-2026-11-08)):
+inteiro 5–480 inclusive, padrão 30 quando ausente; fora da faixa ou não inteiro
+impede a inicialização (`ValidateOnStart`, diagnóstico seguro). Fixado na criação:
+`ExpiraEm = CriadoEm + prazo configurado`, ambos do mesmo `InstanteOperacao`;
+ticket e cookie usam esse `ExpiraEm`. Retrieve/Renew comparam com o `ExpiraEm`
+gravado e nunca recalculam pela configuração atual. CHECK no banco limita
+`ExpiraEm - CriadoEm` a 5–480 minutos.
 Renew é atualização rastreada de sessão ativa com `Versao` esperada, nunca upsert,
-nem extensão de prazo; só altera metadados se o ticket mudar. `ExpiraEm` é
-`CriadoEm` + 30 minutos, ambos do mesmo `InstanteOperacao`.
+nem extensão de prazo; só altera metadados se o ticket mudar.
 Store não usa cache de autorização; erro de banco não é tratado como “sessão ausente”.
+A API não remove sessões nem executa job em background; a remoção de registros
+encerrados é o comando restrito `sessao limpar` (abaixo).
 
 Identity valida senha/hash e lockout: cinco falhas por conta, 15 minutos de bloqueio,
 com atualização concorrente segura. Ao confirmar o bloqueio, revogar todas as
@@ -333,12 +356,25 @@ email/tenant; não criar contas ou permissões por startup/login.
 ### Operação restrita e evolução do banco
 
 Host pontual L2 cria/desativa/reativa contas, redefine senha, concede/retira a
-permissão declarada e revoga sessões de uma conta. Usa UserManager, alvo explícito,
+permissão declarada, revoga sessões de uma conta e remove sessões encerradas além
+da retenção (`sessao limpar`). Usa UserManager, alvo explícito,
 credencial individual de operador distinta, preflight e auditoria persistida.
 Login PostgreSQL por operador, não compartilhado, é atribuído ao responsável
 autenticado e gravado em `LoginOperador` com a correlação. Não aceita
 `--actor` como autorização, senha em argumentos, conta global ou chamadas por HTTP.
 Contrato e política de senha em [operations.md](contracts/operations.md).
+
+`sessao limpar` (clarificação 2026-11-08, [operations §5](contracts/operations.md#sessao-limpar)):
+retenção `OperacaoAcesso:RetencaoSessoesDias`, inteiro 1–365, padrão 30, sem argumento
+que a altere; inválida encerra antes de conectar. Remove somente sessões revogadas
+com `RevogadaEm < corte` ou não revogadas com `ExpiraEm < corte`
+(`corte = InstanteOperacao - retenção`); sessão válida nunca é elegível. Uma
+transação com delete rastreado (`Versao` esperada, sem `ExecuteDelete`) e registro;
+falha faz rollback total e grava registro `Falha` separado. Exatamente um
+`RegistroOperacaoAcesso` imutável por execução com alvo validado, atribuído ao
+`LoginOperador` individual, com retenção, instante de corte, quantidade removida,
+resultado e correlação, sem ids de sessões ou contas e sem autoria Sistema.
+Somente o operador tem DELETE em sessões; runtime não. Sem job na API.
 
 Contas/permissões/sessões possuem autor/data da criação e última alteração e
 correlação, preenchidos centralmente por contexto confiável de execução.
@@ -359,7 +395,7 @@ Downgrade de imagem não reverte automaticamente os dados.
 
 | Rastreabilidade L2 | Evidência exigida |
 |---|---|
-| US2; FR-005 a FR-008, FR-033; SC-002 | Login/logout, sessão vinculada, revogação/expiração, conta/permissão e operação restrita independentes em A/B. |
+| US2; FR-005 a FR-008, FR-033; SC-002 | Login/logout, sessão vinculada, revogação/expiração, conta/permissão e operação restrita independentes em A/B. Prazo configurável: 5 e 480 aceitos, ausente = 30, 4/481/não inteiro bloqueiam a inicialização; expiração no `ExpiraEm` fixado na emissão, inclusive após mudar a configuração. Limpeza: com retenção padrão remove 100% das encerradas há mais de 30 dias e 0% das válidas ou encerradas há 30 dias ou menos (fronteira exata do corte); um registro por execução, inclusive sem remoções e com falha injetada, atribuído ao operador; retenção 0/366 rejeitada. |
 | US3; FR-009, FR-011 a FR-016; SC-003 | Marcador/estado antes do acesso, migration inicial única, alvo errado bloqueado e carga 200/100/100/pico >=20. |
 | US5; FR-020 a FR-023; SC-005 | Consumidor independente usa somente contrato, cookie jar/CSRF e distingue erros; sem frontend. |
 | US1/US6; FR-002/003, FR-024 a FR-028; SC-006/008 | Execução reproduzível, configuração explícita, CI bloqueante e documentação/evidências da superfície L2. |
@@ -377,8 +413,8 @@ esses critérios futuros concluídos.
 | P1a — fundações de modelo | P0 | `InstanteUtc`, `IdentificadorV7`, `TimeProvider` registrado, `IContextoOperacao`, `EntidadeAuditavel`/`IEntidadeAuditavel`/`IEntidadeVersionada`, `InterceptadorAuditoria` com token por entidade; código existente alinhado ao modelo (sem `DateTimeOffset.UtcNow` em `PermissaoUsuario`/preflight, validação de offset, sem `ConcedidaEm`, concessão sem `Versao`, FKs `FkIdUsuario`/`FkIdTenant`, colunas Identity e auxiliares mapeadas, PKs `Guid` com `ValueGeneratedNever`, `CodigoAplicacao` em código/env/Compose/testes); convenção central de nomes de constraints; testes de arquitetura (relógio, `Guid.NewGuid`/`CreateVersion7()` sem argumento, `ExecuteUpdate`) e de modelo (PK `Id*`, FK `FkId*`, UUID v7 com timestamp do relógio de teste, exceções em lista fechada, nomes de constraints ≤63, catálogo `CodigosPermissao`). |
 | P1b — migration | P1a | Migration de rascunho descartada; migration inicial única gerada do modelo completo; bancos A/B criados do zero; SC-009 e rejeição de histórico desconhecido. |
 | P1c — erros e validação (ADR 0003) | P0 | `Resultado`/`Resultado<T>`/`Erro` no Domain; `ConfiguracaoProblemDetails` com 400/403/404/409/422; JSON estrito com `ThrowOnBadRequest`; FluentValidation com filtro no grupo `/api/v1`; testes de contrato (formato, chaves camelCase, nenhum valor ecoado) e de arquitetura (validador por `Requisicao*`, validador sem I/O, padrão/unicidade de códigos, `Skip` só em `*.Integracoes.*`). Pode evoluir em paralelo com P1a/P1b. |
-| P2 — sessão e controles HTTP | P1, P1c | Cookies/store, CSRF, limiter, autorização e saúde isolada. |
-| P3 — operação restrita | P1 | Casos de uso autorizados/auditáveis sem endpoint administrativo. Pode evoluir em paralelo com P2. |
+| P2 — sessão e controles HTTP | P1, P1c | Cookies/store, CSRF, limiter, autorização e saúde isolada. Opção `Sessao:PrazoAbsolutoMinutos` validada na inicialização (5/480 aceitos, 4/481/não inteiro rejeitados, ausente = 30), `ExpiraEm` fixado na emissão e CHECK de prazo; runtime sem DELETE em sessões e sem job de limpeza. |
+| P3 — operação restrita | P1 | Casos de uso autorizados/auditáveis sem endpoint administrativo, incluindo `sessao limpar`: retenção 1–365 (padrão 30), critério de corte com fronteira exata, delete rastreado atômico e um registro imutável por execução (sucesso, zero removidas e falha) com campos de limpeza e CHECK. Pode evoluir em paralelo com P2. |
 | P4 — contratos e aceite | P2 e P3 | SC-002/003/005, regressões da base (SC-009), CI/documentação e consumidor independente. |
 
 SC-003 usa operações sintéticas exclusivamente no host de testes, passando pelos

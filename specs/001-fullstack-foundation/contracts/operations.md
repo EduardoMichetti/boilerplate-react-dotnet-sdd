@@ -1,6 +1,6 @@
 # Contracts: EF/health e operação restrita L2
 
-**Date**: 2026-11-05
+**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21).
 **Status**: EF/health L1 entregues; autenticação e host operacional abaixo são
 contratos planejados, não comandos/endpoints já disponíveis.
 **References**: [plano](../plan.md), [modelo](../data-model.md),
@@ -52,8 +52,8 @@ Exit code EF 0 significa conclusão; qualquer falha é não zero, sem fallback.
 
 | Identidade | Privilégios necessários | Proibido |
 |---|---|---|
-| API runtime | CONNECT/USAGE locais; SELECT marcador/histórico/permissões; DML de usuários para Identity/lockout e sessões. | Owner, DDL, superuser, CREATEDB/CREATEROLE, conexão a B ou alteração de marcador/auditoria operacional. |
-| Operador de acesso | CONNECT local; leitura de marcador/contas/permissões; DML de contas/concessões/sessões; INSERT de auditoria. | DDL, modificar identidade/epoch, UPDATE/DELETE de auditoria, conexão a outro tenant. |
+| API runtime | CONNECT/USAGE locais; SELECT marcador/histórico/permissões; DML de usuários para Identity/lockout; SELECT/INSERT/UPDATE de sessões, sem DELETE. | Owner, DDL, superuser, CREATEDB/CREATEROLE, conexão a B ou alteração de marcador/auditoria operacional. |
+| Operador de acesso | CONNECT local; leitura de marcador/contas/permissões; DML de contas/concessões/sessões (único com DELETE de sessões, para `sessao limpar`); INSERT de auditoria. | DDL, modificar identidade/epoch, UPDATE/DELETE de auditoria, conexão a outro tenant. |
 | Owner de migrations | DDL/grants do alvo em manutenção. | Montagem na API ou uso rotineiro para FR-033. |
 | Provisionador | Criar/restringir banco e roles por procedimento técnico. | Identidade do servidor web. |
 
@@ -151,7 +151,10 @@ tipos incompatíveis; responder 400 Problem Details sem ecoar valores sensíveis
   nativo; ticket persistido também é protegido. Sem DbContext global/scoped capturado.
 - SetApplicationName inclui produto/ambiente/tenant; volume/key ring por instalação,
   certificado externo obrigatório em produção e permissões mínimas dos arquivos.
-- Sessão absoluta de 30 minutos; sem sliding expiration ou renovação de prazo.
+- Sessão com prazo absoluto `Sessao:PrazoAbsolutoMinutos` (inteiro 5–480, padrão 30;
+  fora da faixa ou não inteiro impede a inicialização), fixado na emissão:
+  `ExpiraEm = CriadoEm + prazo`. Sem sliding expiration ou renovação de prazo;
+  mudar a configuração não altera sessões já emitidas.
   Retrieve verifica registro, conta/lockout/stamp/epoch e prazos em cada operação.
 - Permitir sessões simultâneas da mesma conta em clientes/cookie jars distintos,
   sem identificação física do dispositivo. Login rotaciona somente a sessão do
@@ -177,7 +180,7 @@ Habilitar lockout em toda conta desde a criação: cinco falhas por conta,
 15 minutos; login válido só zera contagem quando a conta não está bloqueada.
 Confirmar lockout, revogar todas as sessões da conta e mudar stamp na mesma
 transação. Ao terminar o bloqueio, somente novo login permite acesso;
-cookies anteriores continuam inválidos mesmo dentro dos 30 minutos originais.
+cookies anteriores continuam inválidos mesmo dentro do prazo original.
 Concorrência não pode perder contagens nem sobrescrever revogação: conflito de
 `ConcurrencyStamp` na contagem recarrega a conta e reavalia até três vezes; esgotado, 503.
 Rate limiter nativo: cinco requisições/minuto/IP efetivo/instalação,
@@ -221,6 +224,7 @@ conta redefinir-senha --id-tenant UUID --id-ambiente UUID --id-usuario UUID
 conta revogar-sessoes --id-tenant UUID --id-ambiente UUID --id-usuario UUID
 permissao conceder --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read
 permissao revogar --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read
+sessao limpar --id-tenant UUID --id-ambiente UUID
 ```
 
 UUIDs não vazios; parâmetros desconhecidos/duplicados falham. Conta é sempre local.
@@ -244,9 +248,34 @@ zero linhas no DELETE de retirada simultânea ou `ConcurrencyFailure` do `UserMa
 geram `resultado=falha`, código `CONFLITO_CONCORRENTE` e saída não zero, sem repetição
 automática. Código de permissão desconhecido falha.
 
+### `sessao limpar`
+
+Remove registros de sessões encerradas há mais que a retenção; não há job,
+`IHostedService` ou timer na API (agendamento externo é L4).
+
+- Retenção em `OperacaoAcesso:RetencaoSessoesDias`: inteiro 1–365, padrão 30 quando
+  ausente. Não há argumento para alterá-la. Valor fora da faixa ou não inteiro
+  encerra antes de conectar: não zero, `codigo=RETENCAO_INVALIDA` em stderr/journal,
+  sem registro no banco (o alvo ainda não foi validado).
+- Após preflight e papel autorizados: `corte = InstanteOperacao - RetencaoDias`.
+  Elegível somente: revogada com `RevogadaEm < corte`, ou não revogada com
+  `ExpiraEm < corte`. Encerrada exatamente no corte ou depois é mantida; sessão
+  válida nunca é elegível, inclusive em concorrência com login/logout/Renew.
+- Uma transação: delete rastreado das elegíveis com `Versao` esperada (sem
+  `ExecuteDelete`) + INSERT do registro `Sucesso` com a quantidade removida.
+  Conflito ou erro: rollback completo (nenhuma removida), registro `Falha`
+  (`QuantidadeRemovida=0`) em transação separada e saída não zero. Sem repetição automática.
+- Exatamente um `RegistroOperacaoAcesso` por execução com alvo validado,
+  `TipoOperacao=LimparSessoes`, `LoginOperador` individual, `RetencaoDias`,
+  `InstanteCorte`, `QuantidadeRemovida`, `Resultado`, `CodigoResultado`, `IdOperacao`;
+  sem ids de sessões ou contas e sem autoria Sistema. Zero elegíveis é `sucesso`.
+  Se nem o registro de falha puder ser gravado, vale a regra do journal protegido.
+- Não altera contas, concessões, stamp, epoch nem sessões fora do critério.
+
 Resultado em stdout: um objeto JSON com `idOperacao`, `idTenant`, `idAmbiente`,
 `idUsuario` (quando conhecido), `loginOperador` autenticado individual,
-`operacao`, `resultado`, `codigo`, `registradaEm`.
+`operacao`, `resultado`, `codigo`, `registradaEm`; em `sessao limpar`, também
+`retencaoDias`, `instanteCorte` e `quantidadeRemovida`, sem `idUsuario`.
 Sem email/nome/senha/ticket/conexão. `resultado` é `sucesso`, `negado` ou `falha`;
 exit code 0 somente para sucesso persistido/auditado. Qualquer falha/negação retorna
 não zero e diagnóstico seguro correlacionado em stderr. A ACL/journal protegido

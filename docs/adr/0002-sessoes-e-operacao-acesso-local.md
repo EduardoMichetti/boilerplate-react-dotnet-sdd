@@ -1,7 +1,8 @@
 # ADR 0002: Sessão revogável e operação de acesso local ao tenant
 
 **Data**: 2026-11-04
-**Revisão**: 2026-11-05 — esclarecimentos de sessões e auditoria.
+**Revisão**: 2026-11-05 — esclarecimentos de sessões e auditoria;
+2026-11-08 — prazo de sessão configurável e limpeza auditada (research D21).
 **Status**: proposto no planejamento L2; implementação e aceite pendentes.
 **Contexto**: [plano L2](../../specs/001-fullstack-foundation/plan.md),
 [pesquisa](../../specs/001-fullstack-foundation/research.md),
@@ -21,7 +22,8 @@ senha diretamente por SQL ignora os mecanismos Identity e não prova autorizaç�
   com sessão no PostgreSQL exclusivo da instalação, ticket protegido e referência
   tenant/epoch/sessão protegida no cookie.
 - Validar conta, lockout, stamp, epoch, prazo e concessões atuais a cada operação.
-  Expiração absoluta de 30 minutos, sem sliding expiration, refresh ou cache de
+  Expiração absoluta (padrão 30 minutos, configurável de 5 a 480 e fixada na
+  emissão), sem sliding expiration, refresh ou cache de
   autorização. Renew nunca recria sessão revogada nem estende sua validade.
   Bloqueio por tentativas inválidas revoga todas as sessões da conta; seu término
   exige novo login, sem restaurar sessões antigas.
@@ -38,7 +40,9 @@ senha diretamente por SQL ignora os mecanismos Identity e não prova autorizaç�
   certificado externo em produção, HTTPS e CSRF explícito para JSON mutável.
 - Adicionar host pontual `Platform.Operations`, fora da imagem API, com autorização
   operacional por credencial PostgreSQL local distinta e ACL do ambiente.
-  Ele reutiliza casos de uso/Identity e não abre porta HTTP.
+  Ele reutiliza casos de uso/Identity e não abre porta HTTP. Também remove sessões
+  encerradas além da retenção (`sessao limpar`, padrão 30 dias), com um registro
+  imutável por execução atribuído ao operador; a API não tem job de limpeza.
   Cada operador utiliza login individual não compartilhado; auditoria grava
   identidade autenticada e correlação, não um nome declarado no comando.
 - Adicionar auditoria local persistida; operação e registro de sucesso são atômicos.

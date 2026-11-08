@@ -105,8 +105,9 @@ identidade técnica textual, não chave técnica (Constituição IX).
 
 - A porta `IContextoOperacao` em Application expõe `IdOperacao`, `TipoAutor`,
   `Autor` e `InstanteOperacao`. Cada host fornece sua implementação: API por
-  requisição (usuário autenticado ou anônimo), `Platform.Operations` (operador
-  autenticado) e tooling/limpeza (Sistema). Nunca vem de DTO ou argumento do consumidor.
+  requisição (usuário autenticado ou anônimo) e `Platform.Operations` (operador
+  autenticado, inclusive na limpeza de sessões). Nunca vem de DTO ou argumento do
+  consumidor. `Sistema` permanece no enum, sem produtor na L2.
 - `InstanteOperacao` é lido **uma vez** do `TimeProvider` por operação e normalizado
   por `InstanteUtc`; o mesmo valor alimenta `CriadoEm`/`AlteradoEm`, `ExpiraEm`,
   `RevogadaEm` e `RegistradaEm` daquela operação.
@@ -128,7 +129,7 @@ O token pertence a quem escreve a linha; não há dois tokens na mesma tabela.
 |---|---|---|---|
 | `UsuarioAplicacao` | `ConcurrencyStamp` nativo (renovado pelo `UserStore` a cada `UpdateAsync`) | somente via `UserManager` | Preenche metadados; não toca em `ConcurrencyStamp`; sem `Versao`. Mudança só de `ConcurrencyStamp` não é alteração efetiva. |
 | `PermissaoUsuario` | nenhum (imutável) | INSERT e DELETE | Rejeita `Modified`; metadados de alteração ficam nulos. Retirada registra `RegistroOperacaoAcesso`. |
-| `SessaoAutenticacao` | `Versao` int64 | store e casos de uso de sessão | Preenche metadados e incrementa `Versao`. |
+| `SessaoAutenticacao` | `Versao` int64 | store e casos de uso de sessão; DELETE só pelo caso de uso de limpeza (operador) | Preenche metadados e incrementa `Versao`; `Deleted` não altera metadados e usa `Versao` como token. |
 | `RegistroOperacaoAcesso` | nenhum (append-only) | INSERT | Rejeita `Modified` e `Deleted`. |
 
 Conflito (`IdentityResult` com `ConcurrencyFailure`, `DbUpdateConcurrencyException`,
@@ -142,8 +143,10 @@ Metadados de criação são imutáveis. Nas alterações, preservar criação e 
 última alteração; mesma transação dos dados. A auditoria não armazena snapshots,
 senha/hash/ticket/conexão nem faz diff de campos sensíveis.
 Tentativa de senha inválida é Anonimo, não o usuário indicado no email.
-Login com credencial verificada pode atribuir mudanças à conta autenticada;
-limpeza automática é Sistema. `IdOperacao` é UUID gerado pelo servidor/processo,
+Login com credencial verificada pode atribuir mudanças à conta autenticada.
+Não há limpeza automática: a remoção de sessões é o comando `sessao limpar`,
+atribuído ao operador individual autenticado e registrado em `RegistroOperacaoAcesso`
+(remoção não preenche metadados de alteração). `IdOperacao` é UUID gerado pelo servidor/processo,
 distinto do `traceId` HTTP de 32 caracteres, mas associado a ele no diagnóstico.
 Um no-op não altera metadados; exclusão de concessão mantém o evento operacional,
 sem transformar auditoria de última alteração em histórico completo de versões.
@@ -187,6 +190,8 @@ fuso: não é controlável em teste, e conversão de exibição não é papel do
 | `ProtecaoDados:DiretorioChaves` | Volume privado persistente por instalação, gravável pela API. |
 | `ProtecaoDados:ArquivoCertificado` / `ArquivoSenhaCertificado` | Arquivos privados externos; produção exige certificado e acesso à chave privada. Não argv/build/Git. |
 | `OperacaoAcesso:PapelAutorizado` | Role de login PostgreSQL individual exata do operador autorizado; configuração protegida do host pontual e segredo não compartilhado. |
+| `Sessao:PrazoAbsolutoMinutos` | API somente; inteiro decimal 5–480 inclusive, ausente = 30. Fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro ([D21](research.md#d21--prazo-de-sessão-configurável-e-limpeza-auditada-de-sessões-2026-11-08)). Aplicado só na emissão. |
+| `OperacaoAcesso:RetencaoSessoesDias` | `Platform.Operations` somente; inteiro decimal 1–365 inclusive, ausente = 30. Fora da faixa ou não inteiro impede `sessao limpar` antes de qualquer acesso ao banco. |
 
 Para variáveis hierárquicas usar `__`, por exemplo `StringsConexao__BancoApp`.
 Não introduzir aliases `ConnectionStrings`, `TenantId` ou `ApplicationId` no código.
@@ -265,16 +270,17 @@ operação. `/me` só autoriza a própria conta validada; logout, só a própria
 | `IdSessao` | UUID v7 não vazio, PK opaca gerada pelo servidor. |
 | `FkIdUsuario` | UUID, FK local (`fk_sessoes_autenticacao_usuarios`), exclusão restrita para preservar rastreabilidade. |
 | `EpocaAcesso` | UUID não vazio, cópia da geração vigente na emissão. |
-| `TicketProtegido` | `bytea` anulável; serialização nativa protegida por Data Protection; inserido na emissão e removido na revogação. Pode permanecer após expiração até limpeza, mas nunca autoriza uso. |
-| `ExpiraEm` | UTC, `CriadoEm` +30 minutos; imutável, maior que `CriadoEm`. |
+| `TicketProtegido` | `bytea` anulável; serialização nativa protegida por Data Protection; inserido na emissão e removido na revogação. Pode permanecer após expiração até a remoção da linha por `sessao limpar`, mas nunca autoriza uso. |
+| `ExpiraEm` | UTC, `CriadoEm` + `Sessao:PrazoAbsolutoMinutos` vigente na emissão (padrão 30); imutável. CHECK `ck_sessoes_autenticacao_prazo`: diferença entre 5 e 480 minutos. Mudança posterior da configuração não altera sessões emitidas. |
 | `RevogadaEm` | UTC anulável; estado da sessão (não metadado de auditoria), preenchido na revogação com o mesmo instante de `AlteradoEm`. |
 | `Versao` | int64 positivo, token de concorrência incrementado pelo `InterceptadorAuditoria`. |
 | Base auditável | Campos da §4; `CriadoEm` é o instante de emissão. |
 
 Índices: PK `IdSessao`, `ix_sessoes_autenticacao_fk_id_usuario` para revogação da
-conta e `ix_sessoes_autenticacao_expira_em` para futura limpeza. CHECKs: UUIDs
-válidos, prazo válido e sessão revogada sem ticket. Expiração é verificada no uso;
-não depende de job de limpeza. O índice por conta não é único: uma conta pode ter
+conta, `ix_sessoes_autenticacao_expira_em` e `ix_sessoes_autenticacao_revogada_em`
+para o critério de `sessao limpar`. CHECKs: UUIDs válidos, prazo de 5–480 minutos
+e sessão revogada sem ticket. Expiração é verificada no uso; não depende de limpeza,
+e a API não executa remoção em segundo plano. O índice por conta não é único: uma conta pode ter
 sessões simultâneas em clientes/dispositivos distintos. Não modelar fingerprint de
 dispositivo. Não há coluna de tenant duplicada: a conta tem FK ao marcador único;
 a referência do cookie também carrega tenant/epoch e ambos são validados.
@@ -293,6 +299,7 @@ mantidos; nomes dos novos tipos internos são portugueses.
 | Ativa → revogada | Carrega rastreada e salva com `Versao` esperada: `RevogadaEm` preenchido, ticket removido, metadados de alteração e versão pelo interceptor. |
 | Ativa → expirada | `agora >= ExpiraEm`; nenhum Retrieve/Renew concede acesso. |
 | Revogada/expirada → ativa | Proibido; novo login exige outra `IdSessao`. |
+| Revogada/expirada → removida | Somente `sessao limpar`, quando `RevogadaEm < corte` ou (`RevogadaEm` nulo e `ExpiraEm < corte`), com `corte = InstanteOperacao - RetencaoSessoesDias`. Delete rastreado com `Versao` esperada, na transação do registro da execução. Ativa → removida é impossível pelo critério. |
 
 Logout só confirma após commit. Disputa Renew/logout não pode restaurar ticket;
 conflito de `Versao` (zero linhas atualizadas) nunca autoriza INSERT.
@@ -335,6 +342,17 @@ mutável `EntidadeAuditavel`. Metadados das entidades não substituem esse hist�
 | `RegistradaEm` | UTC `timestamptz`, o mesmo `InstanteOperacao` das alterações do comando. |
 | `Resultado` | enum `Sucesso`/`Negado`/`Falha`; jamais incluir senha/token/ticket. |
 | `CodigoResultado` | string até 100, código estável seguro, sem mensagem SQL. |
+| `RetencaoDias` | int 1–365, somente `LimparSessoes`: retenção aplicada. |
+| `InstanteCorte` | UTC `timestamptz`, somente `LimparSessoes`: `RegistradaEm - RetencaoDias`. |
+| `QuantidadeRemovida` | int ≥ 0, somente `LimparSessoes`; 0 quando nada era elegível ou houve falha (rollback). |
+
+CHECK `ck_operacoes_acesso_limpeza`: os três campos de limpeza estão todos presentes
+quando `TipoOperacao=LimparSessoes` e todos nulos nos demais tipos; na limpeza
+`IdUsuarioAlvo` e `CodigoPermissao` são nulos. O registro nunca lista sessões ou
+contas removidas. Cada execução de `sessao limpar` com alvo validado gera
+exatamente um registro (`Sucesso`, inclusive com zero removidas, ou `Falha`), sempre
+com `LoginOperador`; não existe autoria Sistema. Invocação rejeitada antes da
+validação do alvo segue a regra de falha pré-auditoria abaixo.
 
 Índices `ix_operacoes_acesso_id_usuario_alvo_registrada_em` e por instante.
 Operador pode INSERT, não UPDATE/DELETE dos registros. API não altera auditoria
@@ -363,7 +381,8 @@ Testes devem provar: banco novo A/B, reaplicação sem duplicação ou perda,
 rejeição de histórico desconhecido, restrições/transações,
 revogação/expiração/stamp/epoch, disputa Renew/logout, reset/bloqueio de A sem
 efeito em B, preenchimento/imutabilidade de auditoria, autoria
-individual/anônima/sistema, SC-003 com resultados persistidos corretos, instantes
+individual/anônima (sem produtor de Sistema), `ExpiraEm` com prazos 5/30/480 e CHECK
+de prazo, limpeza com fronteira exata do corte e um registro por execução, SC-003 com resultados persistidos corretos, instantes
 com offset zero e microssegundos iguais após gravar e ler, conflito de `Versao` em
 Renew/revogação/troca de sessão no login (falha preserva a anterior; disputa conclui
 uma única troca), `ConcurrencyStamp` na conta sem `Versao`, concessão imutável,

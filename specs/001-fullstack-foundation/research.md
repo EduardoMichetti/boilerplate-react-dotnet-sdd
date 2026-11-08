@@ -443,7 +443,7 @@ Não adicionar cache de sessão ou capturar DbContext scoped nas options.
 
 Retrieve confere sessão, conta ativa/lockout/stamp, epoch e expiração em cada
 operação. Concessões são verificadas no banco na autorização. Desabilitar sliding
-expiration; 30 minutos absolutos, sem refresh. Renew não faz upsert, não estende
+expiration; prazo absoluto (padrão 30 minutos, configurável 5–480 por D21), sem refresh. Renew não faz upsert, não estende
 prazo e só atualiza linha ainda ativa/versão esperada. Logout persiste revogação
 antes de confirmar; erro de banco não é retornado como `null` ou logout concluído.
 
@@ -745,9 +745,73 @@ a disputa perdida de credencial inválida (401) e de dependência indisponível 
 [Guid.CreateVersion7(DateTimeOffset)](https://learn.microsoft.com/en-us/dotnet/api/system.guid.createversion7),
 [EF Core concurrency](https://learn.microsoft.com/en-us/ef/core/saving/concurrency).
 
+### D21 — Prazo de sessão configurável e limpeza auditada de sessões (2026-11-08)
+
+**Decision**:
+- **Prazo absoluto configurável**: chave `Sessao:PrazoAbsolutoMinutos` (env
+  `Sessao__PrazoAbsolutoMinutos`), lida somente pela API. Ausente = 30. Aceita apenas
+  inteiro decimal sem sinal, separador ou espaço (`NumberStyles.None`, cultura
+  invariante) na faixa **5–480 inclusive**; `4`, `481`, `30.5`, `0`, `-5` ou texto
+  impedem a inicialização (`ValidateOnStart`) com diagnóstico que cita a chave e a
+  faixa, nunca o valor de outras configurações. Não há fallback silencioso para 30.
+  O valor é capturado na emissão: `ExpiraEm = CriadoEm + prazo`, ambos do mesmo
+  `InstanteOperacao`; `ExpiresUtc` do ticket e o cookie usam esse `ExpiraEm`.
+  Retrieve/Renew comparam `agora >= ExpiraEm` gravado, nunca recalculam com a
+  configuração atual; mudar o prazo e reiniciar não altera sessões emitidas.
+  CHECK do banco garante `ExpiraEm - CriadoEm` entre 5 e 480 minutos.
+- **Comando de limpeza**: `sessao limpar` no host `Platform.Operations`, mesmo
+  preflight/autorização dos demais comandos. Retenção em
+  `OperacaoAcesso:RetencaoSessoesDias` (ausente = 30; inteiro 1–365, mesma regra de
+  parse). Não há argumento de retenção nem modo “forçar”: a política é configuração
+  protegida do host, não escolha ad hoc. Sem job, `IHostedService` ou timer na API;
+  agendamento externo é L4.
+- **Critério de remoção**: `corte = InstanteOperacao - RetencaoDias`. Remove somente
+  sessões com `RevogadaEm < corte` ou (`RevogadaEm` nulo e `ExpiraEm < corte`).
+  Como `corte < agora`, uma sessão ativa nunca satisfaz o critério; encerrada
+  exatamente no corte é mantida (“há mais de N dias”). Revogação só ocorre em
+  sessão ativa, então `RevogadaEm` é sempre o instante de encerramento da revogada.
+- **Execução**: uma transação. Projeta `IdSessao`/`Versao` das elegíveis (sem
+  carregar tickets), anexa stubs e marca `Deleted` (alteração rastreada, com `Versao`
+  como token; `ExecuteDelete` continua proibido), insere o registro de sucesso e faz
+  commit. Conflito ou erro: rollback total (zero removidas) e, em transação separada,
+  registro `Falha`. Sessões elegíveis não têm transição concorrente legítima
+  (Renew/logout/revogação exigem sessão ativa), então conflito é anomalia, não disputa.
+- **Registro único por execução**: `RegistroOperacaoAcesso` com
+  `TipoOperacao=LimparSessoes`, operador individual autenticado (`LoginOperador`),
+  `RetencaoDias`, `InstanteCorte`, `QuantidadeRemovida` (0 em falha ou nada elegível),
+  `Resultado`, `CodigoResultado` e `IdOperacao`; `IdUsuarioAlvo`/`CodigoPermissao`
+  nulos e nenhuma lista de sessões ou contas. Os três campos novos são obrigatórios
+  apenas nesse tipo (CHECK). Não existe autoria `Sistema` para limpeza.
+- **Invocação rejeitada antes do alvo validado** (argumentos, retenção fora da faixa,
+  configuração ou preflight) não chega a ser uma execução sobre o banco: segue a regra
+  existente — saída não zero, diagnóstico seguro em stderr e journal protegido, sem
+  gravar em banco não validado. A partir do alvo validado e papel autorizado, toda
+  execução gera exatamente um registro.
+- **Privilégios**: DELETE em `sessoes_autenticacao` somente para o operador; runtime
+  mantém SELECT/INSERT/UPDATE em sessões, sem DELETE.
+
+**Rationale**: fixar o prazo na emissão torna o comportamento independente de
+reinícios e mantém “sem extensão”. Configuração protegida para retenção evita que um
+argumento apague histórico recente por engano. Uma única transação dá contagem exata
+e “zero ou tudo”, compatível com o volume de sessões de 5–480 minutos por instalação.
+O registro sem ids cumpre a clarificação e evita transformar auditoria em inventário.
+
+**Alternatives considered**:
+- Recalcular expiração com o prazo atual: rejeitada; violaria “fixado na criação”.
+- `ExecuteDelete` em lote: rejeitada; contorna interceptor/token e a regra D19.
+- Lotes com commits parciais: rejeitada; falha deixaria contagem ambígua.
+- `--retencao-dias` por argumento: rejeitada; política por produto, não por execução.
+- Job em background na API: rejeitado pela clarificação de 2026-11-08.
+- Autoria `Sistema` para limpeza: rejeitada; a limpeza é sempre iniciada por operador.
+
+**Sources**: clarificações 2026-11-08 de [spec.md](spec.md) (FR-006, FR-033, SC-002),
+[Options validation](https://learn.microsoft.com/en-us/dotnet/core/extensions/options#options-validation),
+[EF Core concurrency](https://learn.microsoft.com/en-us/ef/core/saving/concurrency).
+
 ## Fechamento da pesquisa L2
 
-Não há esclarecimentos técnicos pendentes. Decisões acima permitem a Phase 1 sem
+Não há esclarecimentos técnicos pendentes; D21 incorpora as clarificações de
+2026-11-08 sem alterar D14–D20. Decisões acima permitem a Phase 1 sem
 atualizar a stack ou ampliar para frontend/negócio/deploy.
 Valores privados, caminhos de certificado e proxies reais são configuração do
 ambiente de validação/produção, não escolhas arquiteturais silenciosamente assumidas.
