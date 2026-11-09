@@ -3,6 +3,7 @@ namespace Platform.Infrastructure.Persistence.DesignTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Platform.Domain.Tenancy;
+using Platform.Infrastructure.Persistence.Auditoria;
 using Platform.Infrastructure.Persistence.TenantAccess;
 
 /// <summary>
@@ -35,7 +36,7 @@ public sealed class AcessoTenantDbContextFactory : IDesignTimeDbContextFactory<A
             }
         }
 
-        string? idAplicacao = Environment.GetEnvironmentVariable("IdAplicacao") ?? "boilerplate-react-dotnet-sdd";
+        string? codigoAplicacao = Environment.GetEnvironmentVariable("CodigoAplicacao") ?? "boilerplate-react-dotnet-sdd";
         string? idAmbienteBruto = Environment.GetEnvironmentVariable("IdAmbiente");
         Guid idAmbiente = Guid.TryParse(idAmbienteBruto, out Guid eGuid)
             ? eGuid
@@ -62,10 +63,12 @@ public sealed class AcessoTenantDbContextFactory : IDesignTimeDbContextFactory<A
             ? "Host=localhost;Database=boilerplate_designtime;Username=postgres"
             : stringConexao!;
 
+        TimeProvider relogio = TimeProvider.System;
+
         if (!ehFallbackTempoDesign)
         {
             OpcoesPreflightMigracao opcoesPreflight = new(
-                IdAplicacao: idAplicacao,
+                CodigoAplicacao: codigoAplicacao,
                 IdAmbiente: idAmbiente,
                 IdTenant: idTenant,
                 EstadoTenant: estadoTenant,
@@ -74,7 +77,7 @@ public sealed class AcessoTenantDbContextFactory : IDesignTimeDbContextFactory<A
                 IdTenantCli: idTenantCli,
                 IdAmbienteCli: idAmbienteCli);
 
-            PreflightMigracaoTenant.ExecutarPreflightAsync(opcoesPreflight).GetAwaiter().GetResult();
+            PreflightMigracaoTenant.ExecutarPreflightAsync(opcoesPreflight, CadeiaConhecida()).GetAwaiter().GetResult();
         }
 
         DbContextOptionsBuilder<AcessoTenantDbContext> construtorOpcoes = new();
@@ -82,12 +85,13 @@ public sealed class AcessoTenantDbContextFactory : IDesignTimeDbContextFactory<A
         {
             npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
         });
+        construtorOpcoes.AddInterceptors(new InterceptadorAuditoria(new ContextoOperacaoFerramentaMigracao()));
 
         construtorOpcoes.UseSeeding((contexto, _) =>
         {
             if (contexto is AcessoTenantDbContext contextoTenant)
             {
-                PreflightMigracaoTenant.PopularIdentidadeBanco(contextoTenant, idTenant, idAmbiente);
+                PreflightMigracaoTenant.PopularIdentidadeBanco(contextoTenant, idTenant, idAmbiente, relogio);
             }
         });
 
@@ -95,10 +99,22 @@ public sealed class AcessoTenantDbContextFactory : IDesignTimeDbContextFactory<A
         {
             if (contexto is AcessoTenantDbContext contextoTenant)
             {
-                await PreflightMigracaoTenant.PopularIdentidadeBancoAsync(contextoTenant, idTenant, idAmbiente, tokenCancelamento);
+                await PreflightMigracaoTenant.PopularIdentidadeBancoAsync(contextoTenant, idTenant, idAmbiente, relogio, tokenCancelamento);
             }
         });
 
         return new AcessoTenantDbContext(construtorOpcoes.Options);
+    }
+
+    /// <summary>
+    /// IDs das migrations conhecidas por este binário, em ordem (sem abrir conexão).
+    /// </summary>
+    /// <returns>Cadeia conhecida.</returns>
+    public static IReadOnlyList<string> CadeiaConhecida()
+    {
+        DbContextOptionsBuilder<AcessoTenantDbContext> construtor = new();
+        construtor.UseNpgsql("Host=localhost", npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation"));
+        using AcessoTenantDbContext contexto = new(construtor.Options);
+        return contexto.Database.GetMigrations().ToList();
     }
 }

@@ -1,207 +1,188 @@
 namespace Platform.IntegrationTests.Tenancy;
 
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Platform.Application.Tenancy;
 using Platform.Domain.Tenancy;
 using Platform.Infrastructure.Persistence.DesignTime;
 using Platform.Infrastructure.Persistence.TenantAccess;
+using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 using Platform.IntegrationTests.Fixtures;
+using Platform.IntegrationTests.Suporte;
 using Xunit;
 
+/// <summary>
+/// T077: migration inicial única em bancos A/B novos, reaplicação, histórico desconhecido
+/// rejeitado pelo tooling e pelo runtime, alvo errado bloqueado antes de DDL e roles ausentes.
+/// </summary>
 public sealed class TestesMigracaoEIsolamentoTenant(FixtureInstalacaoPostgres fixture)
     : IClassFixture<FixtureInstalacaoPostgres>
 {
+    private const string IdMigracaoFutura = "29991231000000_MigracaoDeVersaoFutura";
+
     [Fact]
-    public async Task BancoVazio_RejeitaPreflightMigracaoSemAprovacao()
+    public async Task BancoVazio_RejeitaPreflightSemAprovacao()
     {
-        OpcoesPreflightMigracao opcoesNaoAprovadas = new(
-            IdAplicacao: "app-teste",
-            IdAmbiente: fixture.TenantA.IdAmbiente,
-            IdTenant: fixture.TenantA.IdTenant,
-            EstadoTenant: EstadoTenant.Inativo,
-            StringConexao: fixture.TenantA.StringConexaoProprietario,
-            PermissaoInicializarBancoVazioBruta: "false");
+        (string conexaoOwner, _) = await CriarBancoAvulsoAsync(comRolesDaInstalacao: true);
+
+        OpcoesPreflightMigracao naoAprovado = Opcoes(conexaoOwner, Guid.NewGuid(), Guid.NewGuid(), "false");
 
         InvalidOperationException excecao = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => PreflightMigracaoTenant.ExecutarPreflightAsync(opcoesNaoAprovadas, TestContext.Current.CancellationToken));
-
+            () => PreflightMigracaoTenant.ExecutarPreflightAsync(naoAprovado, AcessoTenantDbContextFactory.CadeiaConhecida(), TestContext.Current.CancellationToken));
         Assert.Contains("não autorizada", excecao.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Migracao_FalhaComMensagemClaraQuandoRolesDaInstalacaoNaoExistem()
+    {
+        (string conexaoOwner, string banco) = await CriarBancoAvulsoAsync(comRolesDaInstalacao: false);
+        Guid idTenant = Guid.NewGuid();
+
+        await using AcessoTenantDbContext contexto = new(BancoTeste.CriarOpcoesMigracao(conexaoOwner, idTenant, Guid.NewGuid(), TimeProvider.System));
+        PostgresException excecao = await Assert.ThrowsAsync<PostgresException>(() => contexto.Database.MigrateAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains($"{banco}_runtime", excecao.MessageText, StringComparison.Ordinal);
+        await using AcessoTenantDbContext verificacao = new(BancoTeste.CriarOpcoesMigracao(conexaoOwner, idTenant, Guid.NewGuid(), TimeProvider.System));
+        Assert.Empty(await verificacao.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task MigracaoInicialEReaplicacao_SaoIdempotentesEPreservamDados()
     {
-        // 1. Migração inicial no Tenant A e Tenant B com autorização
         foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
         {
-            OpcoesPreflightMigracao opcoesAprovadas = new(
-                IdAplicacao: "app-teste",
-                IdAmbiente: tenant.IdAmbiente,
-                IdTenant: tenant.IdTenant,
-                EstadoTenant: EstadoTenant.Inativo,
-                StringConexao: tenant.StringConexaoProprietario,
-                PermissaoInicializarBancoVazioBruta: "true",
-                IdTenantCli: tenant.IdTenant,
-                IdAmbienteCli: tenant.IdAmbiente);
-
-            await PreflightMigracaoTenant.ExecutarPreflightAsync(opcoesAprovadas, TestContext.Current.CancellationToken);
-
-            DbContextOptions<AcessoTenantDbContext> opcoes = CriarOpcoes(tenant.StringConexaoProprietario, tenant.IdTenant, tenant.IdAmbiente);
-            await using (AcessoTenantDbContext contexto = new(opcoes))
-            {
-                await contexto.Database.MigrateAsync(TestContext.Current.CancellationToken);
-            }
-
-            await tenant.ConcederPermissoesExecucaoAsync(TestContext.Current.CancellationToken);
-
-            // Verifica se o marcador de identidade existe e corresponde
-            await using (AcessoTenantDbContext contexto = new(opcoes))
-            {
-                var identidade = await contexto.IdentidadeBanco.SingleAsync(TestContext.Current.CancellationToken);
-                Assert.Equal(tenant.IdTenant, identidade.IdTenant);
-                Assert.Equal(tenant.IdAmbiente, identidade.IdAmbiente);
-                Assert.NotEqual(Guid.Empty, identidade.EpocaAcesso);
-            }
+            await BancoTeste.MigrarAsync(tenant, tokenCancelamento: TestContext.Current.CancellationToken);
         }
 
-        // 2. Reaplicação com autorização de banco vazio desligada - deve suceder e preservar dados
+        Dictionary<Guid, Guid> epocas = [];
         foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
         {
-            OpcoesPreflightMigracao reaplicar = new(
-                IdAplicacao: "app-teste",
-                IdAmbiente: tenant.IdAmbiente,
-                IdTenant: tenant.IdTenant,
-                EstadoTenant: EstadoTenant.Inativo,
-                StringConexao: tenant.StringConexaoProprietario,
-                PermissaoInicializarBancoVazioBruta: "false", // Desligada após inicialização!
-                IdTenantCli: tenant.IdTenant,
-                IdAmbienteCli: tenant.IdAmbiente);
+            await using AcessoTenantDbContext contexto = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
+            IdentidadeBancoTenant marcador = await contexto.IdentidadeBanco.SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(tenant.IdTenant, marcador.IdTenant);
+            Assert.Equal(tenant.IdAmbiente, marcador.IdAmbiente);
+            Assert.Equal(7, marcador.EpocaAcesso.Version);
+            Assert.Equal(TimeSpan.Zero, marcador.InicializadoEm.Offset);
+            Assert.Equal(
+                AcessoTenantDbContextFactory.CadeiaConhecida(),
+                (await contexto.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).ToList());
+            epocas[tenant.IdTenant] = marcador.EpocaAcesso;
+        }
 
-            await PreflightMigracaoTenant.ExecutarPreflightAsync(reaplicar, TestContext.Current.CancellationToken);
+        // Reaplicação com aprovação de banco vazio desligada: no-op sem duplicar nem perder dados.
+        foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
+        {
+            OpcoesPreflightMigracao reaplicar = Opcoes(tenant.StringConexaoProprietario, tenant.IdTenant, tenant.IdAmbiente, "false");
+            await PreflightMigracaoTenant.ExecutarPreflightAsync(reaplicar, AcessoTenantDbContextFactory.CadeiaConhecida(), TestContext.Current.CancellationToken);
+            await BancoTeste.MigrarAsync(tenant, tokenCancelamento: TestContext.Current.CancellationToken);
 
-            DbContextOptions<AcessoTenantDbContext> opcoes = CriarOpcoes(tenant.StringConexaoProprietario, tenant.IdTenant, tenant.IdAmbiente);
-            await using (AcessoTenantDbContext contexto = new(opcoes))
-            {
-                await contexto.Database.MigrateAsync(TestContext.Current.CancellationToken);
-            }
+            await using AcessoTenantDbContext contexto = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
+            IdentidadeBancoTenant marcador = await contexto.IdentidadeBanco.SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(epocas[tenant.IdTenant], marcador.EpocaAcesso);
+        }
+    }
 
-            await tenant.ConcederPermissoesExecucaoAsync(TestContext.Current.CancellationToken);
+    [Fact]
+    public async Task HistoricoComIdDesconhecido_BloqueiaToolingERuntimeMesmoSemPendentes()
+    {
+        await BancoTeste.MigrarAsync(fixture.TenantA, tokenCancelamento: TestContext.Current.CancellationToken);
+        await ExecutarOwnerAsync(
+            fixture.TenantA,
+            $"INSERT INTO foundation.\"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('{IdMigracaoFutura}', '10.0.12')");
+        try
+        {
+            OpcoesPreflightMigracao opcoes = Opcoes(fixture.TenantA.StringConexaoProprietario, fixture.TenantA.IdTenant, fixture.TenantA.IdAmbiente, "false");
+            InvalidOperationException excecao = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => PreflightMigracaoTenant.ExecutarPreflightAsync(opcoes, AcessoTenantDbContextFactory.CadeiaConhecida(), TestContext.Current.CancellationToken));
+            Assert.Contains("desconhecidos", excecao.Message, StringComparison.Ordinal);
 
-            await using (AcessoTenantDbContext contexto = new(opcoes))
-            {
-                var identidade = await contexto.IdentidadeBanco.SingleAsync(TestContext.Current.CancellationToken);
-                Assert.Equal(tenant.IdTenant, identidade.IdTenant);
-                Assert.Equal(tenant.IdAmbiente, identidade.IdAmbiente);
-            }
+            await using AcessoTenantDbContext contextoRuntime = BancoTeste.CriarContexto(fixture.TenantA.StringConexaoExecucao);
+            Assert.Empty(await contextoRuntime.Database.GetPendingMigrationsAsync(TestContext.Current.CancellationToken));
+            IdentidadeBancoTenantSnapshot snapshot = await new VerificadorIdentidadeBancoTenant(contextoRuntime).LerAsync(TestContext.Current.CancellationToken);
+            Assert.False(snapshot.PossuiVersaoMigracaoEsperada);
+        }
+        finally
+        {
+            await ExecutarOwnerAsync(
+                fixture.TenantA,
+                $"DELETE FROM foundation.\"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{IdMigracaoFutura}'");
         }
     }
 
     [Fact]
     public async Task Preflight_BloqueiaAntesDeDDLQuandoTenantConfiguradoDivergeDoBancoAlvo()
     {
-        // Garante que o Tenant B esteja migrado e com seu marcador gravado
-        OpcoesPreflightMigracao aprovadoB = new(
-            IdAplicacao: "app-teste",
-            IdAmbiente: fixture.TenantB.IdAmbiente,
-            IdTenant: fixture.TenantB.IdTenant,
-            EstadoTenant: EstadoTenant.Inativo,
-            StringConexao: fixture.TenantB.StringConexaoProprietario,
-            PermissaoInicializarBancoVazioBruta: "true",
-            IdTenantCli: fixture.TenantB.IdTenant,
-            IdAmbienteCli: fixture.TenantB.IdAmbiente);
+        await BancoTeste.MigrarAsync(fixture.TenantB, tokenCancelamento: TestContext.Current.CancellationToken);
 
-        await PreflightMigracaoTenant.ExecutarPreflightAsync(aprovadoB, TestContext.Current.CancellationToken);
-
-        DbContextOptions<AcessoTenantDbContext> opcoesB = CriarOpcoes(
-            fixture.TenantB.StringConexaoProprietario, fixture.TenantB.IdTenant, fixture.TenantB.IdAmbiente);
-        await using (AcessoTenantDbContext contextoB = new(opcoesB))
-        {
-            await contextoB.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        }
-
-        // Tenta rodar o preflight com a identidade do Tenant A apontando para a base do Tenant B
-        OpcoesPreflightMigracao divergente = new(
-            IdAplicacao: "app-teste",
-            IdAmbiente: fixture.TenantA.IdAmbiente,
-            IdTenant: fixture.TenantA.IdTenant,
-            EstadoTenant: EstadoTenant.Inativo,
-            StringConexao: fixture.TenantB.StringConexaoProprietario, // Base errada!
-            PermissaoInicializarBancoVazioBruta: "true",
-            IdTenantCli: fixture.TenantA.IdTenant,
-            IdAmbienteCli: fixture.TenantA.IdAmbiente);
+        OpcoesPreflightMigracao divergente = Opcoes(
+            fixture.TenantB.StringConexaoProprietario, fixture.TenantA.IdTenant, fixture.TenantA.IdAmbiente, "true");
 
         await Assert.ThrowsAsync<ExcecaoIsolamentoTenant>(
-            () => PreflightMigracaoTenant.ExecutarPreflightAsync(divergente, TestContext.Current.CancellationToken));
+            () => PreflightMigracaoTenant.ExecutarPreflightAsync(divergente, AcessoTenantDbContextFactory.CadeiaConhecida(), TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task Verificador_LeIdentidadeBancoEVerificaStatusMigracao()
+    public async Task Verificador_RuntimeLeIdentidadeECadeiaCompleta()
     {
-        // Garante migração do Tenant A
-        OpcoesPreflightMigracao aprovadoA = new(
-            IdAplicacao: "app-teste",
-            IdAmbiente: fixture.TenantA.IdAmbiente,
-            IdTenant: fixture.TenantA.IdTenant,
-            EstadoTenant: EstadoTenant.Inativo,
-            StringConexao: fixture.TenantA.StringConexaoProprietario,
-            PermissaoInicializarBancoVazioBruta: "true",
-            IdTenantCli: fixture.TenantA.IdTenant,
-            IdAmbienteCli: fixture.TenantA.IdAmbiente);
+        await BancoTeste.MigrarAsync(fixture.TenantA, tokenCancelamento: TestContext.Current.CancellationToken);
 
-        await PreflightMigracaoTenant.ExecutarPreflightAsync(aprovadoA, TestContext.Current.CancellationToken);
+        await using AcessoTenantDbContext contexto = BancoTeste.CriarContexto(fixture.TenantA.StringConexaoExecucao);
+        IdentidadeBancoTenantSnapshot snapshot = await new VerificadorIdentidadeBancoTenant(contexto).LerAsync(TestContext.Current.CancellationToken);
 
-        DbContextOptions<AcessoTenantDbContext> opcoesProprietario = CriarOpcoes(
-            fixture.TenantA.StringConexaoProprietario,
-            fixture.TenantA.IdTenant,
-            fixture.TenantA.IdAmbiente);
-
-        await using (AcessoTenantDbContext contextoProprietario = new(opcoesProprietario))
-        {
-            await contextoProprietario.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        }
-
-        await fixture.TenantA.ConcederPermissoesExecucaoAsync(TestContext.Current.CancellationToken);
-
-        DbContextOptions<AcessoTenantDbContext> opcoesExecucao = CriarOpcoes(
-            fixture.TenantA.StringConexaoExecucao,
-            fixture.TenantA.IdTenant,
-            fixture.TenantA.IdAmbiente);
-
-        await using AcessoTenantDbContext contexto = new(opcoesExecucao);
-        VerificadorIdentidadeBancoTenant verificador = new(contexto);
-
-        var snapshot = await verificador.LerAsync(TestContext.Current.CancellationToken);
         Assert.Equal(fixture.TenantA.IdTenant, snapshot.IdTenant);
         Assert.Equal(fixture.TenantA.IdAmbiente, snapshot.IdAmbiente);
         Assert.NotEqual(Guid.Empty, snapshot.EpocaAcesso);
         Assert.True(snapshot.PossuiVersaoMigracaoEsperada);
     }
 
-    private static DbContextOptions<AcessoTenantDbContext> CriarOpcoes(
-        string stringConexao, Guid idTenant, Guid idAmbiente)
+    private static OpcoesPreflightMigracao Opcoes(string conexao, Guid idTenant, Guid idAmbiente, string permitirVazio) => new(
+        CodigoAplicacao: "app-teste",
+        IdAmbiente: idAmbiente,
+        IdTenant: idTenant,
+        EstadoTenant: EstadoTenant.Inativo,
+        StringConexao: conexao,
+        PermissaoInicializarBancoVazioBruta: permitirVazio,
+        IdTenantCli: idTenant,
+        IdAmbienteCli: idAmbiente);
+
+    private static async Task ExecutarOwnerAsync(InstalacaoTestePostgres tenant, string sql)
     {
-        DbContextOptionsBuilder<AcessoTenantDbContext> construtor = new();
-        construtor.UseNpgsql(stringConexao, npgsql =>
-        {
-            npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
-        });
+        await using NpgsqlConnection conexao = new(tenant.StringConexaoProprietario);
+        await conexao.OpenAsync(TestContext.Current.CancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
 
-        construtor.UseSeeding((contexto, _) =>
-        {
-            if (contexto is AcessoTenantDbContext contextoTenant)
-            {
-                PreflightMigracaoTenant.PopularIdentidadeBanco(contextoTenant, idTenant, idAmbiente);
-            }
-        });
+    /// <summary>
+    /// Cria um banco avulso vazio com owner próprio; opcionalmente também as roles runtime/operador.
+    /// </summary>
+    private async Task<(string ConexaoOwner, string Banco)> CriarBancoAvulsoAsync(bool comRolesDaInstalacao)
+    {
+        string banco = $"avulso_{Guid.NewGuid():N}";
+        string senha = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        await using NpgsqlConnection admin = new(fixture.StringConexaoAdministrador);
+        await admin.OpenAsync(TestContext.Current.CancellationToken);
 
-        construtor.UseAsyncSeeding(async (contexto, _, tokenCancelamento) =>
+        string sql = $"CREATE ROLE {banco}_owner LOGIN PASSWORD '{senha}' NOSUPERUSER NOCREATEDB NOCREATEROLE; " +
+            (comRolesDaInstalacao ? $"CREATE ROLE {banco}_runtime NOLOGIN; CREATE ROLE {banco}_operador NOLOGIN; " : string.Empty);
+        await using (NpgsqlCommand roles = new(sql, admin))
         {
-            if (contexto is AcessoTenantDbContext contextoTenant)
-            {
-                await PreflightMigracaoTenant.PopularIdentidadeBancoAsync(contextoTenant, idTenant, idAmbiente, tokenCancelamento);
-            }
-        });
+            await roles.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
 
-        return construtor.Options;
+        await using (NpgsqlCommand criar = new($"CREATE DATABASE {banco} OWNER {banco}_owner", admin))
+        {
+            await criar.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        string conexaoOwner = new NpgsqlConnectionStringBuilder(fixture.StringConexaoAdministrador)
+        {
+            Database = banco,
+            Username = $"{banco}_owner",
+            Password = senha,
+            Pooling = false,
+        }.ConnectionString;
+        return (conexaoOwner, banco);
     }
 }

@@ -1,7 +1,10 @@
 # ADR 0003: Tratamento de erros, validação de entrada e códigos de erro
 
 **Data**: 2026-11-07
-**Status**: proposto; implementação e aceite pendentes.
+**Status**: aceito (2026-11-08, mantenedor). Revisão 2026-11-08: `TipoErro.NaoAutenticado` (D3/D5).
+**Aprovações registradas (2026-11-08, mantenedor)**: dependência FluentValidation
+`12.2.0` (Constituição X; G1 em [tasks.md](../../specs/001-fullstack-foundation/tasks.md))
+e emenda 2.3.0 da Constituição, princípio V (Governance; G8).
 **Contexto**: [Constituição V e X](../../.specify/memory/constitution.md),
 [research D08](../../specs/001-fullstack-foundation/research.md),
 [operations.md §4](../../specs/001-fullstack-foundation/contracts/operations.md),
@@ -60,7 +63,7 @@ ou infraestrutura, é exceção. Falha interna nunca é catalogada como erro de 
 
 - Tipos em `Platform.Domain/Resultados`, sem dependências:
   `Erro(Codigo, Mensagem, TipoErro)`, `TipoErro { NaoEncontrado, Conflito, RegraNegocio,
-  AcessoNegado }`, `Resultado<T>` com conversões implícitas a partir de `T` e de `Erro`,
+  AcessoNegado, NaoAutenticado }`, `Resultado<T>` com conversões implícitas a partir de `T` e de `Erro`,
   e `Resultado` não genérico, com a mesma API, para operações sem valor de retorno
   (`Resultado.Ok()`; sucesso costuma virar 204).
 - O acesso principal é `Corresponder(sucesso, falha)`; ler `Valor` numa falha lança
@@ -68,6 +71,9 @@ ou infraestrutura, é exceção. Falha interna nunca é catalogada como erro de 
 - Cada módulo declara seus erros num catálogo estático `Erros<Modulo>`
   (ex.: `ErrosPlanoAcao.JaCancelado`). O `TipoErro` é definido no catálogo, uma vez.
 - `App.Api` traduz `Erro` em Problem Details num único ponto (`ConfiguracaoProblemDetails.DeErro`).
+- **Revisão 2026-11-08 (G5)**: `TipoErro.NaoAutenticado` → 401 é de uso **restrito ao
+  catálogo de plataforma `ErrosAcesso`** (`AUTH_INVALID`, `AUTH_REQUIRED`) e proibido em
+  módulos de negócio; teste de arquitetura garante que nenhum outro catálogo `Erros*` o use.
 - Invariantes de entidade continuam lançando `Excecao*`. Conflitos de concorrência
   (`DbUpdateConcurrencyException`) são capturados na persistência e viram `Erro` do tipo
   `Conflito`.
@@ -94,6 +100,7 @@ ou infraestrutura, é exceção. Falha interna nunca é catalogada como erro de 
 | Status | Quando |
 |---|---|
 | 400 `INPUT_INVALID` | Payload malformado (desserialização ou FluentValidation). |
+| 401 | `TipoErro.NaoAutenticado` — somente `ErrosAcesso` (plataforma); nunca em módulos de negócio. |
 | 403 | `TipoErro.AcessoNegado`. |
 | 404 | `TipoErro.NaoEncontrado`. |
 | 409 | `TipoErro.Conflito`: conflita com o estado atual do recurso. |
@@ -112,6 +119,9 @@ indício de defeito no cliente.
   (ex.: `tarefas[0].emailResponsavel`), tanto para erros de desserialização quanto do
   FluentValidation (configurado com resolvedor de nomes camelCase). Assim o frontend
   associa a chave diretamente ao campo do formulário.
+- **Revisão 2026-11-08 (G17)**: falha de desserialização sem campo identificável (JSON
+  malformado, corpo vazio, raiz de tipo incompatível — `JsonException.Path = "$"`) usa a
+  chave `"$"`, como o `ValidationProblemDetails` do ASP.NET Core, com mensagem genérica.
 - Mensagens não interpolam valores de entrada sensíveis (e-mail, documento, nome); o
   campo em `errors` identifica a origem.
 

@@ -38,6 +38,10 @@ EXPOSE 8080
 
 COPY --from=build /app/publish .
 
+# Diretório do key ring do Data Protection: o volume nomeado novo herda este dono e
+# permissão restrita (somente o usuário não-root da imagem).
+RUN mkdir -p /var/lib/bps/chaves     && chown "$APP_UID:$APP_UID" /var/lib/bps/chaves     && chmod 700 /var/lib/bps/chaves
+
 # Execução como usuário não-root nativo da imagem oficial do .NET
 USER $APP_UID
 

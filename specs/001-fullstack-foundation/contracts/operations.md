@@ -1,6 +1,6 @@
 # Contracts: EF/health e operação restrita L2
 
-**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21).
+**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G15 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST).
 **Status**: EF/health L1 entregues; autenticação e host operacional abaixo são
 contratos planejados, não comandos/endpoints já disponíveis.
 **References**: [plano](../plan.md), [modelo](../data-model.md),
@@ -57,14 +57,23 @@ Exit code EF 0 significa conclusão; qualquer falha é não zero, sem fallback.
 | Owner de migrations | DDL/grants do alvo em manutenção. | Montagem na API ou uso rotineiro para FR-033. |
 | Provisionador | Criar/restringir banco e roles por procedimento técnico. | Identidade do servidor web. |
 
+**Nomes das roles (G6)**: derivados do nome do banco da instalação — `<banco>_owner`
+(owner do banco e dos schemas `foundation`/`access`), `<banco>_runtime` (LOGIN da API) e
+`<banco>_operador` (grupo NOLOGIN). Cada operador tem login individual membro de
+`<banco>_operador`. As roles são criadas antes da migration (pelo `infra/docker/init-db.sh`
+no Compose ou pela fixture nos testes); **os GRANTs por tabela são emitidos pela própria
+migration inicial**, que deriva os nomes de `current_database()` e falha com mensagem
+clara se `<banco>_runtime` ou `<banco>_operador` não existir. O script de inicialização
+concede apenas CONNECT/USAGE de banco e schema.
+
 Revogar CONNECT de PUBLIC e conceder somente aos roles daquela instalação.
 Sem permissão pública de criação de schema. Configuração exemplificada com owner
 no runtime não atende ao contrato, mesmo que o arquivo diga “runtime”.
 Separar secrets efetivamente; testes tentam DDL/conexão cruzada com runtime e
 tentam executar operações de conta com papel runtime (deve negar no host).
 
-O host verifica `session_user=current_user` e papel exato configurado em
-`OperacaoAcesso:PapelAutorizado`, além dos grants mínimos. Não aceita SET ROLE,
+O host verifica `session_user=current_user`, igualdade com o login individual configurado em
+`OperacaoAcesso:LoginAutorizado` e pertença a `<banco>_operador`, além dos grants mínimos. Não aceita SET ROLE,
 `--actor`, username declarado ou cookie como prova de autorização.
 Cada operador possui login PostgreSQL individual e segredo próprio, provisionados
 pelo responsável do ambiente; não compartilhar o login entre pessoas. O papel
@@ -75,6 +84,26 @@ Não substituir isso por uma flag booleana `--authorized`.
 ## 4. Contrato HTTP L2
 
 ### Ordem de validação
+
+Ordem efetiva nas cinco rotas L2 (G2 revisada, G9, G15):
+
+1. Rate limiter (somente `POST /api/v1/sessions`) → 429 `RATE_LIMITED`.
+2. `X-Tenant-Id` presente e com formato válido → 400 `TENANT_REQUIRED`/`INPUT_INVALID`.
+3. Tenant coincide → 401 `AUTH_INVALID` no login; 403 `TENANT_ACCESS_DENIED` nas demais.
+4. Marcador/versão do banco → 503 `DEPENDENCY_UNAVAILABLE` (antes de qualquer consulta a conta/sessão).
+5. Autenticação do cookie de sessão, quando presente. Logout sem sessão válida → 401
+   `AUTH_REQUIRED` aqui, antes de CSRF (G9).
+6. Corpo JSON + FluentValidation (somente login; logout é `DELETE` sem corpo) → 400 `INPUT_INVALID`.
+7. CSRF (login e logout) → 400 `CSRF_INVALID`.
+8. Estado da instalação → credenciais/autorização.
+
+Os itens 1–4 são middleware (antes da autenticação e do binding). Cookie antiforgery
+(G7): `__Host-bps-csrf` em produção e `bps-csrf` somente em Development localhost; header
+`X-CSRF-TOKEN`. Forwarded headers ficam desligados na L2: `CabecalhosEncaminhados:ProxiesConfiaveis`
+vazio significa não processar `X-Forwarded-*`. Opções numéricas opcionais com valor vazio
+(`""`) equivalem a ausentes (G10): `Sessao:PrazoAbsolutoMinutos` e
+`OperacaoAcesso:RetencaoSessoesDias` usam o padrão 30; qualquer outro valor segue a
+validação estrita (inclusive `" 30"` rejeitado).
 
 - Health/OpenAPI não fazem lookup de conta/sessão, mesmo com cookies enviados.
 - Nas cinco operações L2 exigir um único `X-Tenant-Id`, UUID não vazio.
@@ -102,10 +131,10 @@ Falha de dependência nunca é convertida em 401 silencioso ou lista vazia.
 
 ### Jornada
 
-1. GET `/api/v1/auth/antiforgery` com tenant: obter requestToken e cookie CSRF
+1. GET `/api/v1/antiforgery-token` com tenant: obter requestToken e cookie CSRF
    HttpOnly, sem autenticar ou enumerar contas. Com cookie válido, token corresponde
    à identidade corrente; cookie inválido/expirado é tratado como anônimo nesse GET.
-2. POST `/api/v1/auth/login` com `email`, `password`, tenant e `X-CSRF-TOKEN`.
+2. POST `/api/v1/sessions` (login → 201 Created) com `email`, `password`, tenant e `X-CSRF-TOKEN`.
    Validar explicitamente o antiforgery JSON. Se houver sessão corrente válida,
    o CSRF deve corresponder a ela; após validar credenciais, trocar a sessão desse
    cookie numa única transação: revogar a anterior com `Versao` esperada e inserir a
@@ -117,7 +146,7 @@ Falha de dependência nunca é convertida em 401 silencioso ou lista vazia.
 3. Obter novo token CSRF em **outro GET** após login (nova identidade).
 4. GET `/api/v1/me`: somente a própria conta e validade da sessão.
    GET `/api/v1/context`: também exige `foundation.context.read` atual.
-5. POST `/api/v1/auth/logout`: exige sessão e CSRF correntes. Revogar no banco,
+5. DELETE `/api/v1/sessions/current` (logout): exige sessão e CSRF correntes. Revogar no banco,
    confirmar commit e depois remover cookie/responder 204. Replay passa a 401.
    Instalação inativa não bloqueia esse encerramento; GET antiforgery continua
    disponível para obter o token necessário sem expor identidade/contexto.
@@ -207,7 +236,8 @@ INPUT_INVALID inclui `errors` por campo (chaves camelCase sem `$.`) para JSON
 malformado, campo desconhecido, tipo incompatível e regra de validação, sem ecoar
 valores. As rotas L2 não emitem 422 nem códigos de módulo; categorias, catálogo e
 mecanismos em [ADR 0003](../../../docs/adr/0003-tratamento-de-erros-e-validacao.md).
-Respostas de acesso, antiforgery e respectivos erros: `Cache-Control: no-store`.
+Respostas de acesso, antiforgery e respectivos erros: `Cache-Control` contendo `no-store`
+(em erros originados de exceção o framework acrescenta `no-cache`, `Pragma` e `Expires`, G18).
 Falha ao persistir revogação não apaga cookie nem confirma saída; 503 seguro.
 
 ## 5. Host operacional L2 — FR-033

@@ -19,7 +19,7 @@ public interface IVerificadorIdentidadeBancoTenant
 /// <param name="IdTenant">Identificador do tenant registrado no banco.</param>
 /// <param name="IdAmbiente">Identificador do ambiente registrado no banco.</param>
 /// <param name="EpocaAcesso">Identificador de época de acesso do banco.</param>
-/// <param name="PossuiVersaoMigracaoEsperada">Indica se não há migrações pendentes na base.</param>
+/// <param name="PossuiVersaoMigracaoEsperada">Indica se o histórico aplicado é exatamente a cadeia conhecida completa (sem pendentes nem IDs desconhecidos).</param>
 public sealed record IdentidadeBancoTenantSnapshot(
     Guid IdTenant,
     Guid IdAmbiente,

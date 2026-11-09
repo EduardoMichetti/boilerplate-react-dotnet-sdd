@@ -26,124 +26,388 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("IdReivindicacaoUsuario")
+                        .HasComment("PK inteira imposta pelo Identity.");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<string>("ClaimType")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Tipo da claim.");
 
                     b.Property<string>("ClaimValue")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Valor da claim.");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("FkIdUsuario")
+                        .HasComment("FK para a conta.");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_reivindicacoes_usuario");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_reivindicacoes_usuario_fk_id_usuario");
 
-                    b.ToTable("reivindicacoes_usuario", "access");
+                    b.ToTable("reivindicacoes_usuario", "access", t =>
+                        {
+                            t.HasComment("Tabela auxiliar do Identity (claims); vazia e sem uso na L2.");
+                        });
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<System.Guid>", b =>
                 {
                     b.Property<string>("LoginProvider")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Provedor externo (parte da PK).");
 
                     b.Property<string>("ProviderKey")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Chave no provedor externo (parte da PK).");
 
                     b.Property<string>("ProviderDisplayName")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Nome de exibição do provedor.");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("FkIdUsuario")
+                        .HasComment("FK para a conta.");
 
-                    b.HasKey("LoginProvider", "ProviderKey");
+                    b.HasKey("LoginProvider", "ProviderKey")
+                        .HasName("pk_logins_usuario");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_logins_usuario_fk_id_usuario");
 
-                    b.ToTable("logins_usuario", "access");
+                    b.ToTable("logins_usuario", "access", t =>
+                        {
+                            t.HasComment("Tabela auxiliar do Identity (logins externos); vazia e sem uso na L2.");
+                        });
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<System.Guid>", b =>
                 {
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("FkIdUsuario")
+                        .HasComment("FK para a conta (parte da PK).");
 
                     b.Property<string>("LoginProvider")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Provedor do token (parte da PK).");
 
                     b.Property<string>("Name")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Nome do token (parte da PK).");
 
                     b.Property<string>("Value")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Valor do token.");
 
-                    b.HasKey("UserId", "LoginProvider", "Name");
+                    b.HasKey("UserId", "LoginProvider", "Name")
+                        .HasName("pk_tokens_usuario");
 
-                    b.ToTable("tokens_usuario", "access");
+                    b.ToTable("tokens_usuario", "access", t =>
+                        {
+                            t.HasComment("Tabela auxiliar do Identity (tokens); vazia e sem uso na L2.");
+                        });
                 });
 
             modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoTenant", b =>
                 {
                     b.Property<int>("IdUnico")
                         .HasColumnType("integer")
-                        .HasComment("Identificador singleton fixado em 1 para garantir linha única.");
+                        .HasComment("Chave singleton fixa (IdUnicoPadrao = 1).");
 
                     b.Property<Guid>("EpocaAcesso")
                         .HasColumnType("uuid")
-                        .HasComment("Época de acesso atual utilizada para revogação e invalidação global de sessões.");
+                        .HasComment("Geração local de sessões; sessões de outra época são rejeitadas.");
 
                     b.Property<Guid>("IdAmbiente")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador único do ambiente de execução correspondente a esta instalação.");
+                        .HasComment("UUID imutável do ambiente da instalação.");
 
                     b.Property<Guid>("IdTenant")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador imutável do tenant proprietário deste banco de dados.");
+                        .HasComment("UUID imutável do tenant dono deste banco; chave alternativa referenciada pelas contas.");
 
                     b.Property<DateTimeOffset>("InicializadoEm")
                         .HasColumnType("timestamp with time zone")
-                        .HasComment("Data e hora UTC em que o banco de dados da instalação foi inicializado tecnicamente.");
+                        .HasComment("Instante UTC da inicialização técnica, do TimeProvider do tooling.");
 
-                    b.HasKey("IdUnico");
+                    b.HasKey("IdUnico")
+                        .HasName("pk_identidade_banco");
 
                     b.HasAlternateKey("IdTenant")
                         .HasName("uq_identidade_banco_id_tenant");
 
                     b.ToTable("identidade_banco", "foundation", t =>
                         {
-                            t.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por tenant.");
+                            t.HasComment("Identidade singleton do banco da instalação, conferida antes de qualquer acesso a contas e sessões.");
+
+                            t.HasCheckConstraint("ck_identidade_banco_id_unico", "\"IdUnico\" = 1");
                         });
                 });
 
             modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.PermissaoUsuario", b =>
                 {
-                    b.Property<Guid>("IdUsuario")
+                    b.Property<Guid>("FkIdUsuario")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador do usuário que recebeu a permissão.");
+                        .HasComment("FK para a conta que recebeu a concessão.");
 
                     b.Property<string>("CodigoPermissao")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
-                        .HasComment("Código textual identificador da permissão concedida no sistema.");
+                        .HasComment("Código do catálogo CodigosPermissao (exceção registrada: compõe a PK).");
 
-                    b.Property<DateTimeOffset>("ConcedidaEm")
+                    b.Property<DateTimeOffset?>("AlteradoEm")
                         .HasColumnType("timestamp with time zone")
-                        .HasComment("Data e hora UTC em que a permissão foi concedida.");
+                        .HasComment("Instante UTC da última alteração efetiva; nulo se nunca alterado.");
+
+                    b.Property<string>("AutorAlteracao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da última alteração; nula para Anonimo ou sem alteração.");
+
+                    b.Property<string>("AutorCriacao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da criação; nula somente para Anonimo.");
+
+                    b.Property<DateTimeOffset>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da criação (microssegundos), do TimeProvider da operação.");
+
+                    b.Property<Guid?>("IdOperacaoAlteracao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da última alteração; obrigatório quando AlteradoEm está preenchido.");
+
+                    b.Property<Guid>("IdOperacaoCriacao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da operação que criou o registro.");
+
+                    b.Property<string>("TipoAutorAlteracao")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da última alteração; nulo se nunca alterado.");
+
+                    b.Property<string>("TipoAutorCriacao")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da criação (Operador, Usuario, Sistema, Anonimo).");
+
+                    b.HasKey("FkIdUsuario", "CodigoPermissao")
+                        .HasName("pk_permissoes_usuario");
+
+                    b.ToTable("permissoes_usuario", "access", t =>
+                        {
+                            t.HasComment("Concessões imutáveis de permissões do catálogo às contas locais.");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_auditoria_alteracao", "(\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL) OR (\"AlteradoEm\" IS NOT NULL AND \"TipoAutorAlteracao\" IS NOT NULL AND \"IdOperacaoAlteracao\" IS NOT NULL AND (\"TipoAutorAlteracao\" = 'Anonimo') = (\"AutorAlteracao\" IS NULL))");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_auditoria_criacao", "(\"TipoAutorCriacao\" = 'Anonimo') = (\"AutorCriacao\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_codigo_permissao", "\"CodigoPermissao\" ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$' AND char_length(\"CodigoPermissao\") <= 128");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_imutavel", "\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_tipo_autor_alteracao", "\"TipoAutorAlteracao\" IS NULL OR \"TipoAutorAlteracao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+
+                            t.HasCheckConstraint("ck_permissoes_usuario_tipo_autor_criacao", "\"TipoAutorCriacao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+                        });
+                });
+
+            modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.RegistroOperacaoAcesso", b =>
+                {
+                    b.Property<Guid>("IdOperacao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID v7 do evento e correlação do comando.");
+
+                    b.Property<string>("CodigoPermissao")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasComment("Código de permissão, quando relevante.");
+
+                    b.Property<string>("CodigoResultado")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasComment("Código estável e seguro do resultado, sem mensagem SQL.");
+
+                    b.Property<Guid>("IdAmbiente")
+                        .HasColumnType("uuid")
+                        .HasComment("Ambiente do alvo validado (referência sem constraint).");
+
+                    b.Property<Guid>("IdTenant")
+                        .HasColumnType("uuid")
+                        .HasComment("Tenant do alvo validado (referência sem constraint).");
+
+                    b.Property<Guid?>("IdUsuarioAlvo")
+                        .HasColumnType("uuid")
+                        .HasComment("Conta alvo (referência sem FK, preservada após evolução da conta).");
+
+                    b.Property<DateTimeOffset?>("InstanteCorte")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Somente LimparSessoes: RegistradaEm - RetencaoDias.");
+
+                    b.Property<string>("LoginOperador")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasComment("Login PostgreSQL individual autenticado do operador.");
+
+                    b.Property<int?>("QuantidadeRemovida")
+                        .HasColumnType("integer")
+                        .HasComment("Somente LimparSessoes: sessões removidas (0 quando nada elegível ou falha).");
+
+                    b.Property<DateTimeOffset>("RegistradaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC do registro, igual ao InstanteOperacao do comando.");
+
+                    b.Property<string>("Resultado")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Resultado da operação (Sucesso, Negado, Falha).");
+
+                    b.Property<int?>("RetencaoDias")
+                        .HasColumnType("integer")
+                        .HasComment("Somente LimparSessoes: retenção aplicada, em dias (1–365).");
+
+                    b.Property<string>("TipoOperacao")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo da operação restrita.");
+
+                    b.HasKey("IdOperacao")
+                        .HasName("pk_operacoes_acesso");
+
+                    b.HasIndex("RegistradaEm")
+                        .HasDatabaseName("ix_operacoes_acesso_registrada_em");
+
+                    b.HasIndex("IdUsuarioAlvo", "RegistradaEm")
+                        .HasDatabaseName("ix_operacoes_acesso_id_usuario_alvo_registrada_em");
+
+                    b.ToTable("operacoes_acesso", "access", t =>
+                        {
+                            t.HasComment("Histórico append-only das operações restritas de contas, permissões e sessões (FR-033).");
+
+                            t.HasCheckConstraint("ck_operacoes_acesso_limpeza", "(\"TipoOperacao\" = 'LimparSessoes' AND \"RetencaoDias\" IS NOT NULL AND \"InstanteCorte\" IS NOT NULL AND \"QuantidadeRemovida\" IS NOT NULL AND \"IdUsuarioAlvo\" IS NULL AND \"CodigoPermissao\" IS NULL) OR (\"TipoOperacao\" <> 'LimparSessoes' AND \"RetencaoDias\" IS NULL AND \"InstanteCorte\" IS NULL AND \"QuantidadeRemovida\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_operacoes_acesso_login_operador", "char_length(\"LoginOperador\") BETWEEN 1 AND 128");
+
+                            t.HasCheckConstraint("ck_operacoes_acesso_resultado", "\"Resultado\" IN ('Sucesso', 'Negado', 'Falha')");
+
+                            t.HasCheckConstraint("ck_operacoes_acesso_tipo_operacao", "\"TipoOperacao\" IN ('CriarConta', 'DesativarConta', 'ReativarConta', 'RedefinirSenha', 'RevogarSessoes', 'ConcederPermissao', 'RevogarPermissao', 'LimparSessoes')");
+
+                            t.HasCheckConstraint("ck_operacoes_acesso_valores_limpeza", "(\"RetencaoDias\" IS NULL OR \"RetencaoDias\" BETWEEN 1 AND 365) AND (\"QuantidadeRemovida\" IS NULL OR \"QuantidadeRemovida\" >= 0)");
+                        });
+                });
+
+            modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.SessaoAutenticacao", b =>
+                {
+                    b.Property<Guid>("IdSessao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID v7 opaco da sessão, gerado pelo servidor.");
+
+                    b.Property<DateTimeOffset?>("AlteradoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da última alteração efetiva; nulo se nunca alterado.");
+
+                    b.Property<string>("AutorAlteracao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da última alteração; nula para Anonimo ou sem alteração.");
+
+                    b.Property<string>("AutorCriacao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da criação; nula somente para Anonimo.");
+
+                    b.Property<DateTimeOffset>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da criação (microssegundos), do TimeProvider da operação.");
+
+                    b.Property<Guid>("EpocaAcesso")
+                        .HasColumnType("uuid")
+                        .HasComment("Cópia da EpocaAcesso vigente na emissão.");
+
+                    b.Property<DateTimeOffset>("ExpiraEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("CriadoEm + prazo configurado na emissão; imutável.");
+
+                    b.Property<Guid>("FkIdUsuario")
+                        .HasColumnType("uuid")
+                        .HasComment("FK para a conta dona da sessão (exclusão restrita).");
+
+                    b.Property<Guid?>("IdOperacaoAlteracao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da última alteração; obrigatório quando AlteradoEm está preenchido.");
+
+                    b.Property<Guid>("IdOperacaoCriacao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da operação que criou o registro.");
+
+                    b.Property<DateTimeOffset?>("RevogadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da revogação (igual a AlteradoEm); nulo enquanto não revogada.");
+
+                    b.Property<byte[]>("TicketProtegido")
+                        .HasColumnType("bytea")
+                        .HasComment("Ticket nativo protegido por Data Protection; removido na revogação.");
+
+                    b.Property<string>("TipoAutorAlteracao")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da última alteração; nulo se nunca alterado.");
+
+                    b.Property<string>("TipoAutorCriacao")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da criação (Operador, Usuario, Sistema, Anonimo).");
 
                     b.Property<long>("Versao")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")
-                        .HasComment("Token de versão para controle de concorrência otimista.");
+                        .HasComment("Token de concorrência positivo, incrementado a cada alteração efetiva.");
 
-                    b.HasKey("IdUsuario", "CodigoPermissao");
+                    b.HasKey("IdSessao")
+                        .HasName("pk_sessoes_autenticacao");
 
-                    b.ToTable("permissoes_usuario", "access", t =>
+                    b.HasIndex("ExpiraEm")
+                        .HasDatabaseName("ix_sessoes_autenticacao_expira_em");
+
+                    b.HasIndex("FkIdUsuario")
+                        .HasDatabaseName("ix_sessoes_autenticacao_fk_id_usuario");
+
+                    b.HasIndex("RevogadaEm")
+                        .HasDatabaseName("ix_sessoes_autenticacao_revogada_em");
+
+                    b.ToTable("sessoes_autenticacao", "access", t =>
                         {
-                            t.HasComment("Armazena as permissões granulares concedidas a cada usuário na instalação.");
+                            t.HasComment("Sessões autenticadas persistidas e revogáveis, com expiração absoluta fixada na emissão.");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_auditoria_alteracao", "(\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL) OR (\"AlteradoEm\" IS NOT NULL AND \"TipoAutorAlteracao\" IS NOT NULL AND \"IdOperacaoAlteracao\" IS NOT NULL AND (\"TipoAutorAlteracao\" = 'Anonimo') = (\"AutorAlteracao\" IS NULL))");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_auditoria_criacao", "(\"TipoAutorCriacao\" = 'Anonimo') = (\"AutorCriacao\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_prazo", "\"ExpiraEm\" - \"CriadoEm\" BETWEEN interval '5 minutes' AND interval '480 minutes'");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_revogada_sem_ticket", "\"RevogadaEm\" IS NULL OR \"TicketProtegido\" IS NULL");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_tipo_autor_alteracao", "\"TipoAutorAlteracao\" IS NULL OR \"TipoAutorAlteracao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_tipo_autor_criacao", "\"TipoAutorCriacao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_uuids", "\"IdSessao\" <> '00000000-0000-0000-0000-000000000000' AND \"EpocaAcesso\" <> '00000000-0000-0000-0000-000000000000'");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_versao", "\"Versao\" > 0");
                         });
                 });
 
@@ -151,91 +415,148 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador único da conta do usuário (UUID v4).");
+                        .HasColumnName("IdUsuario")
+                        .HasComment("UUID v7 da conta, gerado pelo servidor.");
 
                     b.Property<int>("AccessFailedCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasComment("Falhas de senha consecutivas desde o último sucesso ou bloqueio.");
+
+                    b.Property<DateTimeOffset?>("AlteradoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da última alteração efetiva; nulo se nunca alterado.");
+
+                    b.Property<string>("AutorAlteracao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da última alteração; nula para Anonimo ou sem alteração.");
+
+                    b.Property<string>("AutorCriacao")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasComment("Referência textual do autor da criação; nula somente para Anonimo.");
 
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Token de concorrência da conta, renovado pelo Identity a cada atualização.");
+
+                    b.Property<DateTimeOffset>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC da criação (microssegundos), do TimeProvider da operação.");
 
                     b.Property<string>("Email")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
-                        .HasComment("Endereço de e-mail do usuário utilizado para login e notificações.");
+                        .HasComment("Email de login (até 254); dado pessoal.");
 
                     b.Property<bool>("EmailConfirmed")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasComment("Confirmação de email do Identity; não exigida na L2.");
 
                     b.Property<bool>("EstaAtivo")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(true)
-                        .HasComment("Indica se o usuário está ativo no sistema e autorizado a acessar.");
+                        .HasComment("Conta habilitada; false nega login e operações protegidas.");
 
-                    b.Property<Guid>("IdTenant")
+                    b.Property<Guid>("FkIdTenant")
                         .HasColumnType("uuid")
-                        .HasComment("Identificador imutável do tenant proprietário desta conta.");
+                        .HasComment("FK para identidade_banco.IdTenant: tenant dono da conta.");
+
+                    b.Property<Guid?>("IdOperacaoAlteracao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da última alteração; obrigatório quando AlteradoEm está preenchido.");
+
+                    b.Property<Guid>("IdOperacaoCriacao")
+                        .HasColumnType("uuid")
+                        .HasComment("UUID de correlação da operação que criou o registro.");
 
                     b.Property<bool>("LockoutEnabled")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasComment("Lockout habilitado em toda conta desde a criação.");
 
                     b.Property<DateTimeOffset?>("LockoutEnd")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Fim UTC do bloqueio por tentativas, gravado a partir do TimeProvider.");
 
                     b.Property<string>("NomeExibicao")
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)")
-                        .HasComment("Nome amigável de exibição do usuário na aplicação.");
+                        .HasComment("Nome de exibição (1 a 120 caracteres); dado pessoal.");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
-                        .HasComment("Endereço de e-mail normalizado em letras maiúsculas para consultas eficientes.");
+                        .HasComment("Email normalizado; único no banco da instalação.");
 
                     b.Property<string>("NormalizedUserName")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
-                        .HasComment("Nome de usuário normalizado para comparações e indexação.");
+                        .HasComment("Nome de usuário normalizado pelo Identity.");
 
                     b.Property<string>("PasswordHash")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Hash nativo do Identity; nunca senha pura.");
 
                     b.Property<string>("PhoneNumber")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Telefone do Identity; sem uso na L2.");
 
                     b.Property<bool>("PhoneNumberConfirmed")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasComment("Confirmação de telefone do Identity; sem uso na L2.");
 
                     b.Property<string>("SecurityStamp")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasComment("Carimbo de segurança vigente; mudança invalida sessões.");
+
+                    b.Property<string>("TipoAutorAlteracao")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da última alteração; nulo se nunca alterado.");
+
+                    b.Property<string>("TipoAutorCriacao")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Tipo do autor da criação (Operador, Usuario, Sistema, Anonimo).");
 
                     b.Property<bool>("TwoFactorEnabled")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasComment("2FA do Identity; sem uso na L2.");
 
                     b.Property<string>("UserName")
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
-                        .HasComment("Nome de usuário no sistema para propósitos de autenticação.");
+                        .HasComment("Nome de usuário Identity, derivado do email.");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_usuarios");
 
-                    b.HasIndex("IdTenant")
-                        .HasDatabaseName("ix_usuarios_id_tenant");
+                    b.HasIndex("FkIdTenant")
+                        .HasDatabaseName("ix_usuarios_fk_id_tenant");
 
                     b.HasIndex("NormalizedEmail")
                         .IsUnique()
-                        .HasDatabaseName("ix_usuarios_email_normalizado");
+                        .HasDatabaseName("uq_usuarios_normalized_email");
 
                     b.HasIndex("NormalizedUserName")
                         .IsUnique()
-                        .HasDatabaseName("UserNameIndex");
+                        .HasDatabaseName("uq_usuarios_normalized_user_name");
 
                     b.ToTable("usuarios", "access", t =>
                         {
-                            t.HasComment("Armazena os usuários da aplicação vinculados exclusivamente ao tenant desta instalação.");
+                            t.HasComment("Contas locais da aplicação, exclusivas do tenant desta instalação.");
+
+                            t.HasCheckConstraint("ck_usuarios_auditoria_alteracao", "(\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL) OR (\"AlteradoEm\" IS NOT NULL AND \"TipoAutorAlteracao\" IS NOT NULL AND \"IdOperacaoAlteracao\" IS NOT NULL AND (\"TipoAutorAlteracao\" = 'Anonimo') = (\"AutorAlteracao\" IS NULL))");
+
+                            t.HasCheckConstraint("ck_usuarios_auditoria_criacao", "(\"TipoAutorCriacao\" = 'Anonimo') = (\"AutorCriacao\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_usuarios_nome_exibicao", "char_length(\"NomeExibicao\") BETWEEN 1 AND 120");
+
+                            t.HasCheckConstraint("ck_usuarios_tipo_autor_alteracao", "\"TipoAutorAlteracao\" IS NULL OR \"TipoAutorAlteracao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+
+                            t.HasCheckConstraint("ck_usuarios_tipo_autor_criacao", "\"TipoAutorCriacao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
                         });
                 });
 
@@ -245,7 +566,8 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("fk_reivindicacoes_usuario_usuarios");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<System.Guid>", b =>
@@ -254,7 +576,8 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("fk_logins_usuario_usuarios");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<System.Guid>", b =>
@@ -263,16 +586,30 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("fk_tokens_usuario_usuarios");
                 });
 
             modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.PermissaoUsuario", b =>
                 {
                     b.HasOne("Platform.Infrastructure.Persistence.TenantAccess.Entities.UsuarioAplicacao", "Usuario")
                         .WithMany("Permissoes")
-                        .HasForeignKey("IdUsuario")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("FkIdUsuario")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_permissoes_usuario_usuarios");
+
+                    b.Navigation("Usuario");
+                });
+
+            modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.SessaoAutenticacao", b =>
+                {
+                    b.HasOne("Platform.Infrastructure.Persistence.TenantAccess.Entities.UsuarioAplicacao", "Usuario")
+                        .WithMany()
+                        .HasForeignKey("FkIdUsuario")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sessoes_autenticacao_usuarios");
 
                     b.Navigation("Usuario");
                 });
@@ -281,10 +618,11 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                 {
                     b.HasOne("Platform.Infrastructure.Persistence.TenantAccess.Entities.IdentidadeBancoTenant", null)
                         .WithMany()
-                        .HasForeignKey("IdTenant")
+                        .HasForeignKey("FkIdTenant")
                         .HasPrincipalKey("IdTenant")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("fk_usuarios_identidade_banco");
                 });
 
             modelBuilder.Entity("Platform.Infrastructure.Persistence.TenantAccess.Entities.UsuarioAplicacao", b =>

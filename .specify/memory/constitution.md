@@ -1,25 +1,3 @@
-<!--
-Sync Impact Report
-- Alteração de versão: 2.2.0 -> 2.3.0 (MINOR: ampliação material de obrigações).
-- Princípio modificado: V. API REST e contratos documentados.
-  Acrescentadas obrigações de tratamento de falhas por categoria (entrada malformada,
-  regra de negócio por resultado explícito, falha inesperada por exceção centralizada),
-  estabilidade e unicidade de códigos de erro publicados, desserialização estrita com
-  exceção isolada para payloads de terceiros e mensagens sem valores sensíveis.
-  Verificação ampliada com testes de contrato e de arquitetura correspondentes.
-- Seções adicionadas/removidas: nenhuma.
-- Impacto em artefatos: ADR 0003 (mecanismos concretos: FluentValidation,
-  `Resultado<T>`, códigos `<MODULO>_<REGRA>`, 400/409/422, JSON estrito);
-  specs/001-fullstack-foundation (plan.md bloco P1c, research D08, contrato futuro e
-  operations.md). Código I1 existente não viola as novas regras; implementação no L2.
-- Pendências: aprovação explícita do mantenedor no pull request (Governance) e
-  aprovação da dependência FluentValidation (Princípio X).
-- Escopo de sincronização: templates e comandos do Spec Kit consultam esta
-  Constituição em tempo de execução e não foram modificados.
-- Este relatório é material temporário de revisão, não uma regra de governança;
-  DEVE ser removido antes do commit da Constituição.
--->
-
 # boilerplate-react-dotnet-sdd Constitution
 
 ## Core Principles

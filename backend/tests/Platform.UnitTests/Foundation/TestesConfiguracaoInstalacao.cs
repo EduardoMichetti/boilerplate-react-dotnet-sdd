@@ -21,7 +21,7 @@ public sealed class TestesConfiguracaoInstalacao
             Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => new OpcoesInstalacaoTenant().Validar());
 
         Assert.Equal(6, excecao.Erros.Count);
-        Assert.Contains(excecao.Erros, erro => erro.Contains("IdAplicacao", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, erro => erro.Contains("CodigoAplicacao", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, erro => erro.Contains("StringsConexao:BancoApp", StringComparison.Ordinal));
     }
 
@@ -46,7 +46,7 @@ public sealed class TestesConfiguracaoInstalacao
     public void ComprimentoDeTextosRespeitaLimitesDeclarados(int tamanhoAplicacao, int tamanhoExibicao, bool valido)
     {
         OpcoesInstalacaoTenant opcoes = CriarOpcoes(
-            idAplicacao: new string('a', tamanhoAplicacao),
+            codigoAplicacao: new string('a', tamanhoAplicacao),
             nomeExibicao: new string('b', tamanhoExibicao));
 
         if (valido)
@@ -64,7 +64,7 @@ public sealed class TestesConfiguracaoInstalacao
     {
         OpcoesInstalacaoTenant opcoes = new()
         {
-            IdAplicacao = "produto-teste",
+            CodigoAplicacao = "produto-teste",
             NomeExibicaoTenant = "Instalação sintética",
             EstadoTenant = (EstadoTenant)42,
             StringsConexao = new() { BancoApp = "Host=localhost;Database=sintetico;Username=sintetico" }
@@ -90,13 +90,13 @@ public sealed class TestesConfiguracaoInstalacao
 
     private static OpcoesInstalacaoTenant CriarOpcoes(
         EstadoTenant estado = EstadoTenant.Ativo,
-        string idAplicacao = "produto-teste",
+        string codigoAplicacao = "produto-teste",
         string nomeExibicao = "Instalação sintética",
         string stringConexao = "Host=localhost;Database=sintetico;Username=sintetico")
     {
         return new()
         {
-            IdAplicacao = idAplicacao,
+            CodigoAplicacao = codigoAplicacao,
             IdAmbiente = Guid.NewGuid(),
             IdTenant = Guid.NewGuid(),
             NomeExibicaoTenant = nomeExibicao,

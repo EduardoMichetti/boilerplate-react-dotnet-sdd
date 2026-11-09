@@ -1,36 +1,62 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 using Microsoft.AspNetCore.Identity;
+using Platform.Domain.Auditoria;
 
 /// <summary>
-/// Entidade de usuário da aplicação vinculada exclusivamente a um tenant.
-/// Herda os campos padrão de autenticação do ASP.NET Core Identity (como Email, UserName, PasswordHash).
+/// Conta local da aplicação, exclusiva desta instalação. Mantém <see cref="IdentityUser{TKey}"/>
+/// (Email, UserName, PasswordHash, SecurityStamp, ConcurrencyStamp, lockout) e implementa os
+/// metadados de auditoria. Propriedades herdadas não são renomeáveis: as colunas são mapeadas
+/// para o padrão (<c>Id</c> → <c>IdUsuario</c>).
 /// </summary>
-public sealed class UsuarioAplicacao : IdentityUser<Guid>
+public sealed class UsuarioAplicacao : IdentityUser<Guid>, IEntidadeAuditavel
 {
     /// <summary>
-    /// Identificador único e imutável do tenant proprietário desta conta de usuário.
-    /// Funciona como chave estrangeira para a identidade do banco de dados do tenant.
+    /// FK para <c>identidade_banco.IdTenant</c>: tenant proprietário desta conta (mesma instalação).
     /// </summary>
-    public Guid IdTenant { get; set; }
+    public Guid FkIdTenant { get; set; }
 
     /// <summary>
-    /// Nome amigável de exibição do usuário na interface (deve conter entre 1 e 120 caracteres).
+    /// Nome de exibição obrigatório (1 a 120 caracteres).
     /// </summary>
     public string NomeExibicao { get; set; } = string.Empty;
 
     /// <summary>
-    /// Indicador booleano que define se a conta do usuário está ativa e autorizada a operar no sistema.
+    /// Conta habilitada; <c>false</c> nega login e próximas operações protegidas.
     /// </summary>
     public bool EstaAtivo { get; set; } = true;
 
     /// <summary>
-    /// Coleção de permissões de acesso associadas diretamente a este usuário.
+    /// Concessões vigentes da conta.
     /// </summary>
     public ICollection<PermissaoUsuario> Permissoes { get; } = new List<PermissaoUsuario>();
 
+    /// <inheritdoc />
+    public DateTimeOffset CriadoEm { get; set; }
+
+    /// <inheritdoc />
+    public TipoAutor TipoAutorCriacao { get; set; }
+
+    /// <inheritdoc />
+    public string? AutorCriacao { get; set; }
+
+    /// <inheritdoc />
+    public Guid IdOperacaoCriacao { get; set; }
+
+    /// <inheritdoc />
+    public DateTimeOffset? AlteradoEm { get; set; }
+
+    /// <inheritdoc />
+    public TipoAutor? TipoAutorAlteracao { get; set; }
+
+    /// <inheritdoc />
+    public string? AutorAlteracao { get; set; }
+
+    /// <inheritdoc />
+    public Guid? IdOperacaoAlteracao { get; set; }
+
     /// <summary>
-    /// Valida as invariantes obrigatórias dos campos da conta de usuário.
+    /// Valida as invariantes de negócio da conta (metadados de auditoria são validados pelo interceptor).
     /// </summary>
     public void Validar()
     {
@@ -39,9 +65,9 @@ public sealed class UsuarioAplicacao : IdentityUser<Guid>
             throw new ArgumentException("Id deve ser um UUID não vazio.", nameof(Id));
         }
 
-        if (IdTenant == Guid.Empty)
+        if (FkIdTenant == Guid.Empty)
         {
-            throw new ArgumentException("IdTenant deve ser um UUID não vazio.", nameof(IdTenant));
+            throw new ArgumentException("FkIdTenant deve ser um UUID não vazio.", nameof(FkIdTenant));
         }
 
         if (string.IsNullOrWhiteSpace(NomeExibicao) || NomeExibicao.Length > 120)

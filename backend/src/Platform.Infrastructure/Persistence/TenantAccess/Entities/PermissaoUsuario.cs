@@ -1,53 +1,48 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
+using Platform.Domain.Access;
+using Platform.Domain.Auditoria;
+
 /// <summary>
-/// Representa uma permissão pontual de acesso concedida a um usuário dentro do escopo da instalação do tenant.
+/// Concessão imutável de uma permissão do catálogo a uma conta local. Só INSERT/DELETE:
+/// <see cref="EntidadeAuditavel.CriadoEm"/> é o instante da concessão e os metadados de
+/// alteração permanecem nulos.
 /// </summary>
-public sealed class PermissaoUsuario
+public sealed class PermissaoUsuario : EntidadeAuditavel
 {
     /// <summary>
-    /// Identificador único do usuário que recebeu a permissão (chave estrangeira para UsuarioAplicacao).
+    /// FK local para a conta (parte da PK).
     /// </summary>
-    public Guid IdUsuario { get; set; }
+    public Guid FkIdUsuario { get; set; }
 
     /// <summary>
-    /// Código identificador da permissão concedida no sistema (de 1 a 128 caracteres, ex.: 'fundacao.contexto.ler').
+    /// Código do catálogo <see cref="CodigosPermissao"/> (1 a 128 caracteres; parte da PK).
     /// </summary>
     public string CodigoPermissao { get; set; } = string.Empty;
 
     /// <summary>
-    /// Data e hora em UTC no momento em que a permissão foi concedida ao usuário.
-    /// </summary>
-    public DateTimeOffset ConcedidaEm { get; set; } = DateTimeOffset.UtcNow;
-
-    /// <summary>
-    /// Número de versão para controle de concorrência otimista durante concessões e revogações.
-    /// </summary>
-    public long Versao { get; set; }
-
-    /// <summary>
-    /// Propriedade de navegação para a entidade do usuário proprietário da concessão de permissão.
+    /// Navegação para a conta que recebeu a concessão.
     /// </summary>
     public UsuarioAplicacao? Usuario { get; set; }
 
     /// <summary>
-    /// Valida as invariantes obrigatórias dos campos de concessão da permissão.
+    /// Valida as invariantes de negócio da concessão.
     /// </summary>
     public void Validar()
     {
-        if (IdUsuario == Guid.Empty)
+        if (FkIdUsuario == Guid.Empty)
         {
-            throw new ArgumentException("IdUsuario deve ser um UUID não vazio.", nameof(IdUsuario));
+            throw new ArgumentException("FkIdUsuario deve ser um UUID não vazio.", nameof(FkIdUsuario));
         }
 
-        if (string.IsNullOrWhiteSpace(CodigoPermissao) || CodigoPermissao.Length > 128)
+        if (!CodigosPermissao.FormatoValido(CodigoPermissao))
         {
-            throw new ArgumentException("CodigoPermissao deve conter entre 1 e 128 caracteres.", nameof(CodigoPermissao));
+            throw new ArgumentException("CodigoPermissao deve ter de 1 a 128 caracteres no formato do catálogo.", nameof(CodigoPermissao));
         }
 
-        if (ConcedidaEm == default)
+        if (!CodigosPermissao.EhConhecido(CodigoPermissao))
         {
-            throw new ArgumentException("ConcedidaEm deve ser definido como um instante UTC válido.", nameof(ConcedidaEm));
+            throw new ArgumentException("CodigoPermissao não pertence ao catálogo.", nameof(CodigoPermissao));
         }
     }
 }

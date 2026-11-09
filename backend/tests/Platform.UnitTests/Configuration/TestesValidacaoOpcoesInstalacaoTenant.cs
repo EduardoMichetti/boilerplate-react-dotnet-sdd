@@ -21,7 +21,7 @@ public sealed class TestesValidacaoOpcoesInstalacaoTenant
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
 
         Assert.Equal(6, excecao.Erros.Count);
-        Assert.Contains(excecao.Erros, e => e.Contains("IdAplicacao", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("CodigoAplicacao", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, e => e.Contains("IdAmbiente", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, e => e.Contains("IdTenant", StringComparison.Ordinal));
         Assert.Contains(excecao.Erros, e => e.Contains("NomeExibicaoTenant", StringComparison.Ordinal));
@@ -33,23 +33,23 @@ public sealed class TestesValidacaoOpcoesInstalacaoTenant
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void IdAplicacaoInvalidoOuVazio_FalhaValidacao(string? idAplicacaoInvalido)
+    public void CodigoAplicacaoInvalidoOuVazio_FalhaValidacao(string? codigoAplicacaoInvalido)
     {
         OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
-        opcoes.IdAplicacao = idAplicacaoInvalido;
+        opcoes.CodigoAplicacao = codigoAplicacaoInvalido;
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
-        Assert.Contains(excecao.Erros, e => e.Contains("IdAplicacao", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("CodigoAplicacao", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void IdAplicacaoMaiorQueLimite_FalhaValidacao()
+    public void CodigoAplicacaoMaiorQueLimite_FalhaValidacao()
     {
         OpcoesInstalacaoTenant opcoes = CriarOpcoesValidas();
-        opcoes.IdAplicacao = new string('x', 101);
+        opcoes.CodigoAplicacao = new string('x', 101);
 
         ExcecaoConfiguracaoInstalacao excecao = Assert.Throws<ExcecaoConfiguracaoInstalacao>(() => opcoes.Validar());
-        Assert.Contains(excecao.Erros, e => e.Contains("IdAplicacao", StringComparison.Ordinal));
+        Assert.Contains(excecao.Erros, e => e.Contains("CodigoAplicacao", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public sealed class TestesValidacaoOpcoesInstalacaoTenant
 
     private static OpcoesInstalacaoTenant CriarOpcoesValidas(EstadoTenant estado = EstadoTenant.Ativo) => new()
     {
-        IdAplicacao = "boilerplate-react-dotnet-sdd",
+        CodigoAplicacao = "boilerplate-react-dotnet-sdd",
         IdAmbiente = Guid.Parse("11111111-1111-4111-8111-111111111111"),
         IdTenant = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
         NomeExibicaoTenant = "Cliente de Produção",

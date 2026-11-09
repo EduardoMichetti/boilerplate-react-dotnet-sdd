@@ -23,8 +23,10 @@ public sealed class VerificadorIdentidadeBancoTenant(AcessoTenantDbContext conte
             throw new ExcecaoIsolamentoTenant();
         }
 
-        IEnumerable<string> migracoesPendentes = await contexto.Database.GetPendingMigrationsAsync(tokenCancelamento);
-        bool possuiVersaoMigracaoEsperada = !migracoesPendentes.Any();
+        // Runtime/readiness aceitam somente a cadeia conhecida completa e na ordem: pendente
+        // ou ID desconhecido (banco de versão futura) é versão incompatível.
+        IEnumerable<string> aplicadas = await contexto.Database.GetAppliedMigrationsAsync(tokenCancelamento);
+        bool possuiVersaoMigracaoEsperada = aplicadas.SequenceEqual(contexto.Database.GetMigrations(), StringComparer.Ordinal);
 
         return new IdentidadeBancoTenantSnapshot(
             identidade.IdTenant,

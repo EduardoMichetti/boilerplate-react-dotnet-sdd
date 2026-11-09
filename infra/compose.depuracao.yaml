@@ -1,0 +1,7 @@
+# Override opcional de depuração: publica o PostgreSQL SOMENTE no loopback do host.
+# Uso: docker compose -f infra/compose.yaml -f infra/compose.depuracao.yaml --env-file ... up
+# A e B precisam de valores distintos de PORTA_POSTGRES_DEPURACAO.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${PORTA_POSTGRES_DEPURACAO:?defina PORTA_POSTGRES_DEPURACAO para depuração}:5432"

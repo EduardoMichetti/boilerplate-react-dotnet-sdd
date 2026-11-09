@@ -3,6 +3,8 @@ namespace Platform.Infrastructure.Persistence.DesignTime;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Platform.Domain.Identificadores;
+using Platform.Domain.Tempo;
 using Platform.Domain.Tenancy;
 using Platform.Infrastructure.Persistence.TenantAccess;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
@@ -11,7 +13,7 @@ using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 /// Opções necessárias para a validação prévia de migração (preflight) antes de executar operações DDL.
 /// </summary>
 public sealed record OpcoesPreflightMigracao(
-    string? IdAplicacao,
+    string? CodigoAplicacao,
     Guid IdAmbiente,
     Guid IdTenant,
     EstadoTenant? EstadoTenant,
@@ -61,9 +63,9 @@ public static class PreflightMigracaoTenant
     {
         ArgumentNullException.ThrowIfNull(opcoes);
 
-        if (string.IsNullOrWhiteSpace(opcoes.IdAplicacao) || opcoes.IdAplicacao.Length > 100)
+        if (string.IsNullOrWhiteSpace(opcoes.CodigoAplicacao) || opcoes.CodigoAplicacao.Length > 100)
         {
-            throw new ArgumentException("IdAplicacao deve conter entre 1 e 100 caracteres.", nameof(opcoes));
+            throw new ArgumentException("CodigoAplicacao deve conter entre 1 e 100 caracteres.", nameof(opcoes));
         }
 
         if (opcoes.IdAmbiente == Guid.Empty)
@@ -114,12 +116,20 @@ public static class PreflightMigracaoTenant
     /// <summary>
     /// Avalia se o estado atual do banco de dados permite ou bloqueia a execução da migration.
     /// </summary>
+    /// <param name="opcoes">Opções do preflight.</param>
+    /// <param name="totalTabelasUsuario">Quantidade de tabelas de usuário existentes.</param>
+    /// <param name="marcador">Marcador lido, quando há estrutura.</param>
+    /// <param name="historicoAplicado">IDs em <c>foundation.__EFMigrationsHistory</c>, na ordem aplicada.</param>
+    /// <param name="cadeiaConhecida">IDs das migrations conhecidas pelo binário, em ordem.</param>
     public static void AvaliarEstadoBanco(
         OpcoesPreflightMigracao opcoes,
         int totalTabelasUsuario,
-        MarcadorBancoExistente? marcador)
+        MarcadorBancoExistente? marcador,
+        IReadOnlyList<string>? historicoAplicado = null,
+        IReadOnlyList<string>? cadeiaConhecida = null)
     {
         ValidarOpcoes(opcoes);
+        ValidarHistoricoComoPrefixo(historicoAplicado ?? [], cadeiaConhecida);
         bool permiteInicializar = AnalisarPermissaoInicializacao(opcoes.PermissaoInicializarBancoVazioBruta);
 
         if (totalTabelasUsuario == 0)
@@ -147,10 +157,46 @@ public static class PreflightMigracaoTenant
     }
 
     /// <summary>
+    /// Exige que o histórico aplicado seja prefixo válido da cadeia conhecida: qualquer ID
+    /// desconhecido (banco de versão futura ou de outra linha) bloqueia antes de DDL, mesmo
+    /// sem migrations pendentes.
+    /// </summary>
+    /// <param name="historicoAplicado">IDs aplicados, em ordem.</param>
+    /// <param name="cadeiaConhecida">IDs conhecidos, em ordem; nulo dispensa a verificação (sem cadeia disponível).</param>
+    /// <exception cref="InvalidOperationException">Histórico fora da cadeia conhecida.</exception>
+    public static void ValidarHistoricoComoPrefixo(IReadOnlyList<string> historicoAplicado, IReadOnlyList<string>? cadeiaConhecida)
+    {
+        ArgumentNullException.ThrowIfNull(historicoAplicado);
+        if (cadeiaConhecida is null)
+        {
+            return;
+        }
+
+        if (historicoAplicado.Count > cadeiaConhecida.Count)
+        {
+            throw new InvalidOperationException(
+                "Histórico de migrations contém IDs desconhecidos por esta versão. Operação bloqueada antes de DDL.");
+        }
+
+        for (int i = 0; i < historicoAplicado.Count; i++)
+        {
+            if (!string.Equals(historicoAplicado[i], cadeiaConhecida[i], StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Histórico de migrations não é prefixo da cadeia conhecida. Operação bloqueada antes de DDL.");
+            }
+        }
+    }
+
+    /// <summary>
     /// Conecta ao banco de dados e executa todas as verificações prévias de segurança e isolamento.
     /// </summary>
+    /// <param name="opcoes">Opções do preflight.</param>
+    /// <param name="cadeiaConhecida">IDs das migrations conhecidas pelo binário, em ordem.</param>
+    /// <param name="tokenCancelamento">Token de cancelamento.</param>
     public static async Task ExecutarPreflightAsync(
         OpcoesPreflightMigracao opcoes,
+        IReadOnlyList<string> cadeiaConhecida,
         CancellationToken tokenCancelamento = default)
     {
         ValidarOpcoes(opcoes);
@@ -212,30 +258,48 @@ public static class PreflightMigracaoTenant
             }
         }
 
-        AvaliarEstadoBanco(opcoes, totalTabelasUsuario, marcador);
+        List<string> historicoAplicado = [];
+        bool historicoExiste;
+        await using (NpgsqlCommand checarHistorico = new(
+            "SELECT count(*) FROM information_schema.tables " +
+            "WHERE table_schema = 'foundation' AND table_name = '__EFMigrationsHistory'", conexao))
+        {
+            historicoExiste = Convert.ToInt32(await checarHistorico.ExecuteScalarAsync(tokenCancelamento)) > 0;
+        }
+
+        if (historicoExiste)
+        {
+            await using NpgsqlCommand lerHistorico = new(
+                "SELECT \"MigrationId\" FROM \"foundation\".\"__EFMigrationsHistory\" ORDER BY \"MigrationId\"", conexao);
+            await using NpgsqlDataReader leitor = await lerHistorico.ExecuteReaderAsync(tokenCancelamento);
+            while (await leitor.ReadAsync(tokenCancelamento))
+            {
+                historicoAplicado.Add(leitor.GetString(0));
+            }
+        }
+
+        AvaliarEstadoBanco(opcoes, totalTabelasUsuario, marcador, historicoAplicado, cadeiaConhecida);
     }
 
     /// <summary>
     /// Realiza a inserção síncrona do registro de identidade do banco de dados na base.
     /// </summary>
+    /// <param name="contexto">Contexto do banco alvo.</param>
+    /// <param name="idTenant">Tenant configurado.</param>
+    /// <param name="idAmbiente">Ambiente configurado.</param>
+    /// <param name="relogio">Fonte do instante (TimeProvider do tooling).</param>
     public static void PopularIdentidadeBanco(
         AcessoTenantDbContext contexto,
         Guid idTenant,
-        Guid idAmbiente)
+        Guid idAmbiente,
+        TimeProvider relogio)
     {
         IdentidadeBancoTenant? existente = contexto.IdentidadeBanco
             .FirstOrDefault(e => e.IdUnico == IdentidadeBancoTenant.IdUnicoPadrao);
 
         if (existente is null)
         {
-            contexto.IdentidadeBanco.Add(new IdentidadeBancoTenant
-            {
-                IdUnico = IdentidadeBancoTenant.IdUnicoPadrao,
-                IdTenant = idTenant,
-                IdAmbiente = idAmbiente,
-                EpocaAcesso = Guid.NewGuid(),
-                InicializadoEm = DateTimeOffset.UtcNow
-            });
+            contexto.IdentidadeBanco.Add(CriarMarcador(idTenant, idAmbiente, relogio));
             contexto.SaveChanges();
         }
         else
@@ -250,10 +314,16 @@ public static class PreflightMigracaoTenant
     /// <summary>
     /// Realiza a inserção assíncrona do registro de identidade do banco de dados na base.
     /// </summary>
+    /// <param name="contexto">Contexto do banco alvo.</param>
+    /// <param name="idTenant">Tenant configurado.</param>
+    /// <param name="idAmbiente">Ambiente configurado.</param>
+    /// <param name="relogio">Fonte do instante (TimeProvider do tooling).</param>
+    /// <param name="tokenCancelamento">Token de cancelamento.</param>
     public static async Task PopularIdentidadeBancoAsync(
         AcessoTenantDbContext contexto,
         Guid idTenant,
         Guid idAmbiente,
+        TimeProvider relogio,
         CancellationToken tokenCancelamento = default)
     {
         IdentidadeBancoTenant? existente = await contexto.IdentidadeBanco
@@ -261,14 +331,7 @@ public static class PreflightMigracaoTenant
 
         if (existente is null)
         {
-            contexto.IdentidadeBanco.Add(new IdentidadeBancoTenant
-            {
-                IdUnico = IdentidadeBancoTenant.IdUnicoPadrao,
-                IdTenant = idTenant,
-                IdAmbiente = idAmbiente,
-                EpocaAcesso = Guid.NewGuid(),
-                InicializadoEm = DateTimeOffset.UtcNow
-            });
+            contexto.IdentidadeBanco.Add(CriarMarcador(idTenant, idAmbiente, relogio));
             await contexto.SaveChangesAsync(tokenCancelamento);
         }
         else
@@ -278,5 +341,21 @@ public static class PreflightMigracaoTenant
                 throw new ExcecaoIsolamentoTenant();
             }
         }
+    }
+
+    private static IdentidadeBancoTenant CriarMarcador(Guid idTenant, Guid idAmbiente, TimeProvider relogio)
+    {
+        ArgumentNullException.ThrowIfNull(relogio);
+        DateTimeOffset agora = InstanteUtc.Normalizar(relogio.GetUtcNow());
+        IdentidadeBancoTenant marcador = new()
+        {
+            IdUnico = IdentidadeBancoTenant.IdUnicoPadrao,
+            IdTenant = idTenant,
+            IdAmbiente = idAmbiente,
+            EpocaAcesso = IdentificadorV7.Gerar(agora),
+            InicializadoEm = agora
+        };
+        marcador.Validar();
+        return marcador;
     }
 }

@@ -3,11 +3,14 @@ using Xunit;
 
 namespace Platform.IntegrationTests.Fixtures;
 
+/// <summary>
+/// Confere que a fixture reproduz as identidades técnicas do <c>init-db.sh</c> (G6) com menor privilégio.
+/// </summary>
 public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fixture)
     : IClassFixture<FixtureInstalacaoPostgres>
 {
     [Fact]
-    public async Task ProprietarioEExecucaoPossuemApenasPrivilegiosEsperados()
+    public async Task ProprietarioERuntimePossuemApenasPrivilegiosEsperados()
     {
         foreach (InstalacaoTestePostgres instalacao in new[] { fixture.TenantA, fixture.TenantB })
         {
@@ -36,7 +39,29 @@ public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fi
     }
 
     [Fact]
-    public async Task CredenciaisExecucaoNaoConectamNaOutraInstalacao()
+    public async Task OperadoresSaoLoginsIndividuaisMembrosDoGrupoNologin()
+    {
+        foreach (InstalacaoTestePostgres instalacao in new[] { fixture.TenantA, fixture.TenantB })
+        {
+            foreach (string conexaoOperador in new[] { instalacao.StringConexaoOperadorUm, instalacao.StringConexaoOperadorDois })
+            {
+                await using NpgsqlConnection conexao = new(conexaoOperador);
+                await conexao.OpenAsync(TestContext.Current.CancellationToken);
+                await using NpgsqlCommand comando = new(
+                    "SELECT session_user = current_user " +
+                    "AND pg_has_role(current_user, @grupo, 'MEMBER') " +
+                    "AND NOT (SELECT rolcanlogin FROM pg_roles WHERE rolname = @grupo) " +
+                    "AND NOT (SELECT rolsuper OR rolcreatedb OR rolcreaterole FROM pg_roles WHERE rolname = current_user)", conexao);
+                comando.Parameters.AddWithValue("grupo", instalacao.PapelOperador);
+                Assert.Equal(true, await comando.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+            }
+
+            Assert.NotEqual(instalacao.LoginOperadorUm, instalacao.LoginOperadorDois);
+        }
+    }
+
+    [Fact]
+    public async Task CredenciaisNaoConectamNaOutraInstalacao()
     {
         foreach ((InstalacaoTestePostgres origem, InstalacaoTestePostgres destino) in new[]
         {
@@ -44,16 +69,16 @@ public sealed class TestesFixtureInstalacaoPostgres(FixtureInstalacaoPostgres fi
             (fixture.TenantB, fixture.TenantA)
         })
         {
-            NpgsqlConnectionStringBuilder construtorConexao = new(origem.StringConexaoExecucao)
+            foreach (string conexaoOrigem in new[] { origem.StringConexaoExecucao, origem.StringConexaoOperadorUm })
             {
-                Database = destino.NomeBancoDados
-            };
-            await using NpgsqlConnection conexao = new(construtorConexao.ConnectionString);
+                NpgsqlConnectionStringBuilder construtorConexao = new(conexaoOrigem) { Database = destino.NomeBancoDados };
+                await using NpgsqlConnection conexao = new(construtorConexao.ConnectionString);
 
-            PostgresException negado = await Assert.ThrowsAsync<PostgresException>(
-                () => conexao.OpenAsync(TestContext.Current.CancellationToken));
+                PostgresException negado = await Assert.ThrowsAsync<PostgresException>(
+                    () => conexao.OpenAsync(TestContext.Current.CancellationToken));
 
-            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, negado.SqlState);
+                Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, negado.SqlState);
+            }
         }
     }
 

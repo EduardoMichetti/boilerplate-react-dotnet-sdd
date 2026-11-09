@@ -246,7 +246,7 @@ public sealed class TestesContratoHealthEOpenApi
 
     private static OpcoesInstalacaoTenant CriarOpcoesValidas(EstadoTenant estado = EstadoTenant.Ativo) => new()
     {
-        IdAplicacao = "boilerplate-react-dotnet-sdd",
+        CodigoAplicacao = "boilerplate-react-dotnet-sdd",
         IdAmbiente = IdAmbientePadrao,
         IdTenant = IdTenantPadrao,
         NomeExibicaoTenant = "Cliente de Teste",

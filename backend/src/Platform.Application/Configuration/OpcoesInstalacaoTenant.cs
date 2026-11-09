@@ -9,9 +9,9 @@ namespace Platform.Application.Configuration;
 public sealed class OpcoesInstalacaoTenant
 {
     /// <summary>
-    /// Identificador do produto ou aplicação derivado (de 1 a 100 caracteres).
+    /// Identificação textual do produto (string de 1 a 100; não secreta, não é <c>Id*</c>).
     /// </summary>
-    public string? IdAplicacao { get; set; }
+    public string? CodigoAplicacao { get; set; }
 
     /// <summary>
     /// Identificador único e imutável do ambiente da instalação (UUID não vazio).
@@ -45,9 +45,9 @@ public sealed class OpcoesInstalacaoTenant
     {
         List<string> erros = [];
 
-        if (string.IsNullOrWhiteSpace(IdAplicacao) || IdAplicacao.Length > 100)
+        if (string.IsNullOrWhiteSpace(CodigoAplicacao) || CodigoAplicacao.Length > 100)
         {
-            erros.Add("IdAplicacao deve conter entre 1 e 100 caracteres.");
+            erros.Add("CodigoAplicacao deve conter entre 1 e 100 caracteres.");
         }
 
         if (IdAmbiente == Guid.Empty)

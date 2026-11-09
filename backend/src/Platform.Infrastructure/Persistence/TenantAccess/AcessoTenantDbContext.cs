@@ -1,77 +1,51 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess;
 
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Platform.Infrastructure.Persistence.TenantAccess.Configurations;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
 /// <summary>
-/// DbContext do Entity Framework Core para o módulo de acesso do tenant.
-/// Integra a identidade do banco e os usuários com permissões.
+/// DbContext do acesso local da instalação: marcador, contas, concessões, sessões e
+/// histórico operacional. O <c>InterceptadorAuditoria</c> é registrado pela composição
+/// (API, host operacional e factory de design).
 /// </summary>
 public sealed class AcessoTenantDbContext(DbContextOptions<AcessoTenantDbContext> opcoes)
     : IdentityUserContext<UsuarioAplicacao, Guid>(opcoes)
 {
     /// <summary>
-    /// Conjunto de permissões concedidas aos usuários da instalação.
+    /// Concessões de permissões às contas.
     /// </summary>
     public DbSet<PermissaoUsuario> Permissoes => Set<PermissaoUsuario>();
 
     /// <summary>
-    /// Conjunto singleton que armazena a identidade do banco de dados do tenant.
+    /// Marcador singleton de identidade do banco.
     /// </summary>
     public DbSet<IdentidadeBancoTenant> IdentidadeBanco => Set<IdentidadeBancoTenant>();
 
-    protected override void OnModelCreating(ModelBuilder construtor)
+    /// <summary>
+    /// Sessões autenticadas persistidas.
+    /// </summary>
+    public DbSet<SessaoAutenticacao> Sessoes => Set<SessaoAutenticacao>();
+
+    /// <summary>
+    /// Histórico append-only das operações restritas.
+    /// </summary>
+    public DbSet<RegistroOperacaoAcesso> OperacoesAcesso => Set<RegistroOperacaoAcesso>();
+
+    /// <inheritdoc />
+    protected override void OnModelCreating(ModelBuilder builder)
     {
-        base.OnModelCreating(construtor);
+        base.OnModelCreating(builder);
 
-        construtor.ApplyConfiguration(new ConfiguracaoUsuarioAplicacao());
-        construtor.ApplyConfiguration(new ConfiguracaoPermissaoUsuario());
+        builder.ApplyConfiguration(new ConfiguracaoIdentidadeBancoTenant());
+        builder.ApplyConfiguration(new ConfiguracaoUsuarioAplicacao());
+        builder.ApplyConfiguration(new ConfiguracaoPermissaoUsuario());
+        builder.ApplyConfiguration(new ConfiguracaoSessaoAutenticacao());
+        builder.ApplyConfiguration(new ConfiguracaoRegistroOperacaoAcesso());
+        ConfiguracaoTabelasAuxiliaresIdentity.Aplicar(builder);
 
-        construtor.Entity<IdentityUserClaim<Guid>>(b => b.ToTable("reivindicacoes_usuario", "access"));
-        construtor.Entity<IdentityUserLogin<Guid>>(b => b.ToTable("logins_usuario", "access"));
-        construtor.Entity<IdentityUserToken<Guid>>(b => b.ToTable("tokens_usuario", "access"));
-
-        construtor.Entity<IdentidadeBancoTenant>(b =>
-        {
-            b.ToTable("identidade_banco", "foundation", tabela =>
-                tabela.HasComment("Armazena a identidade singleton do banco de dados para comprovação e isolamento por tenant."));
-
-            b.HasKey(e => e.IdUnico);
-            b.Property(e => e.IdUnico)
-                .ValueGeneratedNever()
-                .HasComment("Identificador singleton fixado em 1 para garantir linha única.");
-
-            b.Property(e => e.IdTenant)
-                .IsRequired()
-                .HasComment("Identificador imutável do tenant proprietário deste banco de dados.");
-
-            b.Property(e => e.IdAmbiente)
-                .IsRequired()
-                .HasComment("Identificador único do ambiente de execução correspondente a esta instalação.");
-
-            b.Property(e => e.EpocaAcesso)
-                .IsRequired()
-                .HasComment("Época de acesso atual utilizada para revogação e invalidação global de sessões.");
-
-            b.Property(e => e.InicializadoEm)
-                .IsRequired()
-                .HasColumnType("timestamp with time zone")
-                .HasComment("Data e hora UTC em que o banco de dados da instalação foi inicializado tecnicamente.");
-
-            b.HasAlternateKey(e => e.IdTenant)
-                .HasName("uq_identidade_banco_id_tenant");
-        });
-
-        construtor.Entity<UsuarioAplicacao>(b =>
-        {
-            b.HasOne<IdentidadeBancoTenant>()
-                .WithMany()
-                .HasForeignKey(u => u.IdTenant)
-                .HasPrincipalKey(t => t.IdTenant)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+        // Sempre por último: nomes de constraints/índices dependem do modelo completo.
+        ConvencaoNomesBanco.Aplicar(builder);
     }
 }

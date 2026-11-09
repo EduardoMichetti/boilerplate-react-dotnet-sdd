@@ -1,0 +1,36 @@
+# Host operacional pontual (FR-033): sem servidor HTTP, sem SDK, sem dotnet-ef e sem credenciais.
+# Stage 1: Build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401 AS build
+WORKDIR /src
+
+COPY ["Directory.Build.props", "./"]
+COPY ["Directory.Packages.props", "./"]
+COPY ["global.json", "./"]
+
+COPY ["backend/src/Platform.Domain/Platform.Domain.csproj", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Domain/packages.lock.json", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Application/Platform.Application.csproj", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Application/packages.lock.json", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Infrastructure/Platform.Infrastructure.csproj", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/Platform.Infrastructure/packages.lock.json", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/Platform.Operations/Platform.Operations.csproj", "backend/src/Platform.Operations/"]
+COPY ["backend/src/Platform.Operations/packages.lock.json", "backend/src/Platform.Operations/"]
+
+RUN dotnet restore "backend/src/Platform.Operations/Platform.Operations.csproj" --locked-mode
+
+COPY ["backend/src/Platform.Domain/", "backend/src/Platform.Domain/"]
+COPY ["backend/src/Platform.Application/", "backend/src/Platform.Application/"]
+COPY ["backend/src/Platform.Infrastructure/", "backend/src/Platform.Infrastructure/"]
+COPY ["backend/src/Platform.Operations/", "backend/src/Platform.Operations/"]
+
+RUN dotnet publish "backend/src/Platform.Operations/Platform.Operations.csproj" -c Release -o /app/publish --no-restore
+
+# Stage 2: Runtime .NET 10.0.12 não-root (sem ASP.NET, sem SDK)
+FROM mcr.microsoft.com/dotnet/runtime:10.0.12 AS runtime
+WORKDIR /app
+
+COPY --from=build /app/publish .
+
+USER $APP_UID
+
+ENTRYPOINT ["dotnet", "Platform.Operations.dll"]

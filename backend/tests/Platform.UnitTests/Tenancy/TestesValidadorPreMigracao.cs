@@ -205,7 +205,7 @@ public sealed class TestesValidadorPreMigracao
         Guid? idAmbienteCli = null)
     {
         return new OpcoesPreflightMigracao(
-            IdAplicacao: "produto-teste",
+            CodigoAplicacao: "produto-teste",
             IdAmbiente: IdAmbienteAlvo,
             IdTenant: IdTenantAlvo,
             EstadoTenant: estadoTenant,

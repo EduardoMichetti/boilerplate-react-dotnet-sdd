@@ -2,50 +2,29 @@ namespace Platform.IntegrationTests.Access;
 
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using Platform.Infrastructure.Persistence.DesignTime;
-using Platform.Infrastructure.Persistence.TenantAccess;
+using Platform.Domain.Access;
+using Platform.Domain.Auditoria;
+using Platform.Domain.Identificadores;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 using Platform.IntegrationTests.Fixtures;
+using Platform.IntegrationTests.Suporte;
+using Platform.Testes.Comum;
 using Xunit;
 
+/// <summary>
+/// T079 / SC-009: persistência e isolamento de contas e concessões sobre a migration inicial
+/// única. Contas são criadas pelo operador individual (o runtime não tem INSERT em usuários).
+/// </summary>
 public sealed class TestesPersistenciaUsuarioTenant(FixtureInstalacaoPostgres fixture)
     : IClassFixture<FixtureInstalacaoPostgres>, IAsyncLifetime
 {
+    private readonly RelogioControlavel _relogio = new(new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero));
+
     public async ValueTask InitializeAsync()
     {
-        CancellationToken tokenCancelamento = TestContext.Current.CancellationToken;
-
-        // Garante que ambas as bases estejam migradas antes de rodar os testes de persistência
         foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
         {
-            DbContextOptionsBuilder<AcessoTenantDbContext> construtor = new();
-            construtor.UseNpgsql(tenant.StringConexaoProprietario, npgsql =>
-            {
-                npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
-            });
-            construtor.UseSeeding((contexto, _) =>
-            {
-                if (contexto is AcessoTenantDbContext contextoTenant)
-                {
-                    PreflightMigracaoTenant.PopularIdentidadeBanco(contextoTenant, tenant.IdTenant, tenant.IdAmbiente);
-                }
-            });
-            construtor.UseAsyncSeeding(async (contexto, _, ct) =>
-            {
-                if (contexto is AcessoTenantDbContext contextoTenant)
-                {
-                    await PreflightMigracaoTenant.PopularIdentidadeBancoAsync(contextoTenant, tenant.IdTenant, tenant.IdAmbiente, ct);
-                }
-            });
-
-            await using (AcessoTenantDbContext contexto = new(construtor.Options))
-            {
-                await contexto.Database.MigrateAsync(tokenCancelamento);
-            }
-
-            await tenant.ConcederPermissoesExecucaoAsync(tokenCancelamento);
+            await BancoTeste.MigrarAsync(tenant, _relogio, TestContext.Current.CancellationToken);
         }
     }
 
@@ -54,359 +33,189 @@ public sealed class TestesPersistenciaUsuarioTenant(FixtureInstalacaoPostgres fi
     [Fact]
     public async Task MesmoEmailEId_CriamContasIndependentesComSenhasDistintas()
     {
-        Guid idUsuarioCompartilhado = Guid.NewGuid();
-        const string emailCompartilhado = "comum@tenant.local";
-        const string senhaA = "SenhaTenantA123!";
-        const string senhaB = "SenhaTenantB456!";
+        Guid idUsuarioCompartilhado = IdentificadorV7.Gerar(_relogio.GetUtcNow());
+        const string EmailCompartilhado = "comum@tenant.local";
+        const string SenhaA = "SenhaTenantA123!";
+        const string SenhaB = "SenhaTenantB456!";
 
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoA)
+        await CriarContaAsync(fixture.TenantA, idUsuarioCompartilhado, EmailCompartilhado, "Usuário no Tenant A", SenhaA);
+        await CriarContaAsync(fixture.TenantB, idUsuarioCompartilhado, EmailCompartilhado, "Usuário no Tenant B", SenhaB);
+
+        foreach ((InstalacaoTestePostgres tenant, string nome, string senhaCerta, string senhaOutra) in new[]
         {
-            UsuarioAplicacao usuarioA = new()
-            {
-                Id = idUsuarioCompartilhado,
-                IdTenant = fixture.TenantA.IdTenant,
-                UserName = emailCompartilhado,
-                Email = emailCompartilhado,
-                NomeExibicao = "Usuário no Tenant A",
-                EstaAtivo = true
-            };
-
-            IdentityResult resultadoA = await gerenciadorUsuariosA.CreateAsync(usuarioA, senhaA);
-            Assert.True(resultadoA.Succeeded, string.Join("; ", resultadoA.Errors.Select(e => e.Description)));
-        }
-
-        var (escopoB, gerenciadorUsuariosB, _) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-        await using (escopoB)
+            (fixture.TenantA, "Usuário no Tenant A", SenhaA, SenhaB),
+            (fixture.TenantB, "Usuário no Tenant B", SenhaB, SenhaA),
+        })
         {
-            UsuarioAplicacao usuarioB = new()
-            {
-                Id = idUsuarioCompartilhado,
-                IdTenant = fixture.TenantB.IdTenant,
-                UserName = emailCompartilhado,
-                Email = emailCompartilhado,
-                NomeExibicao = "Usuário no Tenant B",
-                EstaAtivo = true
-            };
-
-            IdentityResult resultadoB = await gerenciadorUsuariosB.CreateAsync(usuarioB, senhaB);
-            Assert.True(resultadoB.Succeeded, string.Join("; ", resultadoB.Errors.Select(e => e.Description)));
-        }
-
-        // Verifica que as senhas e hashes são independentes e isolados
-        var (escopoVerificacaoA, gerenciadorVerificacaoA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoVerificacaoA)
-        {
-            UsuarioAplicacao? carregadoA = await gerenciadorVerificacaoA.FindByIdAsync(idUsuarioCompartilhado.ToString());
-            Assert.NotNull(carregadoA);
-            Assert.Equal("Usuário no Tenant A", carregadoA.NomeExibicao);
-            Assert.True(await gerenciadorVerificacaoA.CheckPasswordAsync(carregadoA, senhaA));
-            Assert.False(await gerenciadorVerificacaoA.CheckPasswordAsync(carregadoA, senhaB));
-        }
-
-        var (escopoVerificacaoB, gerenciadorVerificacaoB, _) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-        await using (escopoVerificacaoB)
-        {
-            UsuarioAplicacao? carregadoB = await gerenciadorVerificacaoB.FindByIdAsync(idUsuarioCompartilhado.ToString());
-            Assert.NotNull(carregadoB);
-            Assert.Equal("Usuário no Tenant B", carregadoB.NomeExibicao);
-            Assert.True(await gerenciadorVerificacaoB.CheckPasswordAsync(carregadoB, senhaB));
-            Assert.False(await gerenciadorVerificacaoB.CheckPasswordAsync(carregadoB, senhaA));
+            await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(tenant.StringConexaoExecucao, Contexto(TipoAutor.Anonimo));
+            UsuarioAplicacao? carregado = await escopo.GerenciadorUsuarios.FindByIdAsync(idUsuarioCompartilhado.ToString());
+            Assert.NotNull(carregado);
+            Assert.Equal(nome, carregado.NomeExibicao);
+            Assert.Equal(tenant.IdTenant, carregado.FkIdTenant);
+            Assert.True(await escopo.GerenciadorUsuarios.CheckPasswordAsync(carregado, senhaCerta));
+            Assert.False(await escopo.GerenciadorUsuarios.CheckPasswordAsync(carregado, senhaOutra));
         }
     }
 
     [Fact]
     public async Task PermissoesLocais_ConcedemERevogamIndependentemente()
     {
-        Guid idUsuario = Guid.NewGuid();
-        const string email = "teste_perm@tenant.local";
+        Guid idUsuario = IdentificadorV7.Gerar(_relogio.GetUtcNow());
+        const string Email = "teste_perm@tenant.local";
 
-        var (escopoA, gerenciadorUsuariosA, contextoBancoA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoA)
+        foreach (InstalacaoTestePostgres tenant in new[] { fixture.TenantA, fixture.TenantB })
         {
-            await gerenciadorUsuariosA.CreateAsync(new UsuarioAplicacao
-            {
-                Id = idUsuario,
-                IdTenant = fixture.TenantA.IdTenant,
-                UserName = email,
-                Email = email,
-                NomeExibicao = "Usuário A"
-            }, "TesteSenha123!");
-
-            contextoBancoA.Permissoes.Add(new PermissaoUsuario
-            {
-                IdUsuario = idUsuario,
-                CodigoPermissao = "fundacao.contexto.ler",
-                ConcedidaEm = DateTimeOffset.UtcNow,
-                Versao = 1
-            });
-            await contextoBancoA.SaveChangesAsync(TestContext.Current.CancellationToken);
+            await CriarContaAsync(tenant, idUsuario, Email, "Usuário", "TesteSenha123!");
+            await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(tenant.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
+            escopo.Contexto.Permissoes.Add(new PermissaoUsuario { FkIdUsuario = idUsuario, CodigoPermissao = CodigosPermissao.FundacaoContextoLer });
+            await escopo.Contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        var (escopoB, gerenciadorUsuariosB, contextoBancoB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-        await using (escopoB)
+        await using (EscopoIdentityTeste escopoA = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoOperadorUm, Contexto(TipoAutor.Operador)))
         {
-            await gerenciadorUsuariosB.CreateAsync(new UsuarioAplicacao
-            {
-                Id = idUsuario,
-                IdTenant = fixture.TenantB.IdTenant,
-                UserName = email,
-                Email = email,
-                NomeExibicao = "Usuário B"
-            }, "TesteSenha123!");
-
-            contextoBancoB.Permissoes.Add(new PermissaoUsuario
-            {
-                IdUsuario = idUsuario,
-                CodigoPermissao = "modulo.personalizado.acesso",
-                ConcedidaEm = DateTimeOffset.UtcNow,
-                Versao = 1
-            });
-            await contextoBancoB.SaveChangesAsync(TestContext.Current.CancellationToken);
+            PermissaoUsuario concessaoA = await escopoA.Contexto.Permissoes.SingleAsync(p => p.FkIdUsuario == idUsuario, TestContext.Current.CancellationToken);
+            escopoA.Contexto.Permissoes.Remove(concessaoA);
+            await escopoA.Contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
-        // Verifica permissões distintas
-        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoChecagemA)
-        {
-            var permissoesA = await dbChecagemA.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
-            Assert.Single(permissoesA);
-            Assert.Equal("fundacao.contexto.ler", permissoesA[0].CodigoPermissao);
+        await using EscopoIdentityTeste leituraA = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoExecucao, Contexto(TipoAutor.Anonimo));
+        Assert.Empty(await leituraA.Contexto.Permissoes.Where(p => p.FkIdUsuario == idUsuario).ToListAsync(TestContext.Current.CancellationToken));
 
-            // Revoga permissão no Tenant A
-            dbChecagemA.Permissoes.Remove(permissoesA[0]);
-            await dbChecagemA.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-        await using (escopoChecagemB)
-        {
-            var permissoesB = await dbChecagemB.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
-            Assert.Single(permissoesB);
-            Assert.Equal("modulo.personalizado.acesso", permissoesB[0].CodigoPermissao);
-        }
-
-        // Confirma que Tenant A tem 0 permissões e Tenant B continua intacto
-        var (escopoFinalA, _, dbFinalA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoFinalA)
-        {
-            Assert.Empty(await dbFinalA.Permissoes.Where(p => p.IdUsuario == idUsuario).ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
-        }
+        await using EscopoIdentityTeste leituraB = EscopoIdentityTeste.Criar(fixture.TenantB.StringConexaoExecucao, Contexto(TipoAutor.Anonimo));
+        PermissaoUsuario concessaoB = await leituraB.Contexto.Permissoes.SingleAsync(p => p.FkIdUsuario == idUsuario, TestContext.Current.CancellationToken);
+        Assert.Equal(CodigosPermissao.FundacaoContextoLer, concessaoB.CodigoPermissao);
+        Assert.Null(concessaoB.AlteradoEm);
+        Assert.Equal(TipoAutor.Operador, concessaoB.TipoAutorCriacao);
     }
 
     [Fact]
     public async Task UnicidadeEmail_AplicadaLocalmentePorBanco()
     {
-        const string emailDuplicado = "duplicado@tenant.local";
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoA)
-        {
-            var usuario1 = new UsuarioAplicacao
-            {
-                Id = Guid.NewGuid(),
-                IdTenant = fixture.TenantA.IdTenant,
-                UserName = emailDuplicado,
-                Email = emailDuplicado,
-                NomeExibicao = "Usuário 1"
-            };
-            var resultado1 = await gerenciadorUsuariosA.CreateAsync(usuario1, "Senha123!");
-            Assert.True(resultado1.Succeeded);
+        const string EmailDuplicado = "duplicado@tenant.local";
+        await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
 
-            var usuario2 = new UsuarioAplicacao
-            {
-                Id = Guid.NewGuid(),
-                IdTenant = fixture.TenantA.IdTenant,
-                UserName = emailDuplicado,
-                Email = emailDuplicado,
-                NomeExibicao = "Usuário 2"
-            };
-            var resultado2 = await gerenciadorUsuariosA.CreateAsync(usuario2, "Senha123!");
-            Assert.False(resultado2.Succeeded);
-        }
+        IdentityResult resultado1 = await escopo.GerenciadorUsuarios.CreateAsync(NovaConta(fixture.TenantA, EmailDuplicado, "Usuário 1"), "Senha123!");
+        Assert.True(resultado1.Succeeded);
+
+        IdentityResult resultado2 = await escopo.GerenciadorUsuarios.CreateAsync(NovaConta(fixture.TenantA, EmailDuplicado, "Usuário 2"), "Senha123!");
+        Assert.False(resultado2.Succeeded);
     }
 
     [Fact]
-    public async Task RestricaoChaveEstrangeira_ImpedeContaComIdTenantDivergente()
+    public async Task RestricaoChaveEstrangeira_ImpedeContaComTenantDivergente()
     {
-        var (escopoA, gerenciadorUsuariosA, _) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoA)
-        {
-            UsuarioAplicacao usuarioTenantInvalido = new()
-            {
-                Id = Guid.NewGuid(),
-                IdTenant = fixture.TenantB.IdTenant, // ID de tenant divergente!
-                UserName = "divergente@tenant.local",
-                Email = "divergente@tenant.local",
-                NomeExibicao = "Usuário Tenant Inválido"
-            };
+        await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
+        UsuarioAplicacao contaInvalida = NovaConta(fixture.TenantA, "divergente@tenant.local", "Usuário Tenant Inválido");
+        contaInvalida.FkIdTenant = fixture.TenantB.IdTenant;
 
-            await Assert.ThrowsAnyAsync<DbUpdateException>(
-                () => gerenciadorUsuariosA.CreateAsync(usuarioTenantInvalido, "Senha123!"));
-        }
+        await Assert.ThrowsAnyAsync<DbUpdateException>(() => escopo.GerenciadorUsuarios.CreateAsync(contaInvalida, "Senha123!"));
     }
 
     [Fact]
     public async Task Transacoes_SuportamCommitERollback()
     {
-        Guid idUsuarioRollback = Guid.NewGuid();
-        Guid idUsuarioCommit = Guid.NewGuid();
+        UsuarioAplicacao contaRollback = NovaConta(fixture.TenantA, "rollback@tenant.local", "Usuário Rollback");
+        UsuarioAplicacao contaCommit = NovaConta(fixture.TenantA, "commit@tenant.local", "Usuário Commit");
+        await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
 
-        var (escopo, _, contextoBanco) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopo)
+        await using (var transacao = await escopo.Contexto.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
         {
-            // 1. Rollback
-            await using (var transacao = await contextoBanco.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
-            {
-                contextoBanco.Users.Add(new UsuarioAplicacao
-                {
-                    Id = idUsuarioRollback,
-                    IdTenant = fixture.TenantA.IdTenant,
-                    UserName = "rollback@tenant.local",
-                    Email = "rollback@tenant.local",
-                    NomeExibicao = "Usuário Rollback"
-                });
-                await contextoBanco.SaveChangesAsync(TestContext.Current.CancellationToken);
-                await transacao.RollbackAsync(TestContext.Current.CancellationToken);
-            }
-
-            contextoBanco.ChangeTracker.Clear();
-            Assert.Null(await contextoBanco.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == idUsuarioRollback, TestContext.Current.CancellationToken));
-
-            // 2. Commit
-            await using (var transacao = await contextoBanco.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
-            {
-                contextoBanco.Users.Add(new UsuarioAplicacao
-                {
-                    Id = idUsuarioCommit,
-                    IdTenant = fixture.TenantA.IdTenant,
-                    UserName = "commit@tenant.local",
-                    Email = "commit@tenant.local",
-                    NomeExibicao = "Usuário Commit"
-                });
-                await contextoBanco.SaveChangesAsync(TestContext.Current.CancellationToken);
-                await transacao.CommitAsync(TestContext.Current.CancellationToken);
-            }
-
-            contextoBanco.ChangeTracker.Clear();
-            Assert.NotNull(await contextoBanco.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == idUsuarioCommit, TestContext.Current.CancellationToken));
+            escopo.Contexto.Users.Add(contaRollback);
+            await escopo.Contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
+            await transacao.RollbackAsync(TestContext.Current.CancellationToken);
         }
+
+        escopo.Contexto.ChangeTracker.Clear();
+        Assert.Null(await escopo.Contexto.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == contaRollback.Id, TestContext.Current.CancellationToken));
+
+        await using (var transacao = await escopo.Contexto.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+        {
+            escopo.Contexto.Users.Add(contaCommit);
+            await escopo.Contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
+            await transacao.CommitAsync(TestContext.Current.CancellationToken);
+        }
+
+        escopo.Contexto.ChangeTracker.Clear();
+        Assert.NotNull(await escopo.Contexto.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == contaCommit.Id, TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task BarreiraConcorrencia_OperacoesSobrepostasComFalhaEmADeixamBIntacto()
     {
-        Guid idUsuarioA = Guid.NewGuid();
-        Guid idUsuarioB = Guid.NewGuid();
+        UsuarioAplicacao contaA = NovaConta(fixture.TenantA, "concorrente_a@tenant.local", "Concorrente A");
+        UsuarioAplicacao contaB = NovaConta(fixture.TenantB, "concorrente_b@tenant.local", "Concorrente B");
         using Barrier barreira = new(2);
-        int picoConcorrenciaObservado = 0;
-        int ativosEmTransacao = 0;
+        int pico = 0;
+        int ativos = 0;
 
-        Task tarefaA = Task.Run(async () =>
+        async Task ExecutarAsync(InstalacaoTestePostgres tenant, UsuarioAplicacao conta, bool confirmar)
         {
-            var (escopoA, _, dbA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-            await using (escopoA)
-            await using (var txA = await dbA.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+            await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(tenant.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
+            await using var transacao = await escopo.Contexto.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            int atual = Interlocked.Increment(ref ativos);
+            InterlockedMaximo(ref pico, atual);
+            escopo.Contexto.Users.Add(conta);
+            await escopo.Contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
+            barreira.SignalAndWait(TestContext.Current.CancellationToken);
+            if (confirmar)
             {
-                int atual = Interlocked.Increment(ref ativosEmTransacao);
-                lock (barreira)
-                {
-                    if (atual > picoConcorrenciaObservado)
-                    {
-                        picoConcorrenciaObservado = atual;
-                    }
-                }
-
-                dbA.Users.Add(new UsuarioAplicacao
-                {
-                    Id = idUsuarioA,
-                    IdTenant = fixture.TenantA.IdTenant,
-                    UserName = "concorrente_a@tenant.local",
-                    Email = "concorrente_a@tenant.local",
-                    NomeExibicao = "Concorrente A"
-                });
-                await dbA.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-                // Aguarda na barreira para garantir transações ativas simultaneamente
-                barreira.SignalAndWait();
-
-                // Falha deliberada e rollback em A
-                await txA.RollbackAsync(TestContext.Current.CancellationToken);
-                Interlocked.Decrement(ref ativosEmTransacao);
+                await transacao.CommitAsync(TestContext.Current.CancellationToken);
             }
-        }, TestContext.Current.CancellationToken);
-
-        Task tarefaB = Task.Run(async () =>
-        {
-            var (escopoB, _, dbB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-            await using (escopoB)
-            await using (var txB = await dbB.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+            else
             {
-                int atual = Interlocked.Increment(ref ativosEmTransacao);
-                lock (barreira)
-                {
-                    if (atual > picoConcorrenciaObservado)
-                    {
-                        picoConcorrenciaObservado = atual;
-                    }
-                }
-
-                dbB.Users.Add(new UsuarioAplicacao
-                {
-                    Id = idUsuarioB,
-                    IdTenant = fixture.TenantB.IdTenant,
-                    UserName = "concorrente_b@tenant.local",
-                    Email = "concorrente_b@tenant.local",
-                    NomeExibicao = "Concorrente B"
-                });
-                await dbB.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-                // Aguarda na barreira para garantir transações ativas simultaneamente
-                barreira.SignalAndWait();
-
-                // Commit com sucesso em B
-                await txB.CommitAsync(TestContext.Current.CancellationToken);
-                Interlocked.Decrement(ref ativosEmTransacao);
+                await transacao.RollbackAsync(TestContext.Current.CancellationToken);
             }
-        }, TestContext.Current.CancellationToken);
 
-        await Task.WhenAll(tarefaA, tarefaB);
-
-        Assert.True(picoConcorrenciaObservado >= 2, $"Pico de concorrência foi {picoConcorrenciaObservado}, esperado >= 2");
-
-        // Verifica que o Tenant A realizou rollback e não possui idUsuarioA
-        var (escopoChecagemA, _, dbChecagemA) = CriarEscopoCliente(fixture.TenantA.StringConexaoExecucao);
-        await using (escopoChecagemA)
-        {
-            Assert.Null(await dbChecagemA.Users.FindAsync([idUsuarioA], TestContext.Current.CancellationToken));
+            Interlocked.Decrement(ref ativos);
         }
 
-        // Verifica que o Tenant B realizou commit e possui idUsuarioB
-        var (escopoChecagemB, _, dbChecagemB) = CriarEscopoCliente(fixture.TenantB.StringConexaoExecucao);
-        await using (escopoChecagemB)
-        {
-            Assert.NotNull(await dbChecagemB.Users.FindAsync([idUsuarioB], TestContext.Current.CancellationToken));
-        }
+        await Task.WhenAll(
+            Task.Run(() => ExecutarAsync(fixture.TenantA, contaA, confirmar: false), TestContext.Current.CancellationToken),
+            Task.Run(() => ExecutarAsync(fixture.TenantB, contaB, confirmar: true), TestContext.Current.CancellationToken));
+
+        Assert.True(pico >= 2, $"Pico de concorrência foi {pico}, esperado >= 2");
+
+        await using EscopoIdentityTeste leituraA = EscopoIdentityTeste.Criar(fixture.TenantA.StringConexaoExecucao, Contexto(TipoAutor.Anonimo));
+        Assert.Null(await leituraA.Contexto.Users.FindAsync([contaA.Id], TestContext.Current.CancellationToken));
+
+        await using EscopoIdentityTeste leituraB = EscopoIdentityTeste.Criar(fixture.TenantB.StringConexaoExecucao, Contexto(TipoAutor.Anonimo));
+        Assert.NotNull(await leituraB.Contexto.Users.FindAsync([contaB.Id], TestContext.Current.CancellationToken));
+        Assert.Null(await leituraB.Contexto.Users.FindAsync([contaA.Id], TestContext.Current.CancellationToken));
     }
 
-    private static (ServiceProvider Provedor, UserManager<UsuarioAplicacao> GerenciadorUsuarios, AcessoTenantDbContext ContextoBanco) CriarEscopoCliente(
-        string stringConexao)
+    private static void InterlockedMaximo(ref int alvo, int valor)
     {
-        ServiceCollection servicos = new();
-        servicos.AddLogging();
-        servicos.AddDbContext<AcessoTenantDbContext>(opcoes =>
+        int atual;
+        do
         {
-            opcoes.UseNpgsql(stringConexao, npgsql =>
+            atual = Volatile.Read(ref alvo);
+            if (valor <= atual)
             {
-                npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
-            });
-        });
-        servicos.AddIdentityCore<UsuarioAplicacao>(opcoes =>
-        {
-            opcoes.User.RequireUniqueEmail = true;
-        })
-        .AddEntityFrameworkStores<AcessoTenantDbContext>();
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref alvo, valor, atual) != atual);
+    }
 
-        ServiceProvider provedor = servicos.BuildServiceProvider();
-        return (provedor, provedor.GetRequiredService<UserManager<UsuarioAplicacao>>(), provedor.GetRequiredService<AcessoTenantDbContext>());
+    private ContextoOperacaoTeste Contexto(TipoAutor tipo) => ContextoOperacaoTeste.Criar(_relogio, tipo);
+
+    private UsuarioAplicacao NovaConta(InstalacaoTestePostgres tenant, string email, string nome) => new()
+    {
+        Id = IdentificadorV7.Gerar(_relogio.GetUtcNow()),
+        FkIdTenant = tenant.IdTenant,
+        UserName = email,
+        Email = email,
+        NomeExibicao = nome,
+        EstaAtivo = true,
+        LockoutEnabled = true,
+    };
+
+    private async Task CriarContaAsync(InstalacaoTestePostgres tenant, Guid id, string email, string nome, string senha)
+    {
+        await using EscopoIdentityTeste escopo = EscopoIdentityTeste.Criar(tenant.StringConexaoOperadorUm, Contexto(TipoAutor.Operador));
+        UsuarioAplicacao conta = NovaConta(tenant, email, nome);
+        conta.Id = id;
+        IdentityResult resultado = await escopo.GerenciadorUsuarios.CreateAsync(conta, senha);
+        Assert.True(resultado.Succeeded, string.Join("; ", resultado.Errors.Select(e => e.Code)));
     }
 }

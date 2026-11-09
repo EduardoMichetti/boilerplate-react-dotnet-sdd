@@ -12,11 +12,16 @@ using Platform.Infrastructure.Persistence.TenantAccess;
 WebApplicationBuilder construtor = WebApplication.CreateBuilder(args);
 
 construtor.Services.AdicionarProblemDetailsSeguro();
+construtor.Services.AdicionarJsonEstrito();
+construtor.Services.AdicionarValidacaoRequisicoes();
+
+// Fonte única do instante atual em todo o código de produção (Constituição IX).
+construtor.Services.AddSingleton(TimeProvider.System);
 
 construtor.Services.AddOptions<OpcoesInstalacaoTenant>()
     .Configure<IConfiguration>((opcoes, config) =>
     {
-        opcoes.IdAplicacao = config["IdAplicacao"];
+        opcoes.CodigoAplicacao = config["CodigoAplicacao"];
         _ = Guid.TryParse(config["IdAmbiente"], out Guid idAmbiente);
         _ = Guid.TryParse(config["IdTenant"], out Guid idTenant);
         opcoes.IdAmbiente = idAmbiente;
@@ -61,6 +66,10 @@ WebApplication aplicacao = construtor.Build();
 aplicacao.UsarProblemDetailsSeguro();
 
 aplicacao.MapOpenApi("/openapi/v1.json");
+
+// Grupo das rotas de acesso L2: valida todo argumento Requisicao* antes do handler (ADR 0003 D2).
+RouteGroupBuilder grupoApiV1 = aplicacao.MapGroup("/api/v1")
+    .AddEndpointFilter<FiltroValidacaoRequisicao>();
 
 aplicacao.MapGet("/health/live", () => Results.Ok(new RespostaLiveness()))
     .WithName("getLiveness")

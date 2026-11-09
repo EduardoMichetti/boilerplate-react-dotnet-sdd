@@ -105,7 +105,8 @@ public sealed class LayerDependencyTests
             Path.Combine(CaminhoRaizBackend, "src", "Platform.Domain", "Platform.Domain.csproj"),
             Path.Combine(CaminhoRaizBackend, "src", "Platform.Application", "Platform.Application.csproj"),
             Path.Combine(CaminhoRaizBackend, "src", "Platform.Infrastructure", "Platform.Infrastructure.csproj"),
-            Path.Combine(CaminhoRaizBackend, "src", "App.Api", "App.Api.csproj")
+            Path.Combine(CaminhoRaizBackend, "src", "App.Api", "App.Api.csproj"),
+            Path.Combine(CaminhoRaizBackend, "src", "Platform.Operations", "Platform.Operations.csproj")
         ];
 
         foreach (string caminho in caminhosProjetos)
@@ -126,6 +127,8 @@ public sealed class LayerDependencyTests
         Assert.True(grafo["Platform.Infrastructure"].Contains("Platform.Application"), "Platform.Infrastructure deve referenciar Platform.Application.");
         Assert.False(grafo["Platform.Infrastructure"].Contains("App.Api"), "Platform.Infrastructure não pode referenciar App.Api.");
         Assert.True(grafo["App.Api"].Contains("Platform.Application") && grafo["App.Api"].Contains("Platform.Infrastructure"), "App.Api referencia Application e Infrastructure.");
+        Assert.False(grafo.Values.Any(r => r.Contains("Platform.Operations")), "Nenhum projeto de produção referencia Platform.Operations.");
+        Assert.False(grafo["Platform.Operations"].Contains("App.Api"), "Platform.Operations não referencia App.Api.");
 
         HashSet<string> visitados = [];
         HashSet<string> pilhaRecursao = [];
@@ -134,6 +137,42 @@ public sealed class LayerDependencyTests
         {
             Assert.False(TemCiclo(node, grafo, visitados, pilhaRecursao), $"Ciclo detectado a partir do nó {node}.");
         }
+    }
+
+    [Fact]
+    public void PlatformOperations_ReferenciaSomenteApplicationEInfrastructureSemServidorHttp()
+    {
+        string caminhoCsproj = Path.Combine(CaminhoRaizBackend, "src", "Platform.Operations", "Platform.Operations.csproj");
+        XDocument documento = XDocument.Load(caminhoCsproj);
+
+        Assert.Equal("Microsoft.NET.Sdk", documento.Root?.Attribute("Sdk")?.Value);
+
+        List<string> projetos = documento.Descendants("ProjectReference")
+            .Select(p => Path.GetFileNameWithoutExtension(p.Attribute("Include")?.Value ?? string.Empty))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(["Platform.Application", "Platform.Infrastructure"], projetos);
+
+        foreach (string? pacote in documento.Descendants("PackageReference").Select(p => p.Attribute("Include")?.Value))
+        {
+            Assert.DoesNotContain("Microsoft.AspNetCore", pacote, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.DoesNotContain(
+            documento.Descendants("FrameworkReference"),
+            f => string.Equals(f.Attribute("Include")?.Value, "Microsoft.AspNetCore.App", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlatformDomain_NaoReferenciaIdentityEfOuHttpNemPorPacoteTransitivo()
+    {
+        string caminhoLock = Path.Combine(CaminhoRaizBackend, "src", "Platform.Domain", "packages.lock.json");
+        string conteudo = File.ReadAllText(caminhoLock);
+
+        Assert.DoesNotContain("EntityFrameworkCore", conteudo, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Identity", conteudo, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AspNetCore", conteudo, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TemCiclo(

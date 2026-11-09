@@ -3,7 +3,7 @@
   "info": {
     "title": "boilerplate-react-dotnet-sdd - L2 Tenant Access API (planned)",
     "version": "1.2.0",
-    "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
+    "description": "Design L2/I2 de 2026-11-04 sobre a L1 entregue; ainda não implementado. Rotas REST de recurso (G15, 2026-11-08): POST /api/v1/sessions (login, 201), DELETE /api/v1/sessions/current (logout, 204), GET /api/v1/antiforgery-token. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
   },
   "x-increment": "I2",
   "x-planned-only": true,
@@ -21,7 +21,7 @@
     { "name": "Health" }
   ],
   "paths": {
-    "/api/v1/auth/antiforgery": {
+    "/api/v1/antiforgery-token": {
       "get": {
         "operationId": "getAntiforgeryToken",
         "tags": ["Authentication"],
@@ -49,11 +49,11 @@
         }
       }
     },
-    "/api/v1/auth/login": {
+    "/api/v1/sessions": {
       "post": {
-        "operationId": "login",
+        "operationId": "createSession",
         "tags": ["Authentication"],
-        "summary": "Autenticar identidade previamente preparada pelo operador",
+        "summary": "Criar sessão (login) para identidade previamente preparada pelo operador",
         "description": "Exige X-Tenant-Id coincidente com IdTenant da instalação. Valida instalação ativa e marcador IdentidadeBancoTenant antes das credenciais locais; não existe catálogo nem busca em outros bancos. Tenant divergente/inativo, usuário desconhecido/bloqueado/desativado e senha incorreta têm AUTH_INVALID genérico. Valida explicitamente CSRF JSON da identidade corrente. Com sessão anterior válida, a troca é atômica: revogação da anterior (versão esperada) e criação da nova referência são confirmadas na mesma transação antes do sucesso. Se outro login, logout ou revogação concorrente alterar a sessão anterior, responde 409 SESSION_CONFLICT; falha de persistência responde 503. Em ambos a sessão anterior mantém estado e prazo, nenhuma sessão é criada e repetir exige novo GET antiforgery. Não retorna token de autenticação ou conexão. Limite: cinco requisições/minuto/IP efetivo/instalação, janela fixa, fila zero; Identity bloqueia conta por 15 minutos após cinco falhas. Confirmar bloqueio revoga todas as sessões e muda stamp atomicamente; após o prazo, exigir novo login, sem restaurar cookies antigos. Login aceita 1–128 caracteres; senha fora da política de criação resulta em AUTH_INVALID, sem revelar a política.",
         "security": [],
         "parameters": [
@@ -67,7 +67,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Nova sessão de servidor criada, com expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480). Sessões em outros clientes/dispositivos da mesma conta permanecem válidas; somente a sessão do cookie recebido é substituída.",
             "headers": {
               "Set-Cookie": { "$ref": "#/components/headers/SessionCookie" },
@@ -86,11 +86,11 @@
         }
       }
     },
-    "/api/v1/auth/logout": {
-      "post": {
-        "operationId": "logout",
+    "/api/v1/sessions/current": {
+      "delete": {
+        "operationId": "deleteCurrentSession",
         "tags": ["Authentication"],
-        "summary": "Revogar a sessão corrente e eliminar seu cookie",
+        "summary": "Encerrar a sessão corrente (logout) e eliminar seu cookie",
         "description": "Exige header coincidente, sessão local válida e CSRF JSON da identidade corrente; não exige foundation.context.read nem instalação ativa. Encerramento da própria sessão permanece permitido com empresa inativa, sem liberar consultas. Confirma commit da revogação antes de remover cookie/responder. Replay falha; Renew concorrente não recria registro/ticket nem estende prazo. Header divergente nunca seleciona banco. Sessão inválida retorna 401; falha de persistência retorna 503, sem confirmar saída ou apagar cookie como sucesso.",
         "parameters": [
           { "$ref": "#/components/parameters/TenantId" },
@@ -216,7 +216,7 @@
         "name": "X-CSRF-TOKEN",
         "in": "header",
         "required": true,
-        "description": "Token obtido em /api/v1/auth/antiforgery para a identidade corrente; não substitui autenticação.",
+        "description": "Token obtido em GET /api/v1/antiforgery-token para a identidade corrente; não substitui autenticação.",
         "schema": { "type": "string", "minLength": 1, "maxLength": 8192 }
       },
       "TenantId": {
@@ -229,8 +229,8 @@
     },
     "headers": {
       "NoStore": {
-        "description": "Respostas de identidade e tenant não são cacheadas.",
-        "schema": { "type": "string", "enum": ["no-store"] }
+        "description": "Respostas de identidade, tenant e erros não são cacheadas: o valor contém a diretiva no-store. Em erros originados de exceção o framework pode acrescentar diretivas mais restritivas (ex.: no-cache,no-store) (G18).",
+        "schema": { "type": "string", "pattern": "(^|,)\\s*no-store\\s*(,|$)" }
       },
       "SessionCookie": {
         "description": "Cookie de sessão definido ou removido pelo servidor; não incluir conteúdo real em exemplos ou logs.",
@@ -342,7 +342,7 @@
           "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
           "errors": {
             "type": "object",
-            "description": "Somente em 400 INPUT_INVALID. Chave: caminho do campo com nomes JSON em camelCase, sem prefixo $. (ex.: tarefas[0].emailResponsavel), tanto para desserialização quanto para validação. Mensagens em pt-BR, sem ecoar o valor recebido.",
+            "description": "Somente em 400 INPUT_INVALID. Chave: caminho do campo com nomes JSON em camelCase, sem prefixo $. (ex.: tarefas[0].emailResponsavel), tanto para desserialização quanto para validação; erro do corpo inteiro (JSON malformado, vazio ou raiz incompatível) usa a chave \"$\" (G17). Mensagens em pt-BR, sem ecoar o valor recebido.",
             "additionalProperties": { "type": "array", "items": { "type": "string" } }
           }
         }

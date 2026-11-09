@@ -147,7 +147,7 @@ de requisições com corpo/cookie e não salvar o corpo de login em arquivo:
 
 ```powershell
 $cabecalhosA = @{ 'X-Tenant-Id' = $tenantA }
-$csrf = Invoke-RestMethod "$origemA/api/v1/auth/antiforgery" -Headers $cabecalhosA -SessionVariable sessaoA
+$csrf = Invoke-RestMethod "$origemA/api/v1/antiforgery-token" -Headers $cabecalhosA -SessionVariable sessaoA
 $credencial = Get-Credential -UserName 'acesso@example.invalid' -Message 'Senha sintetica da conta A'
 $corpo = @{
     email = $credencial.UserName
@@ -155,18 +155,18 @@ $corpo = @{
 } | ConvertTo-Json -Compress
 $cabecalhosA['X-CSRF-TOKEN'] = $csrf.requestToken
 try {
-    $login = Invoke-RestMethod "$origemA/api/v1/auth/login" -Method Post -Headers $cabecalhosA -WebSession $sessaoA -ContentType 'application/json' -Body $corpo
+    $login = Invoke-RestMethod "$origemA/api/v1/sessions" -Method Post -Headers $cabecalhosA -WebSession $sessaoA -ContentType 'application/json' -Body $corpo
 } finally {
     Remove-Variable corpo, credencial
 }
-$csrf = Invoke-RestMethod "$origemA/api/v1/auth/antiforgery" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA
+$csrf = Invoke-RestMethod "$origemA/api/v1/antiforgery-token" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA
 $cabecalhosA['X-CSRF-TOKEN'] = $csrf.requestToken
 Invoke-RestMethod "$origemA/api/v1/me" -Headers $cabecalhosA -WebSession $sessaoA
 Invoke-RestMethod "$origemA/api/v1/context" -Headers $cabecalhosA -WebSession $sessaoA
-Invoke-WebRequest "$origemA/api/v1/auth/logout" -Method Post -Headers $cabecalhosA -WebSession $sessaoA -UseBasicParsing
+Invoke-WebRequest "$origemA/api/v1/sessions/current" -Method Delete -Headers $cabecalhosA -WebSession $sessaoA -UseBasicParsing
 ```
 
-Não prosseguir se uma chamada falhar. Esperado: token CSRF, login 200 com
+Não prosseguir se uma chamada falhar. Esperado: token CSRF, login 201 com
 `tenantId/expiresAt`, identidade/contexto somente A e logout 204.
 O replay do cookie capturado **somente na fixture de teste** antes do logout
 retorna 401 depois do commit. Não copiar cookies reais para arquivos de evidência.

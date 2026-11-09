@@ -2,6 +2,7 @@
 
 **Date**: 2026-11-06
 **Sources**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md).
+**Revisão**: 2026-11-08 — decisões G6/G7/G13 de [tasks.md](tasks.md).
 **Status**: design L2, em **construção do zero**: nada foi publicado e não há
 dados. Todo o modelo abaixo é novo e o esquema é criado por uma migration inicial
 única (ver §8). Nomes seguem a Constituição 2.2.0.
@@ -33,6 +34,13 @@ Cada campo persistido recebe XML summary e `HasComment`, inclusive auditoria.
 | Referência sem constraint | Mantém `Id*` (não é FK). | `IdUsuarioAlvo`, `IdOperacaoCriacao` |
 | Código/número de negócio | `Codigo*`/`Numero*`, nunca PK/FK (exceção em §3). | `CodigoPermissao` |
 | Constraints e índices | minúsculas, prefixo do tipo, coluna em snake_case: `pk_<tabela>`, `fk_<tabela>_<tabela_ref>[_<papel>]`, `ix_<tabela>_<colunas>`, `uq_<tabela>_<colunas>`, `ck_<tabela>_<regra>`. Máximo 63 caracteres (limite do PostgreSQL, que trunca sem erro). | `pk_permissoes_usuario`, `fk_permissoes_usuario_usuarios`, `ix_sessoes_autenticacao_fk_id_usuario`, `ck_sessoes_autenticacao_prazo` |
+
+**Roles do banco (G6)**: `<banco>_owner`, `<banco>_runtime` e `<banco>_operador` (grupo
+NOLOGIN, com logins individuais de operador como membros), derivados do nome do banco.
+Os GRANTs por tabela são emitidos pela migration inicial (§8).
+
+**Enums persistidos (G7)**: como texto (nome do membro) com CHECK `ck_<tabela>_<coluna>`
+listando os valores válidos.
 
 O prefixo `Fk` existe só na persistência (entidades EF em Infrastructure e colunas).
 Domain, portas/modelos de Application e DTOs usam o nome de domínio (`IdUsuario`;
@@ -189,7 +197,8 @@ fuso: não é controlável em teste, e conversão de exibição não é papel do
 | `Migracoes:PermitirInicializarBancoVazio` | Tooling somente; ausente/false nega inicialização, valor inválido falha. |
 | `ProtecaoDados:DiretorioChaves` | Volume privado persistente por instalação, gravável pela API. |
 | `ProtecaoDados:ArquivoCertificado` / `ArquivoSenhaCertificado` | Arquivos privados externos; produção exige certificado e acesso à chave privada. Não argv/build/Git. |
-| `OperacaoAcesso:PapelAutorizado` | Role de login PostgreSQL individual exata do operador autorizado; configuração protegida do host pontual e segredo não compartilhado. |
+| `OperacaoAcesso:LoginAutorizado` | Login PostgreSQL individual exato do operador autorizado (membro de `<banco>_operador`, não o grupo); configuração protegida do host pontual e segredo não compartilhado. |
+| `CabecalhosEncaminhados:ProxiesConfiaveis` | API; lista de proxies confiáveis. Vazio/ausente (padrão L2) = não processar `X-Forwarded-*` (G7). |
 | `Sessao:PrazoAbsolutoMinutos` | API somente; inteiro decimal 5–480 inclusive, ausente = 30. Fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro ([D21](research.md#d21--prazo-de-sessão-configurável-e-limpeza-auditada-de-sessões-2026-11-08)). Aplicado só na emissão. |
 | `OperacaoAcesso:RetencaoSessoesDias` | `Platform.Operations` somente; inteiro decimal 1–365 inclusive, ausente = 30. Fora da faixa ou não inteiro impede `sessao limpar` antes de qualquer acesso ao banco. |
 
@@ -249,14 +258,17 @@ INSERT/UPDATE/DELETE nelas; teste prova que continuam vazias após a suíte. Nã
 recebem base auditável. Sua existência não habilita cadastro público, OIDC,
 recuperação por email ou contas globais; usá-las exige novo plano.
 L2 define explicitamente as opções Identity, inclusive lockout; não presumir que o
-default do framework prova a política.
+default do framework prova a política. Como o `UserManager` do Identity 10.0.12 lê
+`DateTimeOffset.UtcNow` no lockout, `GerenciadorUsuariosAplicacao : UserManager<UsuarioAplicacao>`
+(Infrastructure) sobrescreve `AccessFailedAsync` e `IsLockedOutAsync` usando `TimeProvider`
+e `InstanteUtc` (G13); nenhum caminho de produção grava `LockoutEnd` pelo relógio do sistema.
 
 ### PermissaoUsuario — `access.permissoes_usuario`
 
 | Campo | Tipo / regra |
 |---|---|
 | `FkIdUsuario` | UUID, FK local (`fk_permissoes_usuario_usuarios`), parte da PK. |
-| `CodigoPermissao` | string de 1 a 128 do catálogo `CodigosPermissao`, parte da PK (exceção da §3); L2 admite `foundation.context.read`. |
+| `CodigoPermissao` | string de 1 a 128 do catálogo `CodigosPermissao`, parte da PK (exceção da §3); formato `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$` (G7) validado por CHECK; L2 admite `foundation.context.read`. |
 | Base auditável | Campos da §4; `CriadoEm` é o instante da concessão. Concessão é imutável: sem `Versao`, metadados de alteração sempre nulos. |
 
 Ausência significa negar. `/context` lê a concessão atual, não confia em claims
@@ -337,7 +349,7 @@ mutável `EntidadeAuditavel`. Metadados das entidades não substituem esse hist�
 | `IdTenant` / `IdAmbiente` | UUIDs do alvo validado, nunca identidade de outro banco. Referências sem constraint. |
 | `IdUsuarioAlvo` | UUID opcional; referência **sem** FK, para preservar a auditoria após evolução da conta; por isso não usa prefixo `Fk`. |
 | `LoginOperador` | string de 1 a 128; login PostgreSQL individual autenticado (`session_user=current_user`), atribuído a um único operador, não argumento livre ou credencial compartilhada. Referência textual, não chave, por isso sem prefixo `Id`. |
-| `TipoOperacao` | enum fechado das operações em [operations.md](contracts/operations.md). |
+| `TipoOperacao` | enum fechado (G7), persistido como texto: `CriarConta`, `DesativarConta`, `ReativarConta`, `RedefinirSenha`, `RevogarSessoes`, `ConcederPermissao`, `RevogarPermissao`, `LimparSessoes`. |
 | `CodigoPermissao` | string opcional até 128, somente quando relevante. |
 | `RegistradaEm` | UTC `timestamptz`, o mesmo `InstanteOperacao` das alterações do comando. |
 | `Resultado` | enum `Sucesso`/`Negado`/`Falha`; jamais incluir senha/token/ticket. |

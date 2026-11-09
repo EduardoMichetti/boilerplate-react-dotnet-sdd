@@ -1,5 +1,7 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
+using Platform.Domain.Tempo;
+
 /// <summary>
 /// Entidade de registro único (singleton) gravada na base para comprovar e proteger a identidade da instalação e do tenant.
 /// </summary>
@@ -60,9 +62,6 @@ public sealed class IdentidadeBancoTenant
             throw new ArgumentException("EpocaAcesso deve ser um UUID não vazio.", nameof(EpocaAcesso));
         }
 
-        if (InicializadoEm == default)
-        {
-            throw new ArgumentException("InicializadoEm deve ser definido como um instante UTC válido.", nameof(InicializadoEm));
-        }
+        InstanteUtc.Validar(InicializadoEm, nameof(InicializadoEm));
     }
 }

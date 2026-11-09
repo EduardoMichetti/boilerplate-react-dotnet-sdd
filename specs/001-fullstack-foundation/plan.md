@@ -1,6 +1,6 @@
 # Implementation Plan: L2 — autenticação e acesso local ao tenant
 
-**Branch Git**: `main` | **Date**: 2026-11-05 | **Revisão**: 2026-11-08 (clarificações de prazo de sessão e limpeza) | **Spec**: [spec.md](spec.md)
+**Branch Git**: `main` | **Date**: 2026-11-05 | **Revisão**: 2026-11-08 (clarificações de prazo de sessão e limpeza; decisões G1–G15 de [tasks.md](tasks.md)) | **Spec**: [spec.md](spec.md)
 **Feature Context**: `001-fullstack-foundation`, resolvido por `.specify/feature.json`.
 O campo `BRANCH` retornado pelo setup é esse contexto, não uma troca de branch Git.
 **Input**: “em specs\001-fullstack-foundation planejar l2 com a l1 entregue”.
@@ -45,6 +45,9 @@ diretas; sem RoleManager, Redis, JWT, mediator, biblioteca de CLI ou provedor ex
 `12.2.0` (Apache-2.0, `net8.0`+), para validação de entrada HTTP conforme
 [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md); aprovação na
 revisão exigida pela Constituição X. Não há atualização das versões existentes.
+`Microsoft.Extensions.Hosting` `10.0.12` somente em `Platform.Operations` (G20, aprovada
+2026-11-08; builder sem repassar argumentos de linha de comando) e referência direta a
+`Microsoft.Extensions.Options` em Application (G19, já transitiva no grafo).
 
 **Storage**: PostgreSQL `18.6`, banco exclusivo da instalação.
 `AcessoTenantDbContext` tem **uma** migration inicial com marcador, contas,
@@ -143,11 +146,16 @@ Antes de habilitar login, as tarefas L2 devem:
    o listener dentro do container pode aceitar sua interface de rede. Não exigir
    `RemoteIpAddress` loopback dentro do container (o gateway Docker não é loopback)
    nem confiar só em Host/X-Forwarded-For para provar acesso local.
-4. Validar os scripts de inicialização/grants sempre em banco local criado do zero:
-   o `init-db.sql` só roda na primeira criação do volume, então o ambiente local de
-   desenvolvimento é montado com volumes novos (`down --volumes` faz parte do setup).
-5. Não considerar `.env.example` uma configuração pronta. Fornecer secrets privados
-   válidos por serviço, sem fabricar valores ausentes.
+4. Validar os scripts de inicialização sempre em banco local criado do zero:
+   o `infra/docker/init-db.sh` (substitui o antigo `init-db.sql`; lê variáveis e cria
+   `<banco>_owner`, `<banco>_runtime`, `<banco>_operador` e o login individual do
+   operador, com CONNECT/USAGE apenas — GRANTs por tabela vêm da migration, G6) só roda
+   na primeira criação do volume, então o ambiente local de desenvolvimento é montado
+   com volumes novos (`down --volumes` faz parte do setup).
+5. Não considerar `.env.example` uma configuração pronta. Secrets locais ficam no
+   `infra/.env.local` privado (mesmo modelo de variáveis do Dokploy, G4); cada serviço
+   recebe somente a própria credencial, o exemplo versionado não tem senha utilizável e
+   `${VAR:?}` falha quando falta valor, sem fabricar valores ausentes.
 
 Não há violação aceita no design. Falha de P0 **bloqueia implementação/liberação da
 superfície autenticada**, não autoriza um login “provisório”. O comando atual é documental.
@@ -302,13 +310,21 @@ aplicam-se às rotas L2 e a todo módulo futuro.
 4. FluentValidation para DTOs `Requisicao*` em `Platform.Application`, aplicado por
    filtro no grupo `/api/v1`; sem banco, relógio ou regras assíncronas.
    Chaves de `errors` em camelCase sem `$.` (ex.: `tarefas[0].emailResponsavel`).
-5. `ConfiguracaoProblemDetails` ganha fábricas para 400 (validação/desserialização),
-   403, 404, 409 e 422. As rotas L2 continuam emitindo apenas os códigos de
+5. `ConfiguracaoProblemDetails` ganha fábricas para 400 (validação/desserialização,
+   `TENANT_REQUIRED`, `CSRF_INVALID`), 401 (`TipoErro.NaoAutenticado`, restrito a
+   `ErrosAcesso`, G5), 403, 404, 409, 422 e 429 (`RATE_LIMITED` + `Retry-After`). As rotas L2 continuam emitindo apenas os códigos de
    plataforma de [operations.md](contracts/operations.md); 422 e códigos
    `<MODULO>_<REGRA>` ficam disponíveis para módulos de negócio.
-6. Login/logout validam seus DTOs pela mesma via, sempre antes de qualquer lookup
-   de conta; a posição relativa ao limiter e ao `X-Tenant-Id` segue a ordem de
-   validação de [operations.md §4](contracts/operations.md#ordem-de-validação).
+6. O login valida seu DTO pela mesma via, sempre antes de qualquer lookup de conta
+   (o logout é `DELETE` sem corpo, G15). Ordem nas cinco rotas (G2 revisada, G9): rate
+   limiter (só login) → `X-Tenant-Id` (400) → tenant coincide (401 login / 403 demais) →
+   marcador/versão (503) → autenticação do cookie (logout sem sessão → 401) → corpo +
+   FluentValidation (login) → CSRF → estado da instalação → credenciais/autorização.
+   Detalhe em [operations.md §4](contracts/operations.md#ordem-de-validação).
+
+**Rotas REST (G15)**: `GET /api/v1/antiforgery-token`, `POST /api/v1/sessions` (login,
+201 Created), `DELETE /api/v1/sessions/current` (logout, 204), `GET /api/v1/me` e
+`GET /api/v1/context`.
 
 ### Sessão e proteção
 
@@ -347,7 +363,9 @@ A API não remove sessões nem executa job em background; a remoção de registr
 encerrados é o comando restrito `sessao limpar` (abaixo).
 
 Identity valida senha/hash e lockout: cinco falhas por conta, 15 minutos de bloqueio,
-com atualização concorrente segura. Ao confirmar o bloqueio, revogar todas as
+com atualização concorrente segura. `GerenciadorUsuariosAplicacao : UserManager<UsuarioAplicacao>`
+em Infrastructure sobrescreve `AccessFailedAsync`/`IsLockedOutAsync` com `TimeProvider` +
+`InstanteUtc`, porque o `UserManager` 10.0.12 lê `DateTimeOffset.UtcNow` no lockout (G13). Ao confirmar o bloqueio, revogar todas as
 sessões da conta e atualizar stamp na mesma transação; fim do bloqueio só permite
 novo login, nunca retomada de sessão antiga. Limiter nativo por IP efetivo (uma instalação por deploy): cinco pedidos
 de login/minuto, janela fixa, fila zero, 429/Retry-After. Login inválido não enumera
@@ -389,6 +407,11 @@ habilitado em toda conta desde a criação. Bancos locais A/B são criados do ze
 Validar banco novo, reaplicação, rejeição de histórico desconhecido, alvo errado e
 runtime sem DDL.
 Executar com owner via factory/preflight existentes; sem seed de usuários.
+GRANTs por tabela para `<banco>_runtime` e `<banco>_operador` são emitidos pela própria
+migration inicial, com nomes derivados de `current_database()` (G6).
+Registro de preparação/migration na L2 (FR-014, G14): exit code e diagnóstico seguro do
+preflight mais `foundation.__EFMigrationsHistory` do próprio banco; auditoria persistente
+de preparação/migration fica para a L4, com backup/restauração.
 Downgrade de imagem não reverte automaticamente os dados.
 
 ### Aceite e ordem de execução para a próxima etapa
@@ -412,9 +435,9 @@ esses critérios futuros concluídos.
 | P0 — configuração/segredos/privilégios | L1 | Runtime/operador/owner distintos, bancos isolados e modo local/HTTPS explícito. |
 | P1a — fundações de modelo | P0 | `InstanteUtc`, `IdentificadorV7`, `TimeProvider` registrado, `IContextoOperacao`, `EntidadeAuditavel`/`IEntidadeAuditavel`/`IEntidadeVersionada`, `InterceptadorAuditoria` com token por entidade; código existente alinhado ao modelo (sem `DateTimeOffset.UtcNow` em `PermissaoUsuario`/preflight, validação de offset, sem `ConcedidaEm`, concessão sem `Versao`, FKs `FkIdUsuario`/`FkIdTenant`, colunas Identity e auxiliares mapeadas, PKs `Guid` com `ValueGeneratedNever`, `CodigoAplicacao` em código/env/Compose/testes); convenção central de nomes de constraints; testes de arquitetura (relógio, `Guid.NewGuid`/`CreateVersion7()` sem argumento, `ExecuteUpdate`) e de modelo (PK `Id*`, FK `FkId*`, UUID v7 com timestamp do relógio de teste, exceções em lista fechada, nomes de constraints ≤63, catálogo `CodigosPermissao`). |
 | P1b — migration | P1a | Migration de rascunho descartada; migration inicial única gerada do modelo completo; bancos A/B criados do zero; SC-009 e rejeição de histórico desconhecido. |
-| P1c — erros e validação (ADR 0003) | P0 | `Resultado`/`Resultado<T>`/`Erro` no Domain; `ConfiguracaoProblemDetails` com 400/403/404/409/422; JSON estrito com `ThrowOnBadRequest`; FluentValidation com filtro no grupo `/api/v1`; testes de contrato (formato, chaves camelCase, nenhum valor ecoado) e de arquitetura (validador por `Requisicao*`, validador sem I/O, padrão/unicidade de códigos, `Skip` só em `*.Integracoes.*`). Pode evoluir em paralelo com P1a/P1b. |
+| P1c — erros e validação (ADR 0003) | P1b (execução sequencial) | `Resultado`/`Resultado<T>`/`Erro` no Domain; `ConfiguracaoProblemDetails` com 400/401/403/404/409/422/429 e ordem de validação G2; JSON estrito com `ThrowOnBadRequest`; FluentValidation com filtro no grupo `/api/v1`; testes de contrato (formato, chaves camelCase, nenhum valor ecoado) e de arquitetura (validador por `Requisicao*`, validador sem I/O, padrão/unicidade de códigos, `Skip` só em `*.Integracoes.*`). Executado após P1b (decisão de execução sequencial, 2026-11-08). |
 | P2 — sessão e controles HTTP | P1, P1c | Cookies/store, CSRF, limiter, autorização e saúde isolada. Opção `Sessao:PrazoAbsolutoMinutos` validada na inicialização (5/480 aceitos, 4/481/não inteiro rejeitados, ausente = 30), `ExpiraEm` fixado na emissão e CHECK de prazo; runtime sem DELETE em sessões e sem job de limpeza. |
-| P3 — operação restrita | P1 | Casos de uso autorizados/auditáveis sem endpoint administrativo, incluindo `sessao limpar`: retenção 1–365 (padrão 30), critério de corte com fronteira exata, delete rastreado atômico e um registro imutável por execução (sucesso, zero removidas e falha) com campos de limpeza e CHECK. Pode evoluir em paralelo com P2. |
+| P3 — operação restrita | P2 (execução sequencial; reutiliza adaptadores de sessão/DI) | Casos de uso autorizados/auditáveis sem endpoint administrativo, incluindo `sessao limpar`: retenção 1–365 (padrão 30), critério de corte com fronteira exata, delete rastreado atômico e um registro imutável por execução (sucesso, zero removidas e falha) com campos de limpeza e CHECK. Executado após P2. |
 | P4 — contratos e aceite | P2 e P3 | SC-002/003/005, regressões da base (SC-009), CI/documentação e consumidor independente. |
 
 SC-003 usa operações sintéticas exclusivamente no host de testes, passando pelos
