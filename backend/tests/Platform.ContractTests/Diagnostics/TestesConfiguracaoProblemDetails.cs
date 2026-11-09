@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Platform.Application.Access;
 using Platform.Application.Configuration;
+using Platform.ContractTests.Suporte;
 using Platform.Domain.Resultados;
 using Platform.Domain.Tenancy;
 using Xunit;
@@ -35,10 +36,11 @@ public sealed class TestesConfiguracaoProblemDetails
     [Fact]
     public async Task EndpointsDeFasesPosterioresPermanecemAusentesRetornando404ProblemDetails()
     {
-        await using WebApplicationFactory<Program> aplicacao = new();
-        using HttpClient cliente = aplicacao.CreateClient();
+        // Host Production da fábrica compartilhada (T119): rotas fora do contrato L2 seguem 404.
+        await using FabricaApiContrato aplicacao = new();
+        using HttpClient cliente = aplicacao.CriarCliente();
 
-        foreach (string caminho in new[] { "/api/v1/auth/login", "/api/v1/me", "/api/v1/context", "/api/v1/users" })
+        foreach (string caminho in new[] { "/api/v1/auth/login", "/api/v1/me/tenants", "/api/v1/users" })
         {
             using HttpResponseMessage resposta = await cliente.GetAsync(caminho, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.NotFound, resposta.StatusCode);

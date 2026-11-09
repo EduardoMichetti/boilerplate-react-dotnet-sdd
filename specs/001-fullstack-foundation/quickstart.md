@@ -2,8 +2,7 @@
 
 **Date**: 2026-11-05
 **References**: [plano](plan.md), [modelo](data-model.md),
-[operações](contracts/operations.md), [API L1](contracts/openapi.json),
-[API alvo L2](contracts/future-openapi.json).
+[operações](contracts/operations.md), [API L2](contracts/openapi.json).
 
 **Estado atual**: L1 entregue. Login, sessões, host `Platform.Operations` e perfil
 `operations` abaixo são **planejados**. Não executar a seção L2 como se já existisse.

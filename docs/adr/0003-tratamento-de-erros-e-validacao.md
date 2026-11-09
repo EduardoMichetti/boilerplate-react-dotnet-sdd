@@ -8,7 +8,7 @@ e emenda 2.3.0 da Constituição, princípio V (Governance; G8).
 **Contexto**: [Constituição V e X](../../.specify/memory/constitution.md),
 [research D08](../../specs/001-fullstack-foundation/research.md),
 [operations.md §4](../../specs/001-fullstack-foundation/contracts/operations.md),
-[future-openapi.json](../../specs/001-fullstack-foundation/contracts/future-openapi.json),
+[openapi.json](../../specs/001-fullstack-foundation/contracts/openapi.json),
 [ConfiguracaoProblemDetails.cs](../../backend/src/App.Api/Diagnostics/ConfiguracaoProblemDetails.cs).
 
 ## Contexto
@@ -114,7 +114,7 @@ indício de defeito no cliente.
 
 - O backend é dono do texto padrão em pt-BR (`title` e `errors`). O frontend pode
   sobrescrever por `code` num mapa opcional, com fallback para o `title` recebido.
-- `errors` permanece `campo → string[]`, como em `future-openapi.json`. A chave é o
+- `errors` permanece `campo → string[]`, como em `openapi.json`. A chave é o
   caminho do campo com os nomes JSON em camelCase, sem prefixo `$.`
   (ex.: `tarefas[0].emailResponsavel`), tanto para erros de desserialização quanto do
   FluentValidation (configurado com resolvedor de nomes camelCase). Assim o frontend
@@ -150,7 +150,7 @@ indício de defeito no cliente.
 
 - `ConfiguracaoProblemDetails` ganha fábricas para 400 (validação e desserialização),
   403, 404, 409 e 422; hoje `Criar` aceita apenas 404, 500 e 503.
-- `future-openapi.json` passa a tratar o enum de `code` como catálogo da plataforma,
+- `openapi.json` (contrato L2, antes `future-openapi.json`) passa a tratar o enum de `code` como catálogo da plataforma,
   estendido por módulo, e a documentar 422 onde aplicável.
 - Nova dependência `FluentValidation` (e `FluentValidation.DependencyInjectionExtensions`)
   `12.2.0` em `Platform.Application`/`App.Api`, sujeita à aprovação prevista na

@@ -1,13 +1,14 @@
+using System.Net;
+using App.Api.Access;
 using App.Api.Diagnostics;
 using App.Api.Health;
+using App.Api.OpenApi;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
+using Platform.Application.Auditoria;
 using Platform.Application.Configuration;
-using Platform.Application.Tenancy;
 using Platform.Domain.Tenancy;
-using Platform.Infrastructure.Persistence.TenantAccess;
+using Platform.Infrastructure;
 
 WebApplicationBuilder construtor = WebApplication.CreateBuilder(args);
 
@@ -34,56 +35,68 @@ construtor.Services.AddOptions<OpcoesInstalacaoTenant>()
         };
     });
 
-construtor.Services.AddDbContext<AcessoTenantDbContext>((provedor, opcoes) =>
-{
-    OpcoesInstalacaoTenant config = provedor.GetRequiredService<IOptions<OpcoesInstalacaoTenant>>().Value;
-    if (!string.IsNullOrWhiteSpace(config.StringsConexao?.BancoApp))
-    {
-        opcoes.UseNpgsql(config.StringsConexao.BancoApp, npgsql =>
-        {
-            npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "foundation");
-        });
-    }
-});
+// Contexto confiável por requisição: instante único, IdOperacao v7 e autoria anônima até a verificação.
+construtor.Services.AddScoped<ContextoOperacaoHttp>();
+construtor.Services.AddScoped<IContextoOperacao>(p => p.GetRequiredService<ContextoOperacaoHttp>());
+construtor.Services.AddScoped<IRegistroUsuarioVerificado>(p => p.GetRequiredService<ContextoOperacaoHttp>());
 
-construtor.Services.AddScoped<IVerificadorIdentidadeBancoTenant, VerificadorIdentidadeBancoTenant>();
+construtor.Services.AdicionarInfraestruturaAcesso();
+construtor.Services.AdicionarAutenticacaoSessao(construtor.Configuration);
+construtor.Services.AdicionarCasosUsoAcesso();
+construtor.Services.AdicionarLimiteLogin();
+
+IReadOnlyList<IPAddress> proxiesConfiaveis = ConfiguracaoLimiteLogin.LerProxiesConfiaveis(construtor.Configuration);
+construtor.Services.AdicionarCabecalhosEncaminhados(proxiesConfiaveis);
+
 construtor.Services.AddScoped<VerificacaoSaudeProntidaoInstalacao>();
+construtor.Services.AddScoped<VerificacaoProtecaoChaves>();
 
-construtor.Services.AddOpenApi("v1", opcoes =>
-{
-    opcoes.OpenApiVersion = Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0;
-    opcoes.AddDocumentTransformer((documento, _, _) =>
-    {
-        documento.Info.Title = "boilerplate-react-dotnet-sdd - Backend I1";
-        documento.Info.Version = "1.0.0";
-        documento.Info.Description = "Contrato de design do primeiro incremento: backend executável e migration de usuários/acesso. Somente saúde é exposta. Sem endpoint de usuário, login, concessão ou painel; contratos de acesso HTTP pertencem a future-openapi.json. Não afirma implementação concluída.";
-        return Task.CompletedTask;
-    });
-});
+construtor.Services.AdicionarOpenApiAcesso();
 
 WebApplication aplicacao = construtor.Build();
 
 aplicacao.UsarProblemDetailsSeguro();
 
+// Forwarded headers somente com proxies explicitamente confiáveis (G7); padrão L2: desligado.
+if (proxiesConfiaveis.Count > 0)
+{
+    aplicacao.UseForwardedHeaders();
+}
+
+aplicacao.UseRouting();
+
+// Ordem G2: limiter (só login) → X-Tenant-Id → marcador/versão → sessão → autorização → corpo → CSRF.
+aplicacao.UseRateLimiter();
+aplicacao.UseMiddleware<MiddlewareCabecalhoTenant>();
+aplicacao.UseMiddleware<MiddlewareVerificacaoInstalacao>();
+aplicacao.UseMiddleware<MiddlewareAutenticacaoSessao>();
+aplicacao.UseAuthorization();
+
 aplicacao.MapOpenApi("/openapi/v1.json");
 
 // Grupo das rotas de acesso L2: valida todo argumento Requisicao* antes do handler (ADR 0003 D2).
-RouteGroupBuilder grupoApiV1 = aplicacao.MapGroup("/api/v1")
-    .AddEndpointFilter<FiltroValidacaoRequisicao>();
+aplicacao.MapGroup("/api/v1")
+    .AddEndpointFilter<FiltroValidacaoRequisicao>()
+    .MapearEndpointsAcesso();
 
 aplicacao.MapGet("/health/live", () => Results.Ok(new RespostaLiveness()))
     .WithName("getLiveness")
-    .WithSummary("Verificar processo vivo")
-    .WithDescription("Não acessa catálogo, banco de tenant ou sessão, mesmo com cookie enviado. Não retorna conexão, secret ou detalhes internos.")
+    .WithTags("Health")
+    .WithSummary("Verificar que o processo está vivo")
+    .WithDescription("Fora do pipeline de autenticação, ignora cookies e header tenant. Não consulta banco, sessão ou key ring.")
     .Produces<RespostaLiveness>(StatusCodes.Status200OK, "application/json");
 
 aplicacao.MapGet("/health/ready", async (
-    [FromServices] VerificacaoSaudeProntidaoInstalacao verificacao,
+    [FromServices] VerificacaoSaudeProntidaoInstalacao verificacaoInstalacao,
+    [FromServices] VerificacaoProtecaoChaves verificacaoChaves,
     HttpContext contexto,
     CancellationToken ct) =>
 {
-    HealthCheckResult resultado = await verificacao.CheckHealthAsync(new HealthCheckContext(), ct);
-    if (resultado.Status == HealthStatus.Healthy)
+    HealthCheckResult instalacao = await verificacaoInstalacao.CheckHealthAsync(new HealthCheckContext(), ct);
+    HealthCheckResult chaves = instalacao.Status == HealthStatus.Healthy
+        ? await verificacaoChaves.CheckHealthAsync(new HealthCheckContext(), ct)
+        : instalacao;
+    if (chaves.Status == HealthStatus.Healthy)
     {
         contexto.Response.StatusCode = StatusCodes.Status200OK;
         await contexto.Response.WriteAsJsonAsync(new RespostaReadiness(), cancellationToken: ct);
@@ -93,13 +106,12 @@ aplicacao.MapGet("/health/ready", async (
     await ConfiguracaoProblemDetails.EscreverAsync(contexto, StatusCodes.Status503ServiceUnavailable);
 })
 .WithName("getReadiness")
-.WithSummary("Verificar backend pronto no escopo I1")
-.WithDescription("Confere configuração runtime da instalação e identidade/versão do banco configurado (IdentidadeBancoTenant e histórico de migrations). Não executa migrations, autentica cookies ou consulta contas. Sem exigência de key ring enquanto não existe autenticação HTTP.")
+.WithTags("Health")
+.WithSummary("Verificar disponibilidade da fundação")
+.WithDescription("Confere configuração, marcador, cadeia de migrations completa e round-trip do key ring. Não executa migrations, não autentica cookies nem consulta contas.")
 .Produces<RespostaReadiness>(StatusCodes.Status200OK, "application/json")
 .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
 aplicacao.Run();
 
 public partial class Program;
-
-

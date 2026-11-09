@@ -6,12 +6,15 @@
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\App.Api\App.Api.csproj" />
     <ProjectReference Include="..\..\src\Platform.Infrastructure\Platform.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Comum\RelogioControlavel.cs" Link="Comum\RelogioControlavel.cs" />
+    <Compile Include="..\Comum\CertificadoTeste.cs" Link="Comum\CertificadoTeste.cs" />
   </ItemGroup>
 </Project>

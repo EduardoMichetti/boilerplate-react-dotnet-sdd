@@ -173,8 +173,7 @@ specs/001-fullstack-foundation/
 ├── quickstart.md                 # validação L1 e roteiro futuro L2
 ├── tasks.md                      # histórico L1 preservado
 └── contracts/
-    ├── openapi.json              # superfície entregue L1, inalterada neste plano
-    ├── future-openapi.json       # alvo L2; x-planned-only=true
+    ├── openapi.json              # contrato L2 entregue (promovido na Parada L2-2)
     └── operations.md             # contratos EF e procedimento restrito L2
 ```
 

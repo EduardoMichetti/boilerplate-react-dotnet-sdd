@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Application;
+using Platform.Application.Auditoria;
 using Platform.Application.Configuration;
 using Platform.Domain.Resultados;
 using Platform.Domain.Tenancy;
@@ -255,10 +256,11 @@ public static class ConfiguracaoProblemDetails
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status500InternalServerError;
             ProblemDetails problema = Criar(contextoHttp, codigoStatus);
+            Guid? idOperacao = contextoHttp.RequestServices.GetService<IContextoOperacao>()?.IdOperacao;
             registrador.LogError(
                 new EventId(1000, "RequisicaoFalhou"),
-                "Falha na requisição. Código: {Codigo}; TraceId: {TraceId}; TipoExcecao: {TipoExcecao}",
-                problema.Extensions["code"], problema.Extensions["traceId"], excecao.GetType().FullName);
+                "Falha na requisição. Código: {Codigo}; TraceId: {TraceId}; IdOperacao: {IdOperacao}; TipoExcecao: {TipoExcecao}",
+                problema.Extensions["code"], problema.Extensions["traceId"], idOperacao, excecao.GetType().FullName);
             await EscreverAsync(contextoHttp, problema);
             return true;
         }

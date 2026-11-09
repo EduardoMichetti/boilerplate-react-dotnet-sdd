@@ -1,90 +1,800 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "boilerplate-react-dotnet-sdd - Backend I1",
-    "version": "1.0.0",
-    "description": "Contrato de design do primeiro incremento: backend executável e migration de usuários/acesso. Somente saúde é exposta. Sem endpoint de usuário, login, concessão ou painel; contratos de acesso HTTP pertencem a future-openapi.json. Não afirma implementação concluída."
+    "title": "boilerplate-react-dotnet-sdd - L2 Tenant Access API",
+    "version": "2.0.0",
+    "description": "Contrato L2/I2 implementado (Parada L2-2, 2026-11-08) e servido em /openapi/v1.json. Rotas REST de recurso (G15, 2026-11-08): POST /api/v1/sessions (login, 201), DELETE /api/v1/sessions/current (logout, 204), GET /api/v1/antiforgery-token. Contas, permissões, sessões revogáveis e auditoria operacional ficam no banco da própria instalação. As cinco operações de acesso exigem X-Tenant-Id; header nunca seleciona conexão. Cookie de produção __Host-bps-session; somente Development HTTP localhost usa bps-session. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), CSRF explícito e concessões atuais. P0 do plano exige credenciais runtime/operador/owner distintas, key ring privado persistente e transporte apropriado antes de habilitar login. Sem cadastro público, painel, frontend ou listagem global de tenants."
   },
-  "x-increment": "I1",
+  "x-increment": "I2",
   "servers": [
-    { "url": "/", "description": "Origem do backend." }
+    {
+      "url": "/",
+      "description": "Mesma origem do frontend; consumidores independentes configuram a origem publicada."
+    }
   ],
-  "security": [],
+  "security": [
+    {
+      "SessionCookie": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Identity"
+    },
+    {
+      "name": "TenantContext"
+    },
+    {
+      "name": "Health"
+    }
+  ],
   "paths": {
+    "/api/v1/antiforgery-token": {
+      "get": {
+        "operationId": "getAntiforgeryToken",
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Obter token de requisição antiforgery",
+        "description": "Emite cookie antiforgery HttpOnly e retorna o token para X-CSRF-TOKEN. Exige um header válido coincidente com a instalação antes de lookup; divergência retorna 403. Não exige instalação ativa, para permitir encerrar a própria sessão sem liberar consultas. Não autentica nem enumera tenants. Com sessão válida emite token da identidade corrente; cookie inválido/expirado é anônimo, sem mascarar falha de dependência. Obter novo token em outro GET após login/logout. Resposta não cacheável.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token emitido para o contexto atual.",
+            "headers": {
+              "Set-Cookie": {
+                "$ref": "#/components/headers/AntiforgeryCookie"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiforgeryToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Criar sessão (login) para identidade previamente preparada pelo operador",
+        "description": "Exige X-Tenant-Id coincidente com IdTenant da instalação. Valida instalação ativa e marcador IdentidadeBancoTenant antes das credenciais locais; não existe catálogo nem busca em outros bancos. Tenant divergente/inativo, usuário desconhecido/bloqueado/desativado e senha incorreta têm AUTH_INVALID genérico. Valida explicitamente CSRF JSON da identidade corrente. Com sessão anterior válida, a troca é atômica: revogação da anterior (versão esperada) e criação da nova referência são confirmadas na mesma transação antes do sucesso. Se outro login, logout ou revogação concorrente alterar a sessão anterior, responde 409 SESSION_CONFLICT; falha de persistência responde 503. Em ambos a sessão anterior mantém estado e prazo, nenhuma sessão é criada e repetir exige novo GET antiforgery. Não retorna token de autenticação ou conexão. Limite: cinco requisições/minuto/IP efetivo/instalação, janela fixa, fila zero; Identity bloqueia conta por 15 minutos após cinco falhas. Confirmar bloqueio revoga todas as sessões e muda stamp atomicamente; após o prazo, exigir novo login, sem restaurar cookies antigos. Login aceita 1–128 caracteres; senha fora da política de criação resulta em AUTH_INVALID, sem revelar a política.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Nova sessão de servidor criada, com expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480). Sessões em outros clientes/dispositivos da mesma conta permanecem válidas; somente a sessão do cookie recebido é substituída.",
+            "headers": {
+              "Set-Cookie": {
+                "$ref": "#/components/headers/SessionCookie"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidCredentials"
+          },
+          "409": {
+            "$ref": "#/components/responses/SessionConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/current": {
+      "delete": {
+        "operationId": "deleteCurrentSession",
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Encerrar a sessão corrente (logout) e eliminar seu cookie",
+        "description": "Exige header coincidente, sessão local válida e CSRF JSON da identidade corrente; não exige foundation.context.read nem instalação ativa. Encerramento da própria sessão permanece permitido com empresa inativa, sem liberar consultas. Confirma commit da revogação antes de remover cookie/responder. Replay falha; Renew concorrente não recria registro/ticket nem estende prazo. Header divergente nunca seleciona banco. Sessão inválida retorna 401; falha de persistência retorna 503, sem confirmar saída ou apagar cookie como sucesso.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Somente a sessão corrente revogada; outras sessões da mesma conta permanecem válidas. Sem corpo.",
+            "headers": {
+              "Set-Cookie": {
+                "$ref": "#/components/headers/SessionCookie"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "tags": [
+          "Identity"
+        ],
+        "summary": "Consultar identidade e validade da própria sessão",
+        "description": "Autoriza somente leitura da própria conta vinculada à sessão local. Exige header coincidente, sessão/epoch/stamp/prazo válidos e conta ativa não bloqueada, conferidos a cada operação. Não exige foundation.context.read, identidade central ou busca da pessoa em outros tenants.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identidade corrente válida.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "409": {
+            "$ref": "#/components/responses/TenantUnavailable"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
+        }
+      }
+    },
+    "/api/v1/context": {
+      "get": {
+        "operationId": "getTenantContext",
+        "tags": [
+          "TenantContext"
+        ],
+        "summary": "Consultar o próprio contexto de acesso no tenant validado",
+        "description": "Exige foundation.context.read vigente no banco, não uma claim permanente do login. Confere header antes de lookup e marcador/versão antes dos dados de acesso; valida cookie protegido, sessão, conta ativa não bloqueada, epoch, stamp e prazo a cada operação. Revogação da concessão vale na próxima operação após commit. Header não escolhe outro banco; não é CRUD de negócio.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contexto validado no banco correto.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "409": {
+            "$ref": "#/components/responses/TenantUnavailable"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "getLiveness",
-        "summary": "Verificar processo vivo",
-        "description": "Não acessa catálogo, banco de tenant ou sessão, mesmo com cookie enviado. Não retorna conexão, secret ou detalhes internos.",
+        "tags": [
+          "Health"
+        ],
+        "summary": "Verificar que o processo está vivo",
+        "description": "Fora do pipeline de autenticação, ignora cookies e header tenant. Não consulta banco, sessão ou key ring. Não expõe versão interna, conexão, stack ou configuração.",
+        "security": [],
         "responses": {
           "200": {
             "description": "Processo vivo.",
             "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/Liveness" } }
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Liveness"
+                }
+              }
             }
           },
-          "default": { "$ref": "#/components/responses/UnexpectedError" }
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
         }
       }
     },
     "/health/ready": {
       "get": {
         "operationId": "getReadiness",
-        "summary": "Verificar backend pronto no escopo I1",
-        "description": "Confere configuração runtime da instalação e identidade/versão do banco configurado (TenantDatabaseIdentity e histórico de migrations). Não executa migrations, autentica cookies ou consulta contas. Sem exigência de key ring enquanto não existe autenticação HTTP.",
+        "tags": [
+          "Health"
+        ],
+        "summary": "Verificar disponibilidade da fundação",
+        "description": "Valida configuração da instalação, IdentidadeBancoTenant e cadeia de migrations conhecida completa do banco local, sem pendentes ou IDs desconhecidos, além de round-trip de proteção do key ring persistente L2 com certificado em produção. Banco de versão futura desconhecida ou key ring indisponível retorna 503. Fora do middleware de sessão; não consulta contas, ignora cookies/header tenant e nunca roda migrations.",
+        "security": [],
         "responses": {
           "200": {
-            "description": "Backend pronto no escopo I1.",
+            "description": "Fundação pronta.",
             "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } }
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
             }
           },
-          "503": { "$ref": "#/components/responses/ServiceUnavailable" },
-          "default": { "$ref": "#/components/responses/UnexpectedError" }
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "default": {
+            "$ref": "#/components/responses/UnexpectedError"
+          }
         }
       }
     }
   },
   "components": {
-    "schemas": {
-      "Liveness": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["status"],
-        "properties": { "status": { "type": "string", "enum": ["alive"] } }
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-bps-session",
+        "description": "Referência tenant/epoch/session protegida pelo handler nativo, HttpOnly, Secure, SameSite=Lax, Path=/ e sem Domain. Store/ticket/key ring tenant-local. Expiração absoluta fixada na emissão (padrão 30 minutos, configurável de 5 a 480), sem sliding/refresh. Somente Development HTTP localhost usa bps-session sem Secure. Portas no mesmo host não isolam cookies; consumidores locais A/B usam jars separados."
+      }
+    },
+    "parameters": {
+      "CsrfToken": {
+        "name": "X-CSRF-TOKEN",
+        "in": "header",
+        "required": true,
+        "description": "Token obtido em GET /api/v1/antiforgery-token para a identidade corrente; não substitui autenticação.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
       },
-      "Readiness": {
+      "TenantId": {
+        "name": "X-Tenant-Id",
+        "in": "header",
+        "required": true,
+        "description": "Um único UUID não vazio. Rejeitar duplicados, listas e formato inválido. Nunca aceitar conexão, secret ou fallback.",
+        "schema": {
+          "$ref": "#/components/schemas/NonEmptyUuid"
+        }
+      }
+    },
+    "headers": {
+      "NoStore": {
+        "description": "Respostas de identidade, tenant e erros não são cacheadas: o valor contém a diretiva no-store. Em erros originados de exceção o framework pode acrescentar diretivas mais restritivas (ex.: no-cache,no-store) (G18).",
+        "schema": {
+          "type": "string",
+          "pattern": "(^|,)\\s*no-store\\s*(,|$)"
+        }
+      },
+      "SessionCookie": {
+        "description": "Cookie de sessão definido ou removido pelo servidor; não incluir conteúdo real em exemplos ou logs.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AntiforgeryCookie": {
+        "description": "Cookie HttpOnly do sistema antiforgery, Secure em produção; não é sessão autenticada.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "NonEmptyUuid": {
+        "type": "string",
+        "format": "uuid",
+        "not": {
+          "enum": [
+            "00000000-0000-0000-0000-000000000000"
+          ]
+        }
+      },
+      "AntiforgeryToken": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["status"],
-        "properties": { "status": { "type": "string", "enum": ["ready"] } }
+        "required": [
+          "requestToken",
+          "headerName"
+        ],
+        "properties": {
+          "requestToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
+          "headerName": {
+            "type": "string",
+            "enum": [
+              "X-CSRF-TOKEN"
+            ]
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expiresAt"
+        ],
+        "properties": {
+          "tenantId": {
+            "$ref": "#/components/schemas/NonEmptyUuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CurrentUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "email",
+          "displayName",
+          "sessionExpiresAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/NonEmptyUuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/NonEmptyUuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "sessionExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TenantSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/NonEmptyUuid"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        }
+      },
+      "TenantContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user",
+          "tenant",
+          "permissions",
+          "applicationVersion"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/CurrentUser"
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/TenantSummary"
+          },
+          "permissions": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Concessões vigentes no tenant; nenhuma concessão de outro tenant ou secret."
+          },
+          "applicationVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
       },
       "ProblemDetails": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "title", "status", "code", "traceId"],
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "traceId"
+        ],
         "properties": {
-          "type": { "type": "string", "format": "uri" },
-          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
-          "code": { "type": "string", "enum": ["DEPENDENCY_UNAVAILABLE", "NOT_FOUND", "INTERNAL_ERROR"] },
-          "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
-          "detail": { "type": "string", "maxLength": 1000 },
-          "instance": { "type": "string", "maxLength": 1000 }
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "description": "URI estável, inclusive URN, do tipo de problema."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "instance": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "code": {
+            "type": "string",
+            "description": "Catálogo de plataforma (ADR 0003): estável, nunca reaproveitado nem com significado alterado. As rotas deste contrato emitem somente estes valores. Módulos de negócio estendem com códigos <MODULO>_<REGRA> em português, padrão ^[A-Z][A-Z0-9_]+$, declarados no próprio contrato com status 403/404/409/422.",
+            "enum": [
+              "INPUT_INVALID",
+              "CSRF_INVALID",
+              "AUTH_INVALID",
+              "AUTH_REQUIRED",
+              "TENANT_REQUIRED",
+              "TENANT_ACCESS_DENIED",
+              "TENANT_UNAVAILABLE",
+              "SESSION_CONFLICT",
+              "NOT_FOUND",
+              "DEPENDENCY_UNAVAILABLE",
+              "RATE_LIMITED",
+              "INTERNAL_ERROR"
+            ]
+          },
+          "traceId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "errors": {
+            "type": "object",
+            "description": "Somente em 400 INPUT_INVALID. Chave: caminho do campo com nomes JSON em camelCase, sem prefixo $. (ex.: tarefas[0].emailResponsavel), tanto para desserialização quanto para validação; erro do corpo inteiro (JSON malformado, vazio ou raiz incompatível) usa a chave \"$\" (G17). Mensagens em pt-BR, sem ecoar o valor recebido.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Liveness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "alive"
+            ]
+          }
+        }
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready"
+            ]
+          }
         }
       }
     },
     "responses": {
-      "ServiceUnavailable": {
-        "description": "503: DEPENDENCY_UNAVAILABLE, sem conexão, secret ou fallback.",
+      "BadRequest": {
+        "description": "400: INPUT_INVALID, TENANT_REQUIRED ou CSRF_INVALID; entrada rejeitada antes de efeitos. INPUT_INVALID cobre JSON malformado, campo desconhecido, tipo incompatível, nulo em campo obrigatório e regra de validação, com errors por campo e sem ecoar valores (ADR 0003).",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
         "content": {
-          "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } }
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "InvalidCredentials": {
+        "description": "401: AUTH_INVALID; genérico para tenant desconhecido/inativo, credencial inválida, usuário bloqueado ou desabilitado.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "AuthenticationRequired": {
+        "description": "401: AUTH_REQUIRED; sessão ausente, inválida, expirada ou revogada. Sem redirect HTML.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "AccessDenied": {
+        "description": "403: TENANT_ACCESS_DENIED; header divergente ou falta de concessão local. Sem lookup em outro tenant.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "TenantUnavailable": {
+        "description": "409: TENANT_UNAVAILABLE em /me e /context; instalação de origem da sessão válida está inativa. Não bloqueia logout ou obtenção de CSRF nem enumera tenants no login anônimo. Inativação não revoga sessões, pausa ou estende prazos; após reativar, somente sessões ainda válidas e não revogadas podem retomar.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SessionConflict": {
+        "description": "409: SESSION_CONFLICT somente no login; a sessão anterior deste cookie foi substituída, encerrada ou revogada por operação concorrente. Nenhuma sessão nova é criada nem cookie de sessão emitido; a anterior não é alterada por esta tentativa. Repetir exige novo GET antiforgery com o contexto atual.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "503: DEPENDENCY_UNAVAILABLE; detalhe genérico para falha de dependência, sem conexão ou origem sensível exposta; sem fallback ou sucesso aparente.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "429: RATE_LIMITED; limite de login.",
+        "headers": {
+          "Retry-After": {
+            "description": "Segundos até nova tentativa permitida.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
         }
       },
       "UnexpectedError": {
-        "description": "500: INTERNAL_ERROR, diagnóstico seguro com correlação.",
+        "description": "500: INTERNAL_ERROR; falha registrada com correlação, sem detalhe interno no consumidor.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
         "content": {
-          "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } }
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
         }
       }
     }

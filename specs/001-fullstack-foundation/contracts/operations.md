@@ -1,17 +1,17 @@
 # Contracts: EF/health e operação restrita L2
 
-**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G15 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST).
-**Status**: EF/health L1 entregues; autenticação e host operacional abaixo são
-contratos planejados, não comandos/endpoints já disponíveis.
+**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G21 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST, emissão do cookie de sessão).
+**Status**: EF/health L1 e contrato HTTP L2 (§4) entregues na Parada L2-2; o host
+operacional (§5) continua contrato planejado, sem comandos disponíveis.
 **References**: [plano](../plan.md), [modelo](../data-model.md),
-[API entregue L1](openapi.json), [API alvo L2](future-openapi.json),
+[API L2 entregue](openapi.json),
 [quickstart](../quickstart.md).
 
 ## 1. Compatibilidade e configuração
 
-Durante o planejamento, `openapi.json` e `/openapi/v1.json` continuam descrevendo L1.
-Na implementação L2, promover o contrato de sete operações (cinco de acesso +
-dois health checks) junto com os endpoints e testes. Não publicar contrato fictício.
+`openapi.json` e `/openapi/v1.json` descrevem o contrato L2 de sete operações (cinco de
+acesso + dois health checks), promovido na Parada L2-2 junto com os endpoints e testes.
+Não publicar contrato fictício.
 `/api/v1/me/tenants`, cadastro público e rotas de negócio continuam ausentes/404.
 
 Nomes efetivos de configuração: `CodigoAplicacao`,
@@ -157,7 +157,7 @@ consultas continuam bloqueadas; após reativar, apenas sessões ainda válidas e
 revogadas podem retomar. Expiração conta inclusive durante a inativação.
 Não confundir essa suspensão com desativação/bloqueio da conta, que revoga sessões.
 
-Payloads, formatos, limites e nomes JSON camelCase estão em `future-openapi.json`;
+Payloads, formatos, limites e nomes JSON camelCase estão em `openapi.json`;
 não renomeá-los para coincidir com nomes das classes internas.
 Sem JWT, localStorage, refresh, listagem de tenants, cadastro ou reset por HTTP.
 Não aceitar campos extras, senha/corpo vazio, tenant/lista/secret no payload ou

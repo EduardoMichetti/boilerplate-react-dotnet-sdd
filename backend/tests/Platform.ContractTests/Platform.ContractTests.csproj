@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Comum\RelogioControlavel.cs" Link="Comum\RelogioControlavel.cs" />
+    <Compile Include="..\Comum\CertificadoTeste.cs" Link="Comum\CertificadoTeste.cs" />
   </ItemGroup>
 </Project>
