@@ -5,10 +5,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Platform.Application.Access.Operacoes;
+using Platform.Application.Access.Operacoes.Portas;
 using Platform.Application.Access.Portas;
 using Platform.Application.Configuration;
 using Platform.Application.Tenancy;
 using Platform.Infrastructure.Access;
+using Platform.Infrastructure.Access.Operacoes;
 using Platform.Infrastructure.Persistence.Auditoria;
 using Platform.Infrastructure.Persistence.TenantAccess;
 using Platform.Infrastructure.Persistence.TenantAccess.Entities;
@@ -68,6 +71,34 @@ public static class InjecaoDependencias
         servicos.AddScoped<IRepositorioSessoes, RepositorioSessoes>();
         servicos.AddScoped<IServicoCredenciais, ServicoCredenciaisIdentity>();
         servicos.AddScoped<IConsultaContextoAcesso, ConsultaContextoAcesso>();
+
+        // Portas e adaptadores de operações restritas (FR-033)
+        servicos.AddScoped<IManutencaoContas, ManutencaoContasIdentity>();
+        servicos.AddScoped<IRegistroOperacoesAcesso, RegistroOperacoesAcesso>();
+        servicos.AddScoped<IVerificadorAutorizacaoOperador, VerificadorAutorizacaoOperador>();
+        servicos.AddScoped<IRepositorioLimpezaSessoes, RepositorioLimpezaSessoes>();
+
+        return servicos;
+    }
+
+    /// <summary>
+    /// Registra os casos de uso de operações restritas (FR-033) no host operacional e testes.
+    /// Exige que <see cref="IProvedorSenha"/> e <see cref="IContextoOperacao"/> estejam registrados.
+    /// </summary>
+    /// <param name="servicos">Coleção de serviços.</param>
+    /// <returns>A mesma coleção.</returns>
+    public static IServiceCollection AdicionarCasosUsoOperacoes(this IServiceCollection servicos)
+    {
+        ArgumentNullException.ThrowIfNull(servicos);
+
+        servicos.AddScoped<CasoUsoCriarConta>();
+        servicos.AddScoped<CasoUsoDesativarConta>();
+        servicos.AddScoped<CasoUsoReativarConta>();
+        servicos.AddScoped<CasoUsoRedefinirSenha>();
+        servicos.AddScoped<CasoUsoRevogarSessoes>();
+        servicos.AddScoped<CasoUsoConcederPermissao>();
+        servicos.AddScoped<CasoUsoRevogarPermissao>();
+        servicos.AddScoped<CasoUsoLimparSessoes>();
 
         return servicos;
     }

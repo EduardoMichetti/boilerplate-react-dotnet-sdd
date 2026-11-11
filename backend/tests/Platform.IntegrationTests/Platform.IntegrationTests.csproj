@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\App.Api\App.Api.csproj" />
     <ProjectReference Include="..\..\src\Platform.Infrastructure\Platform.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Platform.Operations\Platform.Operations.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Testcontainers.PostgreSql" />

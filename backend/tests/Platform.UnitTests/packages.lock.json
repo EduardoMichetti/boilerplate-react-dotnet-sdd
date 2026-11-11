@@ -316,6 +316,13 @@
           "Platform.Application": "[1.0.0, )"
         }
       },
+      "platform.operations": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Application": "[1.0.0, )",
+          "Platform.Infrastructure": "[1.0.0, )"
+        }
+      },
       "FluentValidation": {
         "type": "CentralTransitive",
         "requested": "[12.2.0, )",
