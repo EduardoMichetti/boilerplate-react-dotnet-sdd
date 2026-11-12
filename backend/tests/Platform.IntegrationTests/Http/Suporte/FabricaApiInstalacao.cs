@@ -45,6 +45,9 @@ public sealed record OpcoesFabricaApi
 
     /// <summary>Configurações adicionais (certificado etc.).</summary>
     public IReadOnlyDictionary<string, string?> Extras { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>Configuração adicional de serviços exclusivos de teste.</summary>
+    public Action<IServiceCollection>? ServicosTeste { get; init; }
 }
 
 /// <summary>
@@ -162,6 +165,7 @@ public sealed class FabricaApiInstalacao : WebApplicationFactory<Program>
             servicos.AddSingleton(Falhas);
             servicos.AddSingleton(ComandosSql);
             servicos.AddScoped<IInterceptor, InterceptadorTeste>();
+            _opcoes.ServicosTeste?.Invoke(servicos);
         });
     }
 

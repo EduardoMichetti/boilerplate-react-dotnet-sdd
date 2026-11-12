@@ -3,6 +3,7 @@ using App.Api.Access;
 using App.Api.Diagnostics;
 using App.Api.Health;
 using App.Api.OpenApi;
+using App.Api.Testing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Platform.Application.Auditoria;
@@ -75,9 +76,15 @@ aplicacao.UseAuthorization();
 aplicacao.MapOpenApi("/openapi/v1.json");
 
 // Grupo das rotas de acesso L2: valida todo argumento Requisicao* antes do handler (ADR 0003 D2).
-aplicacao.MapGroup("/api/v1")
-    .AddEndpointFilter<FiltroValidacaoRequisicao>()
-    .MapearEndpointsAcesso();
+RouteGroupBuilder grupoV1 = aplicacao.MapGroup("/api/v1")
+    .AddEndpointFilter<FiltroValidacaoRequisicao>();
+
+grupoV1.MapearEndpointsAcesso();
+
+foreach (IConfiguradorRotasTeste configurador in aplicacao.Services.GetServices<IConfiguradorRotasTeste>())
+{
+    configurador.Configurar(grupoV1);
+}
 
 aplicacao.MapGet("/health/live", () => Results.Ok(new RespostaLiveness()))
     .WithName("getLiveness")
