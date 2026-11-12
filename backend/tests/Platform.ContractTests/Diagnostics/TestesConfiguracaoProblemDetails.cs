@@ -29,7 +29,7 @@ namespace Platform.ContractTests.Diagnostics;
 /// </summary>
 public sealed class TestesConfiguracaoProblemDetails
 {
-    private const string ValorSecreto = "valor-secreto-nao-ecoar-7731";
+    private const string ValorSecreto = "valor-secreto-nao-ecoar-7731"; // gitleaks:allow (valor fictício de teste)
 
     private static readonly Erro ErroRegraTeste = new("TESTE_REGRA_VIOLADA", "Regra de teste violada.", TipoErro.RegraNegocio);
 
@@ -53,6 +53,8 @@ public sealed class TestesConfiguracaoProblemDetails
     [InlineData("/falha", HttpStatusCode.InternalServerError, "INTERNAL_ERROR")]
     [InlineData("/isolamento", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
     [InlineData("/configuracao", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
+    [InlineData("/banco", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
+    [InlineData("/banco-transitorio", HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE")]
     public async Task ErrosUtilizamProblemDetailsSeguroMesmoComCabecalhoHtml(
         string caminho, HttpStatusCode statusEsperado, string codigoEsperado)
     {
@@ -77,6 +79,11 @@ public sealed class TestesConfiguracaoProblemDetails
                     throw new ExcecaoIsolamentoTenant();
                 case "/configuracao":
                     throw new ExcecaoConfiguracaoInstalacao(["CodigoAplicacao é obrigatório."]);
+                case "/banco":
+                    throw new ExcecaoBancoSintetica(SegredoPrivado);
+                case "/banco-transitorio":
+                    // Forma da estratégia de execução do Npgsql/EF: falha transitória embrulhada.
+                    throw new InvalidOperationException(SegredoPrivado, new ExcecaoBancoSintetica(SegredoPrivado));
                 default:
                     contexto.Response.StatusCode = StatusCodes.Status404NotFound;
                     return Task.CompletedTask;
@@ -277,6 +284,8 @@ public sealed class TestesConfiguracaoProblemDetails
             }
         }
     }
+
+    private sealed class ExcecaoBancoSintetica(string mensagem) : System.Data.Common.DbException(mensagem);
 }
 
 /// <summary>

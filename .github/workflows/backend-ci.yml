@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'backend/**'
+      - 'infra/**'
       - '.github/workflows/backend-ci.yml'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
@@ -14,6 +15,7 @@ on:
     branches: [ main ]
     paths:
       - 'backend/**'
+      - 'infra/**'
       - '.github/workflows/backend-ci.yml'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
@@ -51,8 +53,42 @@ jobs:
       - name: Verify code formatting
         run: dotnet format backend/Boilerplate.slnx --verify-no-changes --no-restore
 
+      # Inclui App.Api, Platform.Operations e as três suítes (todas listadas na solution).
       - name: Run tests with Testcontainers
-        run: dotnet test backend/Boilerplate.slnx --no-restore --minimum-expected-tests 1
+        run: dotnet test --solution backend/Boilerplate.slnx --no-restore --minimum-expected-tests 1
+
+      # Valida o Compose com valores fictícios gerados nesta execução (nunca versionados).
+      # O exemplo versionado sozinho DEVE falhar: não contém segredo utilizável.
+      - name: Validate Docker Compose configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENV_CI="$RUNNER_TEMP/compose-ci.env"
+          gerar() { openssl rand -hex 24; }
+          umask 077
+          {
+            echo "CodigoAplicacao=boilerplate-ci"
+            echo "IdAmbiente=$(cat /proc/sys/kernel/random/uuid)"
+            echo "IdTenant=$(cat /proc/sys/kernel/random/uuid)"
+            echo "NomeExibicaoTenant=Instalacao CI"
+            echo "EstadoTenant=Inativo"
+            echo "PORTA_API=18080"
+            echo "BANCO_APP=appdb_ci"
+            echo "SENHA_SUPERUSUARIO_POSTGRES=$(gerar)"
+            echo "SENHA_OWNER=$(gerar)"
+            echo "SENHA_RUNTIME=$(gerar)"
+            echo "LOGIN_OPERADOR_ACESSO=appdb_ci_op_ci"
+            echo "SENHA_OPERADOR_ACESSO=$(gerar)"
+            echo "PORTA_POSTGRES_DEPURACAO=15432"
+          } > "$ENV_CI"
+          docker compose -f infra/compose.yaml --env-file "$ENV_CI" --profile migrations --profile operations config --quiet
+          docker compose -f infra/compose.yaml -f infra/compose.depuracao.yaml --env-file "$ENV_CI" config --quiet
+          if docker compose -f infra/compose.yaml --env-file infra/.env.example config --quiet 2>/dev/null; then
+            echo "::error::infra/.env.example sozinho não deveria produzir configuração válida."
+            exit 1
+          fi
+          rm -f "$ENV_CI"
+          echo "Compose validado (A com perfis migrations/operations e override de depuração)."
 
       - name: NuGet Vulnerability Audit
         shell: bash

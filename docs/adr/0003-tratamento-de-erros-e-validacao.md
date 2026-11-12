@@ -2,6 +2,7 @@
 
 **Data**: 2026-11-07
 **Status**: aceito (2026-11-08, mantenedor). Revisão 2026-11-08: `TipoErro.NaoAutenticado` (D3/D5).
+Revisão 2026-11-12 (Parada L2-5, mantenedor): 503 também para falha de banco embrulhada (D1).
 **Aprovações registradas (2026-11-08, mantenedor)**: dependência FluentValidation
 `12.2.0` (Constituição X; G1 em [tasks.md](../../specs/001-fullstack-foundation/tasks.md))
 e emenda 2.3.0 da Constituição, princípio V (Governance; G8).
@@ -37,6 +38,12 @@ dados de entrada, e o `ResultError` não carrega informação para escolher o st
 
 Critério: se o usuário pode provocar com uso normal, é `Resultado`; se só ocorre por bug
 ou infraestrutura, é exceção. Falha interna nunca é catalogada como erro de negócio.
+
+503 `DEPENDENCY_UNAVAILABLE` vale para configuração/isolamento da instalação,
+`ExcecaoDependenciaIndisponivel` e `DbException`, **inclusive como causa interna**: a
+estratégia de execução do EF/Npgsql embrulha falhas transitórias do banco (ex.: conexões
+esgotadas, SQLSTATE 53300) em `InvalidOperationException`, que sem essa regra virariam
+500. Demais exceções seguem 500 `INTERNAL_ERROR`.
 
 ### D2 — FluentValidation para o formato da entrada
 
@@ -155,7 +162,7 @@ indício de defeito no cliente.
 - Nova dependência `FluentValidation` (e `FluentValidation.DependencyInjectionExtensions`)
   `12.2.0` em `Platform.Application`/`App.Api`, sujeita à aprovação prevista na
   Constituição X; fixada em `Directory.Packages.props` com lockfiles atualizados.
-- Implementação planejada no bloco P1c do [plano L2](../../specs/001-fullstack-foundation/plan.md).
+- Implementada no bloco P1c do [plano L2](../../specs/001-fullstack-foundation/plan.md) (Parada L2-1).
 - Novos testes: contrato (formato de 400/409/422, ausência de valor ecoado), arquitetura
   (validador por `Requisicao*`, validador sem I/O, padrão e unicidade de códigos,
   `JsonUnmappedMemberHandling.Skip` só em `*.Integracoes.*`) e unitários dos

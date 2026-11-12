@@ -1,12 +1,15 @@
-# Quickstart: validar a L1 e, após implementação, a L2
+# Quickstart: validar a L1 e a L2
 
-**Date**: 2026-11-05
+**Date**: 2026-11-05 | **Revisão**: 2026-11-12 (Parada L2-5)
 **References**: [plano](plan.md), [modelo](data-model.md),
-[operações](contracts/operations.md), [API L2](contracts/openapi.json).
+[operações](contracts/operations.md), [API L2](contracts/openapi.json),
+[README](../../README.md).
 
-**Estado atual**: L1 entregue. Login, sessões, host `Platform.Operations` e perfil
-`operations` abaixo são **planejados**. Não executar a seção L2 como se já existisse.
-Este comando de planejamento não executa testes, migrations ou containers.
+**Estado atual**: L1 e L2 **implementadas** (Paradas L2-1 a L2-5). Login, sessões,
+host `Platform.Operations` e perfil `operations` existem; os comandos abaixo usam os
+nomes reais (variáveis G4/G16 do `.env.local`, roles derivadas do banco G6, serviço
+`operations`). A matriz §6 é o roteiro de aceite; a evidência da última execução fica
+no checkpoint da Phase 18 em [tasks.md](tasks.md).
 
 ## 1. Pré-requisitos e regressão L1 disponível
 
@@ -28,28 +31,35 @@ dotnet format .\backend\Boilerplate.slnx --verify-no-changes --no-restore
 dotnet test --solution .\backend\Boilerplate.slnx --no-restore --minimum-expected-tests 1
 ```
 
-Esperado na base L1: saúde/OpenAPI, erros seguros e persistência/migrations A/B.
-As cinco rotas L2 ainda não existem. Histórico e escopo das provas estão em
-[tasks.md](tasks.md); a execução acima, não este documento, gera nova evidência.
+Esperado: saúde/OpenAPI, erros seguros, persistência/migrations A/B e as cinco rotas
+L2 com seus controles, em PostgreSQL real descartável. Histórico e escopo das provas
+estão em [tasks.md](tasks.md); a execução acima, não este documento, gera nova evidência.
+O `nuget.config` da raiz limpa origens herdadas da máquina e usa somente `nuget.org`
+(Central Package Management exige origem única, `NU1507`).
 
-## 2. Preparação L2 — somente depois de implementar seus pré-requisitos
+## 2. Preparação L2 (arquivos privados A/B)
 
-1. Aplicar P0 de [plan.md](plan.md): roles runtime/operador/owner distintas com
-   grants reais, exemplos sem secrets utilizáveis e PostgreSQL sem exposição pública.
-   Se precisar de depuração, publicar somente no loopback; não usar owner na API.
-2. Copiar o exemplo atualizado para configurações privadas A/B. Os valores de
-   `IdTenant` e `IdAmbiente`, bancos/roles, portas API/PostgreSQL e volumes/redes
-   devem ser distintos. Não basta trocar o header/argumento de tenant.
-3. Manter key rings separados/persistentes e nomes Data Protection derivados
-   de aplicação/ambiente/tenant. Montar certificados/senhas por arquivos privados
-   em produção; sem secrets no Git, imagem ou build arguments.
-4. Para HTTP local, usar modo **Development + loopback** explicitamente e cookie
-   `bps-session`; fora disso, HTTPS e `__Host-bps-session`. O Compose L1 em
-   Production/HTTP não serve como validação dos cookies L2 sem esse ajuste.
+1. P0 de [plan.md](plan.md) está aplicado: `infra/docker/init-db.sh` cria
+   `<BANCO_APP>_owner`, `<BANCO_APP>_runtime`, o grupo `<BANCO_APP>_operador` e o
+   login individual `LOGIN_OPERADOR_ACESSO`; a migration inicial emite os GRANTs por
+   tabela. PostgreSQL não é publicado; depuração opcional só no loopback com
+   `infra/compose.depuracao.yaml` e `PORTA_POSTGRES_DEPURACAO`. A API nunca usa owner.
+2. Copiar `infra/.env.example` para `infra/.env.local` (A) e `infra/.env.b.local` (B)
+   e preencher os valores privados (`SENHA_SUPERUSUARIO_POSTGRES`, `SENHA_OWNER`,
+   `SENHA_RUNTIME`, `LOGIN_OPERADOR_ACESSO`, `SENHA_OPERADOR_ACESSO`). `IdTenant`,
+   `IdAmbiente`, `BANCO_APP`, `PORTA_API` e segredos devem ser distintos; volumes/redes
+   já são separados pelo `--project-name`. Não basta trocar o header/argumento de tenant.
+3. Key ring por instalação no volume `chaves_protecao_dados`
+   (`ProtecaoDados__DiretorioChaves`), com discriminador
+   `CodigoAplicacao/IdAmbiente/IdTenant`. Em produção, `ProtecaoDados__ArquivoCertificado`
+   e `ProtecaoDados__ArquivoSenhaCertificado` por arquivos privados; sem secrets no Git,
+   imagem ou build arguments.
+4. Para HTTP local, o Compose já usa **Development + loopback** e cookie
+   `bps-session`; fora disso, HTTPS e `__Host-bps-session`.
    Publicação da API restrita ao loopback do host; listener interno do container
    pode usar sua interface de rede. Gateway Docker não precisa ser loopback.
    Nenhum Host/header encaminhado livremente substitui esse isolamento.
-5. Configurar somente o perfil `operations` com segredo do operador de A ou B;
+5. O perfil `operations` recebe somente o segredo do operador de A ou B;
    cada operador usa login PostgreSQL individual e segredo não compartilhado;
    API não recebe esse segredo. Roles/grants são validados em volumes criados do
    zero (§3); não há volumes L1 a atualizar nem upgrade L1→L2 a provar.
@@ -72,14 +82,13 @@ docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d
 docker compose --project-name boilerplate-b -f $compose --env-file $localB up -d postgres
 ```
 
-Esses comandos pressupõem perfil/imagem `operations` implementados na L2.
 Não imprimir `compose config` completo, usar credencial de demonstração como secret
 ou apagar volumes para contornar falha. Interromper diante de erro.
 
 ## 3. Criar os bancos locais do zero e aplicar a migration inicial
 
 Ambiente **local de desenvolvimento**, sem dados: começar com volumes novos para que
-os scripts de banco/grants rodem (o `init-db.sql` só executa na criação do volume).
+os scripts de banco/grants rodem (o `init-db.sh` só executa na criação do volume).
 Este comando só é aceitável aqui, em ambiente local descartável:
 
 ```powershell
@@ -107,7 +116,7 @@ Não gerar migration por cliente nem chamar migration pelo endpoint HTTP.
 
 ## 4. Preparar contas/permissões sem painel
 
-Com perfil e host L2 implementados, criar conta sintética por instalação.
+Criar uma conta sintética por instalação com o host operacional (perfil `operations`).
 Entrar senhas **diferentes** e privadas no prompt sem eco; não incluí-las no comando.
 Guardar os `idUsuario` retornados, não inferi-los de um exemplo.
 
@@ -123,13 +132,13 @@ docker compose --project-name boilerplate-b -f $compose --env-file $localB --pro
 Esperado: resultado JSON/exit code conforme [operations.md](contracts/operations.md)
 e auditoria persistida da operação, sem senha/hash/conexão. Operador sem papel
 autorizado não muda nada; API/runtime não pode executar esse procedimento.
-Ativar A/B (`EstadoTenant=Ativo`) e iniciar:
+Ativar A/B (`EstadoTenant=Ativo`; em reaplicações, `Migracoes__PermitirInicializarBancoVazio=false`) e iniciar:
 
 ```powershell
 docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d api
 docker compose --project-name boilerplate-b -f $compose --env-file $localB up -d api
-$origemA = 'http://localhost:8080'
-$origemB = 'http://localhost:8081'
+$origemA = 'http://localhost:8080'   # PORTA_API de A
+$origemB = 'http://localhost:8081'   # PORTA_API de B
 Invoke-RestMethod "$origemA/health/live"
 Invoke-RestMethod "$origemA/health/ready"
 Invoke-RestMethod "$origemB/health/ready"
@@ -230,11 +239,13 @@ SC-002 exige todos os casos da matriz aplicável; SC-005 usa só contratos publi
 
 ## 7. Gates e evidências
 
-Reexecutar os comandos da seção 1 após implementar L2. Além deles:
+Reexecutar os comandos da seção 1. Além deles:
 
 ```powershell
 dotnet package list .\backend\Boilerplate.slnx --vulnerable --include-transitive --format json
 gitleaks git --redact --exit-code 1 .
+# sem gitleaks instalado: imagem oficial fixada, montando o repositório só para leitura
+docker run --rm -v "${PWD}:/repo:ro" zricethezav/gitleaks:v8.24.3 git --redact --exit-code 1 /repo
 ```
 
 Usar o scanner fixado/checksum e os critérios de bloqueio do workflow existente;

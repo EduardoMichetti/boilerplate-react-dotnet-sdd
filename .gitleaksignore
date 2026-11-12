@@ -1,0 +1,5 @@
+# Falsos-positivos triados (Parada L2-5, 2026-11-12, mantenedor): constante de teste com valor
+# fictício usada para provar que segredos não são ecoados em Problem Details/logs. Não é segredo real.
+# Somente fingerprints exatos (commit:arquivo:regra:linha); nenhuma regra ou caminho é liberado.
+a6e0ce2f6bb0a18bcc9a07f0eb137a93a944da04:backend/tests/Platform.ContractTests/Diagnostics/TestesConfiguracaoProblemDetails.cs:generic-api-key:32
+1765569cd07e4bc2045ef64b04cacf9925084e36:backend/tests/Platform.ContractTests/Diagnostics/TestesConfiguracaoProblemDetails.cs:generic-api-key:31

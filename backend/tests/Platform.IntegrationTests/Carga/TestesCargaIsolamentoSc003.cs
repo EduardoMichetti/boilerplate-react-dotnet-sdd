@@ -20,6 +20,8 @@ using Xunit;
 public sealed class TestesCargaIsolamentoSc003(FixtureInstalacaoPostgres fixture)
     : TesteHttpBase(fixture), IClassFixture<FixtureInstalacaoPostgres>
 {
+    private const int TamanhoMaximoPoolPorInstalacao = 40;
+
     [Fact]
     public async Task RotaSintetica_NaoExisteNaApiDistribuidaSemConfiguradorDeTeste()
     {
@@ -47,14 +49,11 @@ public sealed class TestesCargaIsolamentoSc003(FixtureInstalacaoPostgres fixture
         await ContasSinteticas.CriarContaAsync(A, Relogio, emailA, ContasSinteticas.SenhaPadraoA);
         await ContasSinteticas.CriarContaAsync(B, Relogio, emailB, ContasSinteticas.SenhaPadraoB);
 
-        // 3. Inicializa APIs com o configurador de rotas de carga sintética
-        OpcoesFabricaApi opcoesComRotasCarga = new()
-        {
-            ServicosTeste = servicos => servicos.AddSingleton<IConfiguradorRotasTeste, ConfiguradorRotasCargaSintetica>(),
-        };
-
-        FabricaApiInstalacao apiA = CriarApi(A, opcoesComRotasCarga);
-        FabricaApiInstalacao apiB = CriarApi(B, opcoesComRotasCarga);
+        // 3. Inicializa APIs com o configurador de rotas de carga sintética e pool real de conexões
+        //    por instalação (reutilização de conexões do pool, como em produção). A e B dividem o
+        //    mesmo servidor de teste (max_connections=100): 40 + 40 conexões deixam folga para a fixture.
+        FabricaApiInstalacao apiA = CriarApi(A, OpcoesCargaComPool(A.StringConexaoExecucao));
+        FabricaApiInstalacao apiB = CriarApi(B, OpcoesCargaComPool(B.StringConexaoExecucao));
 
         // Autentica antes da carga para excluir rate limiter do cenário
         ClienteAcessoHttp clienteAutenticacaoA = CriarCliente(apiA);
@@ -276,8 +275,23 @@ public sealed class TestesCargaIsolamentoSc003(FixtureInstalacaoPostgres fixture
             Assert.True(contagemB > 0, "B deve conter os registros gravados durante a carga.");
         }
 
-        // Registra o sumário de evidência no stdout/diagnóstico
-        Console.WriteLine($"[SC-003 EVIDENCIA] Total={TotalOperacoes}, OpsA={operacoesConcluidasA}, OpsB={operacoesConcluidasB}, PicoEfetivo={picoEfetivoConcorrencia}, Erros={erros.Count}");
+        // Registra o sumário de evidência na saída do teste (xUnit v3: --show-live-output on)
+        TestContext.Current.TestOutputHelper?.WriteLine($"[SC-003 EVIDENCIA] Total={TotalOperacoes}, OpsA={operacoesConcluidasA}, OpsB={operacoesConcluidasB}, PicoEfetivo={picoEfetivoConcorrencia}, Erros={erros.Count}");
+    }
+
+    private static OpcoesFabricaApi OpcoesCargaComPool(string stringConexaoExecucao)
+    {
+        string conexaoComPool = new NpgsqlConnectionStringBuilder(stringConexaoExecucao)
+        {
+            Pooling = true,
+            MaxPoolSize = TamanhoMaximoPoolPorInstalacao,
+        }.ConnectionString;
+
+        return new OpcoesFabricaApi
+        {
+            ServicosTeste = servicos => servicos.AddSingleton<IConfiguradorRotasTeste, ConfiguradorRotasCargaSintetica>(),
+            Extras = new Dictionary<string, string?> { ["StringsConexao:BancoApp"] = conexaoComPool },
+        };
     }
 
     private static void CopiarCookies(ClienteAcessoHttp origem, ClienteAcessoHttp destino)

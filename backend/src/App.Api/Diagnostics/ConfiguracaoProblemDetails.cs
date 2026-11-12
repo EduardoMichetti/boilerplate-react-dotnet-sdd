@@ -226,6 +226,25 @@ public static class ConfiguracaoProblemDetails
         _ => "https://www.rfc-editor.org/rfc/rfc9110#section-15.6.1"
     };
 
+    /// <summary>
+    /// Falha de dependência (503) quando a exceção, ou qualquer causa interna, é de configuração,
+    /// isolamento, dependência indisponível ou do banco. Cobre o <see cref="DbException"/> que a
+    /// estratégia de execução do EF/Npgsql embrulha em <see cref="InvalidOperationException"/> em
+    /// falhas transitórias (ex.: conexões esgotadas), que de outro modo virariam 500.
+    /// </summary>
+    private static bool EhFalhaDependencia(Exception excecao)
+    {
+        for (Exception? atual = excecao; atual is not null; atual = atual.InnerException)
+        {
+            if (atual is ExcecaoConfiguracaoInstalacao or ExcecaoIsolamentoTenant or ExcecaoDependenciaIndisponivel or DbException)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private sealed class ResultadoProblema(ProblemDetails problema, int? segundosRetry) : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext) => EscreverAsync(httpContext, problema, segundosRetry);
@@ -252,7 +271,7 @@ public static class ConfiguracaoProblemDetails
                 return true;
             }
 
-            int codigoStatus = excecao is ExcecaoConfiguracaoInstalacao or ExcecaoIsolamentoTenant or ExcecaoDependenciaIndisponivel or DbException
+            int codigoStatus = EhFalhaDependencia(excecao)
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status500InternalServerError;
             ProblemDetails problema = Criar(contextoHttp, codigoStatus);

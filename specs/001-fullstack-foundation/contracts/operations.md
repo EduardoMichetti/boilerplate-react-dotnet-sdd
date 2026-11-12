@@ -1,8 +1,8 @@
 # Contracts: EF/health e operação restrita L2
 
 **Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G21 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST, emissão do cookie de sessão).
-**Status**: EF/health L1 e contrato HTTP L2 (§4) entregues na Parada L2-2; o host
-operacional (§5) continua contrato planejado, sem comandos disponíveis.
+**Status**: EF/health L1 e contrato HTTP L2 (§4) entregues na Parada L2-2; host
+operacional (§5) entregue na Parada L2-3. Recuperação/produção (§6) segue para a L4.
 **References**: [plano](../plan.md), [modelo](../data-model.md),
 [API L2 entregue](openapi.json),
 [quickstart](../quickstart.md).
@@ -242,9 +242,13 @@ Falha ao persistir revogação não apaga cookie nem confirma saída; 503 seguro
 
 ## 5. Host operacional L2 — FR-033
 
-Executável planejado `Platform.Operations`, sem servidor HTTP, publicado apenas
-no perfil pontual Compose `operations`. Não faz migrations nem cria banco/roles.
-Comandos abaixo são **contrato futuro**, ainda indisponível:
+Executável `Platform.Operations`, sem servidor HTTP, publicado apenas no perfil
+pontual Compose `operations` (imagem `infra/docker/Dockerfile.operations`). Não faz
+migrations nem cria banco/roles. Comandos disponíveis:
+
+Invocação (instalação A; ver [README](../../../README.md#3-contas-e-permissões-pelo-host-operacional-perfil-operations)):
+`docker compose --project-name boilerplate-a -f infra/compose.yaml --env-file infra/.env.local --profile operations run --rm operations <comando>`.
+`conta criar` e `conta redefinir-senha` exigem terminal interativo (TTY) para o prompt sem eco.
 
 ```text
 conta criar --id-tenant UUID --id-ambiente UUID --email EMAIL --nome-exibicao NOME

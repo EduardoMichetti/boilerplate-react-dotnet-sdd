@@ -3,7 +3,9 @@
 **Data**: 2026-11-04
 **Revisão**: 2026-11-05 — esclarecimentos de sessões e auditoria;
 2026-11-08 — prazo de sessão configurável e limpeza auditada (research D21).
-**Status**: proposto no planejamento L2; implementação e aceite pendentes.
+**Status**: aceito (2026-11-12, mantenedor). Implementado nas Paradas L2-2 (sessão HTTP) e
+L2-3 (host operacional e `sessao limpar`), com evidências no checkpoint da Phase 18 de
+[tasks.md](../../specs/001-fullstack-foundation/tasks.md).
 **Contexto**: [plano L2](../../specs/001-fullstack-foundation/plan.md),
 [pesquisa](../../specs/001-fullstack-foundation/research.md),
 [ADR 0001](0001-single-tenant-per-deploy.md).
