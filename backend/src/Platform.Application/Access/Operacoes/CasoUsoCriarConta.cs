@@ -13,7 +13,8 @@ public sealed class CasoUsoCriarConta(
     IManutencaoContas manutencaoContas,
     IRegistroOperacoesAcesso registroOperacoes,
     IProvedorSenha provedorSenha,
-    IContextoOperacao contextoOperacao)
+    IContextoOperacao contextoOperacao,
+    IClassificadorFalhaPersistencia classificadorFalha)
 {
     /// <summary>
     /// Executa a criação da conta.
@@ -66,10 +67,11 @@ public sealed class CasoUsoCriarConta(
         catch (Exception ex)
         {
             await transacao.DesfazerAsync(tokenCancelamento);
-            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, "CONFLITO_CONCORRENTE", agora, tokenCancelamento);
+            FalhaOperacaoClassificada falha = FalhaOperacaoClassificada.De(ex, classificadorFalha);
+            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, falha.Codigo, agora, tokenCancelamento);
             return ResultadoOperacao.CriarFalha(
                 idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador,
-                TipoOperacaoAcesso.CriarConta, "CONFLITO_CONCORRENTE", agora, ex.Message);
+                TipoOperacaoAcesso.CriarConta, falha.Codigo, agora, falha.MensagemDiagnostico);
         }
     }
 

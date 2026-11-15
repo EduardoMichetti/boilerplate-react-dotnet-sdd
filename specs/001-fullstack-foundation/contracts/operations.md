@@ -280,7 +280,18 @@ Concessão duplicada/revogação ausente são no-op auditado; conflito concorren
 é erro explícito, não sobrescrita silenciosa: violação de PK em concessão simultânea,
 zero linhas no DELETE de retirada simultânea ou `ConcurrencyFailure` do `UserManager`
 geram `resultado=falha`, código `CONFLITO_CONCORRENTE` e saída não zero, sem repetição
-automática. Código de permissão desconhecido falha.
+automática. Também é conflito real a exceção de persistência com concorrência otimista ou
+SQLSTATE `23505` (unicidade, inclusive duas criações simultâneas do mesmo email), `40001`
+ou `40P01`. Código de permissão desconhecido falha.
+
+Códigos de falha das operações de conta/permissão (G29): `CONFLITO_CONCORRENTE` somente
+nos casos acima; `EMAIL_JA_CADASTRADO` quando `conta criar` encontra o email já em uso
+(verificação determinística, não corrida); `EMAIL_INVALIDO` quando o Identity recusa o
+email; `SENHA_FORA_DA_POLITICA`, `USUARIO_NAO_ENCONTRADO` e `PERMISSAO_DESCONHECIDA`
+como já descritos; `FALHA_INTERNA` para qualquer outra exceção ou erro não previsto
+(restrição de auditoria, privilégio, conexão, defeito). Todos são `resultado=falha`,
+auditados em transação separada e com saída não zero. O resultado e o registro trazem
+só o código; tipo e mensagem da exceção vão apenas para o diagnóstico em stderr/journal.
 
 ### `sessao limpar`
 

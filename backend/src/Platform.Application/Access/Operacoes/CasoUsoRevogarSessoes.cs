@@ -11,7 +11,8 @@ public sealed class CasoUsoRevogarSessoes(
     IVerificadorAutorizacaoOperador verificadorAutorizacao,
     IManutencaoContas manutencaoContas,
     IRegistroOperacoesAcesso registroOperacoes,
-    IContextoOperacao contextoOperacao)
+    IContextoOperacao contextoOperacao,
+    IClassificadorFalhaPersistencia classificadorFalha)
 {
     /// <summary>
     /// Executa a revogação de todas as sessões da conta.
@@ -60,10 +61,11 @@ public sealed class CasoUsoRevogarSessoes(
         catch (Exception ex)
         {
             await transacao.DesfazerAsync(tokenCancelamento);
-            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, "CONFLITO_CONCORRENTE", agora, tokenCancelamento);
+            FalhaOperacaoClassificada falha = FalhaOperacaoClassificada.De(ex, classificadorFalha);
+            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, falha.Codigo, agora, tokenCancelamento);
             return ResultadoOperacao.CriarFalha(
                 idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador,
-                TipoOperacaoAcesso.RevogarSessoes, "CONFLITO_CONCORRENTE", agora, ex.Message);
+                TipoOperacaoAcesso.RevogarSessoes, falha.Codigo, agora, falha.MensagemDiagnostico);
         }
     }
 

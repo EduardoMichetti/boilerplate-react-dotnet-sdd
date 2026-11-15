@@ -12,7 +12,8 @@ public sealed class CasoUsoRedefinirSenha(
     IManutencaoContas manutencaoContas,
     IRegistroOperacoesAcesso registroOperacoes,
     IProvedorSenha provedorSenha,
-    IContextoOperacao contextoOperacao)
+    IContextoOperacao contextoOperacao,
+    IClassificadorFalhaPersistencia classificadorFalha)
 {
     /// <summary>
     /// Executa a redefinição de senha.
@@ -63,10 +64,11 @@ public sealed class CasoUsoRedefinirSenha(
         catch (Exception ex)
         {
             await transacao.DesfazerAsync(tokenCancelamento);
-            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, "CONFLITO_CONCORRENTE", agora, tokenCancelamento);
+            FalhaOperacaoClassificada falha = FalhaOperacaoClassificada.De(ex, classificadorFalha);
+            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, falha.Codigo, agora, tokenCancelamento);
             return ResultadoOperacao.CriarFalha(
                 idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador,
-                TipoOperacaoAcesso.RedefinirSenha, "CONFLITO_CONCORRENTE", agora, ex.Message);
+                TipoOperacaoAcesso.RedefinirSenha, falha.Codigo, agora, falha.MensagemDiagnostico);
         }
     }
 

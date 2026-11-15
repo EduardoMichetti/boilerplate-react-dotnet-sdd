@@ -3,10 +3,8 @@ namespace Platform.IntegrationTests.Suporte;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Application.Access.Operacoes;
 using Platform.Application.Access.Operacoes.Portas;
-using Platform.Application.Auditoria;
 using Platform.Application.Configuration;
 using Platform.Domain.Tenancy;
-using Platform.Infrastructure;
 using Platform.Infrastructure.Persistence.TenantAccess;
 using Platform.IntegrationTests.Fixtures;
 using Platform.Operations;
@@ -46,7 +44,8 @@ public sealed class EscopoOperacoesTeste : IAsyncDisposable
     public AcessoTenantDbContext Contexto => Servicos.GetRequiredService<AcessoTenantDbContext>();
 
     /// <summary>
-    /// Cria o escopo para testes de operações restritas.
+    /// Cria o escopo para testes de operações restritas; <paramref name="substituirServicos"/> permite
+    /// trocar um registro depois da composição real do host.
     /// </summary>
     public static EscopoOperacoesTeste Criar(
         InstalacaoTestePostgres tenant,
@@ -56,14 +55,14 @@ public sealed class EscopoOperacoesTeste : IAsyncDisposable
         string senhaSintetica = "SenhaSegura123!",
         string? retencaoDiasBruto = "30",
         Guid? overrideIdTenant = null,
-        Guid? overrideIdAmbiente = null)
+        Guid? overrideIdAmbiente = null,
+        Action<IServiceCollection>? substituirServicos = null)
     {
         ServiceCollection servicos = new();
         servicos.AddLogging();
         servicos.AddMemoryCache();
         servicos.AddSingleton<TimeProvider>(relogio);
         servicos.AddSingleton<IProvedorSenha>(new ProvedorSenhaSintetico(senhaSintetica));
-        servicos.AddScoped<IContextoOperacao>(_ => new ContextoOperacaoOperador(relogio, loginAutorizado));
 
         servicos.Configure<OpcoesInstalacaoTenant>(opcoes =>
         {
@@ -84,8 +83,11 @@ public sealed class EscopoOperacoesTeste : IAsyncDisposable
             opcoes.RetencaoSessoesDiasBruto = retencaoDiasBruto;
         });
 
-        servicos.AdicionarInfraestruturaAcesso();
-        servicos.AdicionarCasosUsoOperacoes();
+        // Mesma composição do Program.cs do host: o autor vem do verificador, não da fixture.
+        servicos.AdicionarServicosHostOperacoes();
+
+        // Substituição pontual (ex.: falha injetada) aplicada depois da composição real.
+        substituirServicos?.Invoke(servicos);
 
         ServiceProvider provedor = servicos.BuildServiceProvider();
         IServiceScope escopo = provedor.CreateScope();

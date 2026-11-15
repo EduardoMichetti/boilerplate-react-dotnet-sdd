@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Application.Access.Operacoes;
+using Platform.Application.Auditoria;
 using Platform.Domain.Access;
 using Platform.Domain.Auditoria;
 using Platform.Domain.Identificadores;
@@ -67,6 +68,11 @@ public sealed class TestesOperacoesContaPermissao(FixtureInstalacaoPostgres fixt
         Assert.Equal(Nome, usuario.NomeExibicao);
         Assert.Empty(usuario.Permissoes);
 
+        // Autoria vem do login verificado na conexão, não da fixture
+        Assert.Equal(TipoAutor.Operador, usuario.TipoAutorCriacao);
+        Assert.Equal(tenant.LoginOperadorUm, usuario.AutorCriacao);
+        Assert.Equal(resultado.IdOperacao, usuario.IdOperacaoCriacao);
+
         // Verifica registro de auditoria persistido com Sucesso (leitura via owner pois operador só tem INSERT em operacoes_acesso)
         await using AcessoTenantDbContext contextoOwner = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
         RegistroOperacaoAcesso? registro = await contextoOwner.OperacoesAcesso
@@ -129,6 +135,9 @@ public sealed class TestesOperacoesContaPermissao(FixtureInstalacaoPostgres fixt
         UsuarioAplicacao usuario = await escopo.Contexto.Users.AsNoTracking().SingleAsync(u => u.Id == idUsuario, cancelamento);
         Assert.False(usuario.EstaAtivo);
         Assert.NotEqual(stampOriginal, usuario.SecurityStamp);
+        Assert.Equal(TipoAutor.Operador, usuario.TipoAutorAlteracao);
+        Assert.Equal(tenant.LoginOperadorDois, usuario.AutorAlteracao);
+        Assert.Equal(resultado.IdOperacao, usuario.IdOperacaoAlteracao);
 
         // Todas as sessões devem estar revogadas
         List<SessaoAutenticacao> sessoes = await escopo.Contexto.Sessoes.Where(s => s.FkIdUsuario == idUsuario).ToListAsync(cancelamento);
@@ -181,6 +190,9 @@ public sealed class TestesOperacoesContaPermissao(FixtureInstalacaoPostgres fixt
         await using (EscopoOperacoesTeste escopoLock = EscopoOperacoesTeste.Criar(
             tenant, tenant.StringConexaoOperadorUm, tenant.LoginOperadorUm, _relogio))
         {
+            // Preparo direto pelo UserManager, fora de um caso de uso: declara o operador como o
+            // verificador faria, pois gravação auditável sem autor verificado é rejeitada.
+            escopoLock.Servicos.GetRequiredService<IRegistroOperadorVerificado>().DefinirOperadorVerificado(tenant.LoginOperadorUm);
             UsuarioAplicacao usuarioLock = await escopoLock.Contexto.Users.SingleAsync(u => u.Id == idUsuario, cancelamento);
             GerenciadorUsuariosAplicacao mgr = escopoLock.Servicos.GetRequiredService<GerenciadorUsuariosAplicacao>();
             for (int i = 0; i < 5; i++)
@@ -234,6 +246,27 @@ public sealed class TestesOperacoesContaPermissao(FixtureInstalacaoPostgres fixt
 
         List<SessaoAutenticacao> sessoes = await escopo.Contexto.Sessoes.Where(s => s.FkIdUsuario == idUsuario).ToListAsync(cancelamento);
         Assert.All(sessoes, s => Assert.NotNull(s.RevogadaEm));
+    }
+
+    [Fact]
+    public async Task ConcederPermissao_GravaAutoriaDoOperadorVerificado()
+    {
+        CancellationToken cancelamento = TestContext.Current.CancellationToken;
+        InstalacaoTestePostgres tenant = fixture.TenantA;
+        (Guid idUsuario, _) = await CriarUsuarioESessaoAsync(tenant, cancelamento);
+
+        await using EscopoOperacoesTeste escopo = EscopoOperacoesTeste.Criar(
+            tenant, tenant.StringConexaoOperadorDois, tenant.LoginOperadorDois, _relogio);
+        ResultadoOperacao resultado = await escopo.Servicos.GetRequiredService<CasoUsoConcederPermissao>()
+            .ExecutarAsync(tenant.IdTenant, tenant.IdAmbiente, idUsuario, CodigosPermissao.FundacaoContextoLer, cancelamento);
+        Assert.True(resultado.Sucesso, $"Conceder falhou: {resultado.Codigo} - {resultado.MensagemDiagnostico}");
+
+        await using AcessoTenantDbContext contextoOwner = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
+        PermissaoUsuario concessao = await contextoOwner.Permissoes.AsNoTracking()
+            .SingleAsync(p => p.FkIdUsuario == idUsuario, cancelamento);
+        Assert.Equal(TipoAutor.Operador, concessao.TipoAutorCriacao);
+        Assert.Equal(tenant.LoginOperadorDois, concessao.AutorCriacao);
+        Assert.Equal(resultado.IdOperacao, concessao.IdOperacaoCriacao);
     }
 
     [Fact]

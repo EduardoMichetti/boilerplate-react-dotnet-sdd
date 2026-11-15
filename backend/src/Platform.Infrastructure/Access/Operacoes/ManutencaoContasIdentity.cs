@@ -19,7 +19,8 @@ public sealed class ManutencaoContasIdentity(
     AcessoTenantDbContext contexto,
     GerenciadorUsuariosAplicacao gerenciador,
     IRepositorioSessoes repositorioSessoes,
-    IOptions<OpcoesInstalacaoTenant> instalacao) : IManutencaoContas
+    IOptions<OpcoesInstalacaoTenant> instalacao,
+    IClassificadorFalhaPersistencia classificadorFalha) : IManutencaoContas
 {
     /// <inheritdoc />
     public async Task<ResultadoAcaoConta> CriarContaAsync(
@@ -57,10 +58,33 @@ public sealed class ManutencaoContasIdentity(
             e.Code.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
         if (erroDuplicado is not null)
         {
-            return ResultadoAcaoConta.ConflitoConcorrente("Email já cadastrado.");
+            return ResultadoAcaoConta.EmailJaCadastrado();
         }
 
-        return ResultadoAcaoConta.Falha("CONFLITO_CONCORRENTE", resultado.Errors.First().Description);
+        IdentityError? erroEmail = resultado.Errors.FirstOrDefault(e =>
+            e.Code is nameof(IdentityErrorDescriber.InvalidEmail) or nameof(IdentityErrorDescriber.InvalidUserName));
+        if (erroEmail is not null)
+        {
+            return ResultadoAcaoConta.EmailInvalido(erroEmail.Description);
+        }
+
+        return MapearFalhaIdentity(resultado);
+    }
+
+    /// <summary>
+    /// Somente <c>ConcurrencyFailure</c> do Identity é conflito concorrente real (FR-033);
+    /// qualquer outro erro não previsto é <c>FALHA_INTERNA</c>, com o código do Identity no diagnóstico.
+    /// </summary>
+    private static ResultadoAcaoConta MapearFalhaIdentity(IdentityResult resultado)
+    {
+        IdentityError erro = resultado.Errors.FirstOrDefault(e =>
+                e.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure))
+            ?? resultado.Errors.FirstOrDefault()
+            ?? new IdentityError { Code = "Desconhecido", Description = "Falha sem detalhe do Identity." };
+
+        return erro.Code == nameof(IdentityErrorDescriber.ConcurrencyFailure)
+            ? ResultadoAcaoConta.ConflitoConcorrente(erro.Description)
+            : ResultadoAcaoConta.FalhaInterna($"Identity {erro.Code}: {erro.Description}");
     }
 
     /// <inheritdoc />
@@ -80,7 +104,7 @@ public sealed class ManutencaoContasIdentity(
         IdentityResult resultado = await gerenciador.UpdateSecurityStampAsync(usuario);
         if (!resultado.Succeeded)
         {
-            return ResultadoAcaoConta.ConflitoConcorrente(resultado.Errors.First().Description);
+            return MapearFalhaIdentity(resultado);
         }
 
         return ResultadoAcaoConta.Ok();
@@ -101,7 +125,7 @@ public sealed class ManutencaoContasIdentity(
         IdentityResult resultado = await gerenciador.UpdateAsync(usuario);
         if (!resultado.Succeeded)
         {
-            return ResultadoAcaoConta.ConflitoConcorrente(resultado.Errors.First().Description);
+            return MapearFalhaIdentity(resultado);
         }
 
         return ResultadoAcaoConta.Ok();
@@ -137,7 +161,7 @@ public sealed class ManutencaoContasIdentity(
         IdentityResult resultado = await gerenciador.UpdateAsync(usuario);
         if (!resultado.Succeeded)
         {
-            return ResultadoAcaoConta.ConflitoConcorrente(resultado.Errors.First().Description);
+            return MapearFalhaIdentity(resultado);
         }
 
         return ResultadoAcaoConta.Ok();
@@ -159,7 +183,7 @@ public sealed class ManutencaoContasIdentity(
         IdentityResult resultado = await gerenciador.UpdateSecurityStampAsync(usuario);
         if (!resultado.Succeeded)
         {
-            return ResultadoAcaoConta.ConflitoConcorrente(resultado.Errors.First().Description);
+            return MapearFalhaIdentity(resultado);
         }
 
         return ResultadoAcaoConta.Ok();
@@ -201,7 +225,7 @@ public sealed class ManutencaoContasIdentity(
             await contexto.SaveChangesAsync(tokenCancelamento);
             return ResultadoAcaoConta.Ok();
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (classificadorFalha.EhConflitoConcorrente(ex))
         {
             contexto.Entry(nova).State = EntityState.Detached;
             return ResultadoAcaoConta.ConflitoConcorrente("Violação concorrente de chave primária ao conceder permissão.");

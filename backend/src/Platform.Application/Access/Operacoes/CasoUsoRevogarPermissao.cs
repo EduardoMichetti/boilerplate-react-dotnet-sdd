@@ -11,7 +11,8 @@ public sealed class CasoUsoRevogarPermissao(
     IVerificadorAutorizacaoOperador verificadorAutorizacao,
     IManutencaoContas manutencaoContas,
     IRegistroOperacoesAcesso registroOperacoes,
-    IContextoOperacao contextoOperacao)
+    IContextoOperacao contextoOperacao,
+    IClassificadorFalhaPersistencia classificadorFalha)
 {
     /// <summary>
     /// Executa a revogação de permissão.
@@ -61,10 +62,11 @@ public sealed class CasoUsoRevogarPermissao(
         catch (Exception ex)
         {
             await transacao.DesfazerAsync(tokenCancelamento);
-            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, codigoPermissao, "CONFLITO_CONCORRENTE", agora, tokenCancelamento);
+            FalhaOperacaoClassificada falha = FalhaOperacaoClassificada.De(ex, classificadorFalha);
+            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, codigoPermissao, falha.Codigo, agora, tokenCancelamento);
             return ResultadoOperacao.CriarFalha(
                 idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador,
-                TipoOperacaoAcesso.RevogarPermissao, "CONFLITO_CONCORRENTE", agora, ex.Message);
+                TipoOperacaoAcesso.RevogarPermissao, falha.Codigo, agora, falha.MensagemDiagnostico);
         }
     }
 

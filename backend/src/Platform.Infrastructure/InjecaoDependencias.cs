@@ -74,22 +74,26 @@ public static class InjecaoDependencias
 
         // Portas e adaptadores de operações restritas (FR-033)
         servicos.AddScoped<IManutencaoContas, ManutencaoContasIdentity>();
+        servicos.AddSingleton<IClassificadorFalhaPersistencia, ClassificadorFalhaPersistencia>();
         servicos.AddScoped<IRegistroOperacoesAcesso, RegistroOperacoesAcesso>();
-        servicos.AddScoped<IVerificadorAutorizacaoOperador, VerificadorAutorizacaoOperador>();
         servicos.AddScoped<IRepositorioLimpezaSessoes, RepositorioLimpezaSessoes>();
 
         return servicos;
     }
 
     /// <summary>
-    /// Registra os casos de uso de operações restritas (FR-033) no host operacional e testes.
-    /// Exige que <see cref="IProvedorSenha"/> e <see cref="IContextoOperacao"/> estejam registrados.
+    /// Registra o verificador de autorização do operador e os casos de uso de operações restritas
+    /// (FR-033) no host operacional e testes. Exige que <see cref="IProvedorSenha"/>,
+    /// <see cref="IContextoOperacao"/> e <see cref="IRegistroOperadorVerificado"/> estejam registrados.
+    /// Fica fora de <see cref="AdicionarInfraestruturaAcesso"/> porque a API não executa operações restritas.
     /// </summary>
     /// <param name="servicos">Coleção de serviços.</param>
     /// <returns>A mesma coleção.</returns>
     public static IServiceCollection AdicionarCasosUsoOperacoes(this IServiceCollection servicos)
     {
         ArgumentNullException.ThrowIfNull(servicos);
+
+        servicos.AddScoped<IVerificadorAutorizacaoOperador, VerificadorAutorizacaoOperador>();
 
         servicos.AddScoped<CasoUsoCriarConta>();
         servicos.AddScoped<CasoUsoDesativarConta>();

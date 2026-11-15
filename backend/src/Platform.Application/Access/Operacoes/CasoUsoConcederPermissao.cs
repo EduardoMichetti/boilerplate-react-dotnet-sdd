@@ -11,7 +11,8 @@ public sealed class CasoUsoConcederPermissao(
     IVerificadorAutorizacaoOperador verificadorAutorizacao,
     IManutencaoContas manutencaoContas,
     IRegistroOperacoesAcesso registroOperacoes,
-    IContextoOperacao contextoOperacao)
+    IContextoOperacao contextoOperacao,
+    IClassificadorFalhaPersistencia classificadorFalha)
 {
     /// <summary>
     /// Executa a concessão de permissão.
@@ -61,10 +62,11 @@ public sealed class CasoUsoConcederPermissao(
         catch (Exception ex)
         {
             await transacao.DesfazerAsync(tokenCancelamento);
-            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, codigoPermissao, "CONFLITO_CONCORRENTE", agora, tokenCancelamento);
+            FalhaOperacaoClassificada falha = FalhaOperacaoClassificada.De(ex, classificadorFalha);
+            await RegistrarFalhaAsync(idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador, codigoPermissao, falha.Codigo, agora, tokenCancelamento);
             return ResultadoOperacao.CriarFalha(
                 idOperacao, idTenant, idAmbiente, idUsuario, autorizacao.LoginOperador,
-                TipoOperacaoAcesso.ConcederPermissao, "CONFLITO_CONCORRENTE", agora, ex.Message);
+                TipoOperacaoAcesso.ConcederPermissao, falha.Codigo, agora, falha.MensagemDiagnostico);
         }
     }
 

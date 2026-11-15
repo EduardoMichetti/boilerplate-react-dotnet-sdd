@@ -4,13 +4,19 @@ namespace Platform.Application.Access.Operacoes.Portas;
 /// Resultado da execução de uma ação de manutenção de conta ou permissão.
 /// </summary>
 /// <param name="Sucesso">Indica se a mutação foi aplicada ou se foi no-op idempotente auditado.</param>
-/// <param name="Codigo">Código de resultado seguro (ex.: SUCESSO, USUARIO_NAO_ENCONTRADO, CONFLITO_CONCORRENTE).</param>
+/// <param name="Codigo">Código de resultado seguro (ex.: SUCESSO, USUARIO_NAO_ENCONTRADO, CONFLITO_CONCORRENTE, FALHA_INTERNA).</param>
 /// <param name="Mensagem">Mensagem de diagnóstico opcional.</param>
 public sealed record ResultadoAcaoConta(
     bool Sucesso,
     string Codigo,
     string? Mensagem = null)
 {
+    /// <summary>Código de conflito concorrente real (PK/unicidade simultânea, concorrência otimista, zero linhas na retirada).</summary>
+    public const string CodigoConflitoConcorrente = "CONFLITO_CONCORRENTE";
+
+    /// <summary>Código de falha inesperada que não é conflito concorrente real.</summary>
+    public const string CodigoFalhaInterna = "FALHA_INTERNA";
+
     /// <summary>Sucesso na operação.</summary>
     public static ResultadoAcaoConta Ok() => new(true, "SUCESSO");
 
@@ -24,7 +30,19 @@ public sealed record ResultadoAcaoConta(
 
     /// <summary>Conflito concorrente (PK de permissão, ConcurrencyStamp ou zero linhas na retirada).</summary>
     public static ResultadoAcaoConta ConflitoConcorrente(string mensagem) =>
-        new(false, "CONFLITO_CONCORRENTE", mensagem);
+        new(false, CodigoConflitoConcorrente, mensagem);
+
+    /// <summary>Email já pertence a outra conta da instalação (verificação determinística, não corrida).</summary>
+    public static ResultadoAcaoConta EmailJaCadastrado() =>
+        new(false, "EMAIL_JA_CADASTRADO", "Email já cadastrado.");
+
+    /// <summary>Email ou nome de usuário recusado pelo validador do Identity.</summary>
+    public static ResultadoAcaoConta EmailInvalido(string mensagem) =>
+        new(false, "EMAIL_INVALIDO", mensagem);
+
+    /// <summary>Falha inesperada que não é conflito concorrente real.</summary>
+    public static ResultadoAcaoConta FalhaInterna(string mensagem) =>
+        new(false, CodigoFalhaInterna, mensagem);
 
     /// <summary>Permissão desconhecida fora do catálogo.</summary>
     public static ResultadoAcaoConta PermissaoDesconhecida(string codigo) =>

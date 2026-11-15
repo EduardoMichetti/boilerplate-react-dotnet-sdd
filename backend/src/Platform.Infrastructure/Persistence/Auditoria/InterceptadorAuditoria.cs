@@ -92,9 +92,10 @@ public sealed class InterceptadorAuditoria(IContextoOperacao contexto) : SaveCha
 
     private void PreencherCriacao(IEntidadeAuditavel auditavel)
     {
+        string? autor = ObterAutorCoerente();
         auditavel.CriadoEm = contexto.InstanteOperacao;
         auditavel.TipoAutorCriacao = contexto.TipoAutor;
-        auditavel.AutorCriacao = contexto.Autor;
+        auditavel.AutorCriacao = autor;
         auditavel.IdOperacaoCriacao = contexto.IdOperacao;
         auditavel.AlteradoEm = null;
         auditavel.TipoAutorAlteracao = null;
@@ -144,15 +145,34 @@ public sealed class InterceptadorAuditoria(IContextoOperacao contexto) : SaveCha
             return;
         }
 
+        string? autor = ObterAutorCoerente();
         auditavel.AlteradoEm = contexto.InstanteOperacao;
         auditavel.TipoAutorAlteracao = contexto.TipoAutor;
-        auditavel.AutorAlteracao = contexto.Autor;
+        auditavel.AutorAlteracao = autor;
         auditavel.IdOperacaoAlteracao = contexto.IdOperacao;
 
         if (auditavel is IEntidadeVersionada versionada)
         {
             versionada.Versao++;
         }
+    }
+
+    /// <summary>
+    /// Garante a mesma regra das constraints <c>ck_*_auditoria_*</c> antes de chegar ao banco:
+    /// autor nulo se e somente se o tipo for <see cref="TipoAutor.Anonimo"/>.
+    /// </summary>
+    private string? ObterAutorCoerente()
+    {
+        string? autor = contexto.Autor;
+        bool anonimo = contexto.TipoAutor == TipoAutor.Anonimo;
+        if (anonimo != (autor is null))
+        {
+            throw new InvalidOperationException(
+                $"Contexto de auditoria incoerente: tipo de autor {contexto.TipoAutor} " +
+                (anonimo ? "não pode ter autor." : "exige autor verificado antes da gravação."));
+        }
+
+        return autor;
     }
 
     private static bool EhCarimboConcorrenciaIdentity(EntityEntry entrada, string nomePropriedade) =>

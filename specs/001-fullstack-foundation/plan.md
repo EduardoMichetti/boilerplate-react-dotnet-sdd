@@ -122,7 +122,9 @@ por operador, sem job. [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-vali
 não muda: nenhuma rota, status ou código HTTP novo; configuração inválida é falha
 de inicialização (não Problem Details) e `sessao limpar` usa resultado/código
 estável do host (`RETENCAO_INVALIDA`, `CONFLITO_CONCORRENTE`), sem exceção como
-fluxo de regra esperada.
+fluxo de regra esperada. Desde G29, `CONFLITO_CONCORRENTE` fica restrito a conflito
+real; exceção inesperada nas operações de conta/permissão é `FALHA_INTERNA` e email
+duplicado é `EMAIL_JA_CADASTRADO` (ver [operations.md](contracts/operations.md)).
 
 ### P0 — pré-requisitos bloqueantes, sem exceção constitucional
 

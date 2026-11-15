@@ -5,18 +5,21 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Platform.Application.Access.Operacoes.Portas;
+using Platform.Application.Auditoria;
 using Platform.Application.Configuration;
 using Platform.Application.Tenancy;
 using Platform.Infrastructure.Persistence.TenantAccess;
 
 /// <summary>
 /// Verificador de autorização do operador contra a conexão e o marcador do banco PostgreSQL.
+/// Ao autorizar, define o login confirmado como autor da operação antes de qualquer gravação.
 /// </summary>
 public sealed class VerificadorAutorizacaoOperador(
     AcessoTenantDbContext contexto,
     IVerificadorIdentidadeBancoTenant verificadorIdentidade,
     IOptions<OpcoesInstalacaoTenant> opcoesInstalacao,
-    IOptions<OpcoesOperacaoAcesso> opcoesOperacao) : IVerificadorAutorizacaoOperador
+    IOptions<OpcoesOperacaoAcesso> opcoesOperacao,
+    IRegistroOperadorVerificado registroOperador) : IVerificadorAutorizacaoOperador
 {
     /// <inheritdoc />
     public async Task<ResultadoAutorizacaoOperador> VerificarAutorizacaoAsync(
@@ -116,6 +119,7 @@ public sealed class VerificadorAutorizacaoOperador(
                 $"O usuário '{currentUser}' não é membro da role de grupo '{banco}_operador'.");
         }
 
+        registroOperador.DefinirOperadorVerificado(currentUser);
         return ResultadoAutorizacaoOperador.Sucesso(currentUser);
     }
 }

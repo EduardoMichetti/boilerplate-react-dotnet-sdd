@@ -200,6 +200,27 @@ public sealed class TestesInterceptadorAuditoria(FixtureInstalacaoPostgres fixtu
         Assert.False(await leitura.Sessoes.AnyAsync(s => s.IdSessao == idSessaoNova, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task AutorAusenteParaTipoNaoAnonimo_FalhaAntesDoBancoSemGravar()
+    {
+        // Regressão: host operacional gravava TipoAutor=Operador com Autor nulo e só a constraint
+        // ck_*_auditoria_criacao barrava, mascarada como conflito pelo caso de uso.
+        ContextoOperacaoTeste semAutor = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, autor: null);
+        ContextoOperacaoTeste operador = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm);
+        UsuarioAplicacao conta = await CriarContaAsync(operador);
+
+        await using (AcessoTenantDbContext contexto = BancoTeste.CriarContexto(Tenant.StringConexaoOperadorUm, semAutor))
+        {
+            contexto.Permissoes.Add(new PermissaoUsuario { FkIdUsuario = conta.Id, CodigoPermissao = CodigosPermissao.FundacaoContextoLer });
+            InvalidOperationException erro = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => contexto.SaveChangesAsync(TestContext.Current.CancellationToken));
+            Assert.Contains("exige autor verificado", erro.Message, StringComparison.Ordinal);
+        }
+
+        await using AcessoTenantDbContext leitura = BancoTeste.CriarContexto(Tenant.StringConexaoProprietario);
+        Assert.False(await leitura.Permissoes.AnyAsync(p => p.FkIdUsuario == conta.Id, TestContext.Current.CancellationToken));
+    }
+
     private static void AssertCriacao(IEntidadeAuditavel entidade, ContextoOperacaoTeste contexto)
     {
         Assert.Equal(contexto.InstanteOperacao, entidade.CriadoEm);

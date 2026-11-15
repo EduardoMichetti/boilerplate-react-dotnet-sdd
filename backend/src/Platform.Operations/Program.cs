@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Platform.Application.Access.Operacoes;
 using Platform.Application.Access.Operacoes.Portas;
-using Platform.Application.Auditoria;
 using Platform.Application.Configuration;
 using Platform.Domain.Tenancy;
 using Platform.Infrastructure;
@@ -69,11 +68,9 @@ servicosColecao.AddSingleton<IValidateOptions<OpcoesOperacaoAcesso>, ValidadorOp
 
 servicosColecao.AddSingleton(TimeProvider.System);
 servicosColecao.AddSingleton<IProvedorSenha, LeitorSenhaConsole>();
-servicosColecao.AddScoped<IContextoOperacao, ContextoOperacaoOperador>();
 
 servicosColecao.AddMemoryCache();
-servicosColecao.AdicionarInfraestruturaAcesso();
-servicosColecao.AdicionarCasosUsoOperacoes();
+servicosColecao.AdicionarServicosHostOperacoes();
 
 ServiceProvider provedor = servicosColecao.BuildServiceProvider();
 
