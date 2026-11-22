@@ -115,7 +115,7 @@ public sealed class LayerDependencyTests
             XDocument documento = XDocument.Load(caminho);
 
             var referencias = documento.Descendants("ProjectReference")
-                .Select(p => Path.GetFileNameWithoutExtension(p.Attribute("Include")?.Value ?? string.Empty))
+                .Select(p => NomeProjetoReferenciado(p.Attribute("Include")?.Value))
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .ToList();
 
@@ -148,7 +148,7 @@ public sealed class LayerDependencyTests
         Assert.Equal("Microsoft.NET.Sdk", documento.Root?.Attribute("Sdk")?.Value);
 
         List<string> projetos = documento.Descendants("ProjectReference")
-            .Select(p => Path.GetFileNameWithoutExtension(p.Attribute("Include")?.Value ?? string.Empty))
+            .Select(p => NomeProjetoReferenciado(p.Attribute("Include")?.Value))
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
@@ -208,6 +208,13 @@ public sealed class LayerDependencyTests
         pilhaRecursao.Remove(no);
         return false;
     }
+
+    /// <summary>
+    /// Nome do projeto de um <c>ProjectReference</c>. Os <c>.csproj</c> usam <c>\</c>, que não é separador no Linux;
+    /// normalizar para <c>/</c> mantém o resultado igual em Windows e no runner Ubuntu do CI.
+    /// </summary>
+    private static string NomeProjetoReferenciado(string? include) =>
+        Path.GetFileNameWithoutExtension((include ?? string.Empty).Replace('\\', '/'));
 
     private static string ObterCaminhoRaizBackend()
     {
