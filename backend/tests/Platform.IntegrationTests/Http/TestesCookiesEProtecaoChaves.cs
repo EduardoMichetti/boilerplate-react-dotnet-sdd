@@ -68,8 +68,7 @@ public sealed class TestesCookiesEProtecaoChaves(FixtureInstalacaoPostgres fixtu
     public void Production_SemCertificado_NaoInicializa()
     {
         FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { Ambiente = "Production" });
-        Exception erro = Assert.ThrowsAny<Exception>(() => api.CreateClient());
-        string diagnostico = erro.ToString();
+        string diagnostico = api.ExigirFalhaInicializacao();
         Assert.Contains("ProtecaoDados:ArquivoCertificado", diagnostico, StringComparison.Ordinal);
         Assert.DoesNotContain(A.SenhaExecucao, diagnostico, StringComparison.Ordinal);
     }
@@ -80,8 +79,7 @@ public sealed class TestesCookiesEProtecaoChaves(FixtureInstalacaoPostgres fixtu
         using CertificadoTeste certificado = new();
         File.WriteAllText(certificado.ArquivoSenha, "senha-incorreta");
         FabricaApiInstalacao api = CriarApi(A, OpcoesProducao(certificado));
-        Exception erro = Assert.ThrowsAny<Exception>(() => api.CreateClient());
-        string diagnostico = erro.ToString();
+        string diagnostico = api.ExigirFalhaInicializacao();
         Assert.Contains("ProtecaoDados:ArquivoCertificado", diagnostico, StringComparison.Ordinal);
         Assert.DoesNotContain(certificado.Senha, diagnostico, StringComparison.Ordinal);
         Assert.DoesNotContain("senha-incorreta", diagnostico, StringComparison.Ordinal);

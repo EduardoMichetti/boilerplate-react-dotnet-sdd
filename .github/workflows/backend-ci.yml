@@ -94,9 +94,16 @@ jobs:
         shell: bash
         run: |
           echo "Executando auditoria de pacotes NuGet vulneráveis..."
-          REPORT=$(dotnet package list backend/Boilerplate.slnx --vulnerable --include-transitive --format json)
+          # SDK 10: a solução vai em --project (o argumento posicional é rejeitado).
+          REPORT=$(dotnet package list --project backend/Boilerplate.slnx --vulnerable --include-transitive --format json)
           echo "$REPORT"
-          
+
+          # Scan inconclusivo nunca aprova: exige JSON válido com a lista de projetos.
+          if ! echo "$REPORT" | jq -e '.projects | length > 0' > /dev/null; then
+            echo "::error::Relatório de vulnerabilidades ausente ou inválido; auditoria inconclusiva."
+            exit 1
+          fi
+
           # Bloqueia se contiver achados com severidade High ou Critical
           CRITICAL_COUNT=$(echo "$REPORT" | grep -iE '"severity":\s*"(Critical|High)"' | wc -l || true)
           if [ "$CRITICAL_COUNT" -gt 0 ]; then

@@ -124,6 +124,22 @@ public sealed class FabricaApiInstalacao : WebApplicationFactory<Program>
         Assert.IsType<GerenciadorUsuariosAplicacao>(gerenciador);
     }
 
+    /// <summary>
+    /// Exige que a API não inicialize e devolve o diagnóstico da falha: a exceção recebida mais os logs capturados.
+    /// </summary>
+    /// <remarks>
+    /// G30: quando a aplicação falha ao iniciar antes de o <c>DeferredHost</c> do <c>WebApplicationFactory</c>
+    /// consultar o <c>IHostApplicationLifetime</c>, o host já foi descartado e o framework relança
+    /// <see cref="ObjectDisposedException"/> no lugar da causa real (corrida que aparece sob carga). O host registra a
+    /// falha de inicialização em log antes de ser descartado, então o diagnóstico considera exceção e logs.
+    /// </remarks>
+    /// <returns>Texto da exceção seguido do texto completo de todas as entradas de log.</returns>
+    public string ExigirFalhaInicializacao()
+    {
+        Exception erro = Assert.ThrowsAny<Exception>(() => CreateClient());
+        return erro + Environment.NewLine + string.Join(Environment.NewLine, Logs.Entradas.Select(e => e.TextoCompleto));
+    }
+
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

@@ -66,8 +66,7 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
     {
         FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { PrazoAbsolutoMinutos = valor });
 
-        Exception erro = Assert.ThrowsAny<Exception>(() => api.CreateClient());
-        string diagnostico = erro.ToString();
+        string diagnostico = api.ExigirFalhaInicializacao();
         Assert.Contains("Sessao:PrazoAbsolutoMinutos", diagnostico, StringComparison.Ordinal);
         Assert.Contains("5–480", diagnostico, StringComparison.Ordinal);
         Assert.DoesNotContain(A.SenhaExecucao, diagnostico, StringComparison.Ordinal);

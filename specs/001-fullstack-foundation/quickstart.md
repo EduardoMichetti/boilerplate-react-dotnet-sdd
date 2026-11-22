@@ -242,7 +242,7 @@ SC-002 exige todos os casos da matriz aplicável; SC-005 usa só contratos publi
 Reexecutar os comandos da seção 1. Além deles:
 
 ```powershell
-dotnet package list .\backend\Boilerplate.slnx --vulnerable --include-transitive --format json
+dotnet package list --project .\backend\Boilerplate.slnx --vulnerable --include-transitive --format json
 gitleaks git --redact --exit-code 1 .
 # sem gitleaks instalado: imagem oficial fixada, montando o repositório só para leitura
 docker run --rm -v "${PWD}:/repo:ro" zricethezav/gitleaks:v8.24.3 git --redact --exit-code 1 /repo
