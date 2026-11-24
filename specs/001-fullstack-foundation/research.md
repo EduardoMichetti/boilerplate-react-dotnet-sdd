@@ -964,6 +964,14 @@ upgrade real passa a ser critério da primeira mudança de esquema após a publi
   rotas protegidas, executado depois da autorização e antes do handler, chamando
   `CasoUsoRegistrarUsoSessao` (Application) sobre a porta de sessões. A validação de
   sessão no Retrieve (que roda antes da autorização) não grava nada.
+  **Ordem (G31, 2026-11-24)**: o estado da instalação e a permissão, na L2 verificados
+  dentro dos casos de uso, passam a filtros de endpoint executados antes do registro de
+  uso: autorização de recurso próprio → `FiltroInstalacaoAtiva` (409
+  `TENANT_UNAVAILABLE`) → `FiltroExigirPermissao(codigo)` (403, quando exigida, como em
+  `/context`) → `FiltroRegistroUsoSessao` → handler. Os casos de uso mantêm as mesmas
+  verificações (defesa em profundidade, mesma resposta). 400 `INPUT_INVALID` do filtro de
+  validação e 400 `CSRF_INVALID`, emitidos antes do handler, não renovam; 400/422
+  devolvidos pelo próprio handler renovam.
 - **Limitação de frequência**: grava `UltimoUsoEm = InstanteOperacao` somente se
   `InstanteOperacao − UltimoUsoEm ≥ 60 s` (constante `IntervaloMinimoRegistroUso`, não
   configurável) — no máximo uma escrita por minuto por sessão. Escrita por entidade

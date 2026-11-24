@@ -204,10 +204,12 @@ backend/src/
 │                                    #   de uso, repetição de revogação), migration inicial regenerada, limpeza pela
 │                                    #   expiração efetiva; L3: CHECK com hífen (nova regeneração)
 ├── Platform.Modulos/                # L3 NOVO: IModulo, DeclaracaoModulo (Permissoes = DefinicaoPermissao),
-│                                    #   ValidadorComposicaoModulos, CatalogoPermissoesEfetivo, foundation.autorizacao v1
+│                                    #   ValidadorComposicaoModulos, CatalogoPermissoesEfetivo, foundation.autorizacao v1,
+│                                    #   Authorization/FiltroExigirPermissao (vindo de App.Api, G31)
 ├── App.Composicao/                  # L3 NOVO: lista única de módulos (vazia na base)
 ├── App.Api/
-│   ├── Access/                      # L2.1: FiltroRegistroUsoSessao, emissão (cookie/ticket no teto), respostas
+│   ├── Access/                      # L2.1: FiltroInstalacaoAtiva, FiltroExigirPermissao (G31; movido a
+│   │                                #   Platform.Modulos na L3), FiltroRegistroUsoSessao, ContextoNegacaoSessao, emissão (cookie/ticket no teto), respostas
 │   │                                #   com idleTimeoutMinutes/sessionIdleTimeoutMinutes; L3: modules, permissionDetails
 │   ├── Interface/                   # L3 NOVO: arquivos estáticos, fallback, cabeçalhos, buildId
 │   ├── Modules/                     # L3 NOVO: grupo /api/v1/modules/{id} (com registro de uso)
@@ -289,7 +291,11 @@ repetição de revogação (D33).
    `sessionExpiresAt` (teto) e `sessionIdleTimeoutMinutes`.
 4. **Registro de uso** ([D33](research.md#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência)):
    `FiltroRegistroUsoSessao` no grupo de rotas protegidas (`/me`, `/context`; na L3,
-   módulos), após autorização e antes do handler; grava se `agora − UltimoUsoEm ≥ 60 s`;
+   módulos), na ordem (G31) autorização → `FiltroInstalacaoAtiva` → `FiltroExigirPermissao`
+   (quando exigida) → `FiltroRegistroUsoSessao` → handler, de modo que 403/409 nunca
+   renovam; os casos de uso mantêm as mesmas verificações; 400 `INPUT_INVALID`/
+   `CSRF_INVALID` antes do handler não renovam, 400/422 do handler renovam; grava se
+   `agora − UltimoUsoEm ≥ 60 s`;
    conflito descartado; falha de banco → 503. Login, logout, antiforgery, health, OpenAPI,
    `/tenant` e arquivos estáticos nunca renovam. Revalidações da interface (`/me` por
    carga, foco ou navegação) são requisições aceitas comuns e renovam (clarificação
