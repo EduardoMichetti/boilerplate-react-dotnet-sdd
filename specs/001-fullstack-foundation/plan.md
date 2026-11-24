@@ -1,166 +1,172 @@
-# Implementation Plan: L2 — autenticação e acesso local ao tenant
+# Implementation Plan: L2.1 (sessão por inatividade + teto absoluto) e L3 (interface web de acesso e extensão modular)
 
-**Branch Git**: `main` | **Date**: 2026-11-05 | **Revisão**: 2026-11-08 (clarificações de prazo de sessão e limpeza; decisões G1–G15 de [tasks.md](tasks.md)) | **Spec**: [spec.md](spec.md)
-**Feature Context**: `001-fullstack-foundation`, resolvido por `.specify/feature.json`.
-O campo `BRANCH` retornado pelo setup é esse contexto, não uma troca de branch Git.
-**Input**: “em specs\001-fullstack-foundation planejar l2 com a l1 entregue”.
-**Status**: design da L2; nenhum código, migration, container ou teste de aplicação
-é implementado/executado neste comando. L1/L2 correspondem a I1/I2 nos artefatos anteriores.
+**Branch Git**: `main` | **Date**: 2026-11-24 | **Spec**: [spec.md](spec.md) (clarificações de 2026-11-22 e 2026-11-23)
+**Feature Context**: `001-fullstack-foundation`, resolvido por `SPECIFY_FEATURE_DIRECTORY`
+(não há `.specify/feature.json`). O campo `BRANCH` retornado pelo setup é esse contexto,
+não uma troca de branch Git.
+**Input**: atualizar o plano para os esclarecimentos de 2026-11-23: primeiro a reabertura
+da L2 (sessão por inatividade + teto absoluto, recorte **L2.1**), depois a L3 sobre o novo
+modelo de sessão, registrando somente o delta.
+**Status**: design; nenhum código, migration, container ou teste é implementado ou
+executado neste comando. L3 corresponde a I3 nos artefatos anteriores.
+**Revisões**: 2026-11-23 (plano L3); **2026-11-24** (L2.1 prioritária; deltas L3 de
+permissões com descrição, validade da sessão na tela, nova entrada no próprio local,
+várias abas, nenhum armazenamento no navegador; migration inicial regenerada);
+**2026-11-24, clarificações finais** (revalidação por evento renova a inatividade; motivo
+da negação de sessão só no log — D37; 409 no diálogo de nova entrada resolvido por uma
+revalidação — D38).
+**Plano anterior**: o plano L2 (revisão 2026-11-08) permanece no histórico Git
+(`c33acbe`). Decisões vigentes em [research.md](research.md) D14–D20, D21 (revisada por
+D31), [data-model.md](data-model.md), [operations.md](contracts/operations.md) e ADRs 0002/0003.
 
 ## Summary
 
-**Construção do zero.** Nada foi publicado e não há dados a preservar. O que a L1
-produziu (quatro camadas, usuários e permissões locais, marcador do banco, preflight
-EF, health/OpenAPI, Compose e CI) é ponto de partida e pode ser alterado ou desfeito
-livremente. O esquema do banco é criado por **uma migration inicial única**, gerada
-do modelo completo descrito em [data-model.md](data-model.md), já com as convenções
-da Constituição 2.2.0. Todo registro nasce com autoria e data reais.
-[tasks.md](tasks.md) mantém seu histórico concluído e não é regenerado
-por `/speckit-plan`. O próximo `/speckit-tasks` deve preservar esse histórico e
-gerar somente o trabalho da L2 com identificadores novos.
+A L2 está entregue e validada (quickstart §1–§7, Backend CI verde). A spec reabre a L2
+e define a ordem:
 
-A **L2** entrega login/logout HTTP por cookie, antiforgery, sessão persistida
-revogável, `/me`, `/context`, autorização por concessão atual e procedimento restrito
-de contas/permissões. Mantém **1 backend + 1 PostgreSQL por cliente**, sem catálogo,
-conta global, escolha de banco por header, frontend, painel ou módulo de negócio.
-A L3 continua responsável pela interface e extensão modular; L4, pela publicação
-Dokploy/VPS, backups e restauração.
+1. **L2.1 — modelo de sessão (FR-006, SC-002), prioridade bloqueante.** A sessão expira
+   no que ocorrer primeiro: **inatividade** (padrão 30 min, faixa 5–240) ou **teto
+   absoluto** contado da criação (padrão 600 min, faixa 30–720). Cada requisição
+   autenticada aceita renova a inatividade, nunca o teto; negadas não renovam; sem
+   remember-me ou refresh. Teto e janela são fixados na emissão. Inclui novas chaves de
+   configuração, colunas e CHECKs da sessão, registro de uso limitado a 1 escrita/minuto,
+   regeneração da migration inicial única, campos aditivos na API, SC-002 e regressão
+   revisados. **Implementada e validada antes de iniciar qualquer bloco da L3.**
+2. **L3 — interface web de acesso (FR-004) e extensão modular (FR-017 a FR-019)**, já
+   sobre o modelo da L2.1. O plano L3 de 2026-11-23 continua válido com os deltas:
+   permissões com descrição pt-BR declarada em código e devolvida por `/context`; tela de
+   contexto com teto e regra de inatividade em texto estático; **nova entrada no próprio
+   local** (conteúdo escondido, estado da aba preservado em memória, diálogo de
+   credenciais; mesma conta restaura, outra conta ou sair descarta); aviso entre abas só no
+   logout explícito; nenhum dado gravado no armazenamento do navegador; E2E bloqueantes
+   adicionais.
 
-O design é orientado por [research.md](research.md) (revisão L2 D14–D21),
-[data-model.md](data-model.md), [operações](contracts/operations.md) e
-[ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md).
+Mantém **1 backend + 1 PostgreSQL por cliente**. Publicação/recuperação (Dokploy/VPS,
+HSTS, backups, restauração) continua L4.
+
+Design orientado por [research.md](research.md) (L2.1: D31–D33 e D37; L3: D22–D30, D34–D36 e D38),
+[data-model.md §6–§9](data-model.md), [operations.md §4 (L2.1) e §7–§9](contracts/operations.md)
+e [ui.md](contracts/ui.md).
 
 ## Technical Context
 
-**Language/Version**: C# 14 / `net10.0`. SDK-base `10.0.401` com
-`rollForward=latestFeature` e `allowPrerelease=false`, conforme `global.json`.
-Não confundir SDK-base com a versão efetivamente selecionada no ambiente; registrar
-`dotnet --version` na validação. Runtime/ASP.NET Core e Identity/EF Core `10.0.12`.
+**Language/Version**: backend inalterado — C# 14 / `net10.0`, SDK-base `10.0.401`
+(`rollForward=latestFeature`, sem preview), ASP.NET Core/EF Core/Identity `10.0.12`.
+Frontend (L3): **TypeScript 6.0.3** estrito sobre **Node.js 24.22.3 LTS** (revisão
+[D24](research.md#d24--stack-do-frontend-e-pins-reverificados-2026-11-23) do pin D01).
 
-**Primary Dependencies**: pacotes existentes, provider/driver Npgsql `10.0.3`,
-OpenAPI nativo, Cookies, Antiforgery, Data Protection e Rate Limiting do framework.
-Identity continua com `IdentityUserContext<UsuarioAplicacao, Guid>` e concessões
-diretas; sem RoleManager, Redis, JWT, mediator, biblioteca de CLI ou provedor externo.
-Única dependência nova: `FluentValidation` e `FluentValidation.DependencyInjectionExtensions`
-`12.2.0` (Apache-2.0, `net8.0`+), para validação de entrada HTTP conforme
-[ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md); aprovação na
-revisão exigida pela Constituição X. Não há atualização das versões existentes.
-`Microsoft.Extensions.Hosting` `10.0.12` somente em `Platform.Operations` (G20, aprovada
-2026-11-08; builder sem repassar argumentos de linha de comando) e referência direta a
-`Microsoft.Extensions.Options` em Application (G19, já transitiva no grafo).
+**Primary Dependencies**:
+- **L2.1**: nenhuma dependência nova (Options, EF Core, cookie handler e filtros de
+  endpoint são do framework já referenciado).
+- **L3**: backend sem pacote NuGet novo. Frontend com pins exatos sem ranges
+  (verificados no registro npm em 2026-11-23, D24):
 
-**Storage**: PostgreSQL `18.6`, banco exclusivo da instalação.
-`AcessoTenantDbContext` tem **uma** migration inicial com marcador, contas,
-permissões, `SessaoAutenticacao`, `RegistroOperacaoAcesso`, base auditável e
-convenções de nomes (PK `Id<Entidade>`, FK `FkId<Entidade>`, constraints `pk_/fk_/
-ix_/uq_/ck_`). A migration de rascunho existente no repositório é descartada e
-regenerada a partir desse modelo. Bancos locais A/B são criados do zero.
-Key ring em volume privado por instalação, não em novo banco.
+| Uso | Pacotes |
+|---|---|
+| Runtime | `react`/`react-dom` 19.3.1, `react-router` 8.5.2 |
+| Build/estilo | `vite` 8.3.8, `@vitejs/plugin-react` 6.3.0, `tailwindcss`/`@tailwindcss/vite` 4.3.5 |
+| Tipos | `typescript` 6.0.3, `@types/react`/`@types/react-dom` 19.3.0 |
+| Qualidade | `eslint` 10.15.0, `typescript-eslint` 8.74.0, `eslint-plugin-react-hooks` 7.1.1, `prettier` 3.10.1 |
+| Testes | `vitest` 5.1.1, `jsdom` 31.0.1, `@testing-library/react` 16.3.3, `@testing-library/dom` 10.4.2, `@testing-library/user-event` 14.6.13, `@playwright/test` 1.65.1, `@axe-core/playwright` 4.14.0 |
 
-**Testing**: `xunit.v3 4.0.2`, Microsoft.Testing.Platform e
-Testcontainers.PostgreSql `4.16.0`; manter os três projetos de teste existentes.
-Autenticação real com cookies/CSRF e PostgreSQL, relógio controlável por
-`TimeProvider` (fonte única do instante atual em todo o código de produção, com
-implementação de teste própria, sem pacote novo), barreiras para concorrência e
-consumidor HTTP independente.
+**Estado e consultas no cliente (decisão revisada, [D35](research.md#d35--nova-entrada-no-próprio-local-e-estado-preservado-revisa-d25))**:
+**nenhuma biblioteca**. A preservação do estado na nova entrada usa a árvore React
+mantida montada sob `hidden` + `inert`, `<dialog>` nativo com `showModal()` (foco preso,
+fundo inerte) e uma fila de leituras pendentes no `ClienteApi` sobre `fetch`. TanStack
+Query foi reavaliada e rejeitada: não preserva estado local de componentes, exigiria
+desligar retry/refetch e acrescenta ~13 KB gzip sem necessidade presente. Sem cliente
+HTTP, UI kit, CSS-in-JS, biblioteca de modal/foco, i18n, service worker, telemetria ou
+gerador de tipos OpenAPI. Dependências novas exigem aprovação (Constituição X) — gate Q0.
 
-**Target Platform**: ASP.NET Core em Linux, Compose v2 e PowerShell no Windows.
-Mesmo origin para a API e o frontend posterior. Produção exige HTTPS;
-Development HTTP é exceção explícita somente em localhost.
+**Storage**: PostgreSQL `18.6`, banco exclusivo.
+- **L2.1**: `access.sessoes_autenticacao` troca `ExpiraEm` por `TetoAbsolutoEm` e ganha
+  `JanelaInatividadeMinutos` e `UltimoUsoEm`, com CHECKs de teto (30–720), janela (5–240,
+  ≤ teto) e último uso (`[CriadoEm, TetoAbsolutoEm)`) e índices revisados
+  ([data-model §7](data-model.md#sessaoautenticacao--accesssessoes_autenticacao)).
+  **Migration inicial única regenerada**, sem migration incremental ([D32](research.md#d32--migration-inicial-única-regenerada-em-vez-de-migration-incremental)).
+- **L3**: nenhuma tabela/coluna nova; CHECK de `CodigoPermissao` com hífen entra numa
+  nova regeneração da migration inicial (revisa D28). Módulos sem dados.
+- Interface: **nada** no armazenamento do navegador, nem marcador de recarga (D36).
 
-**Project Type**: monólito modular; quatro projetos de produção existentes mais
-um executável operacional mínimo, `Platform.Operations`, fora da imagem da API.
-Esse host só atende FR-033; não é framework administrativo nem requisito retroativo da L1.
+**Testing**: backend mantém xUnit v3 4.0.2/MTP/Testcontainers 4.16.0 e os três projetos,
+com `TimeProvider` controlável. L2.1 acrescenta a matriz de sessão (fronteiras de
+inatividade/teto, negadas não renovam, limitação de escrita, faixas de configuração,
+CHECKs, concorrência registro de uso × revogação, limpeza pela expiração efetiva,
+revalidação por `/me` renovando, motivo da negação no log capturado por `CapturaLogs`). L3:
+ESLint (tipos), `tsc --noEmit`, Prettier, Vitest + Testing Library, Playwright (Chromium)
++ axe contra a stack local com a API servindo a interface. Todos bloqueantes.
 
-**Performance Goals**: SC-002 e SC-005 completos para a superfície backend;
-SC-003 com **200 operações, 100 por instalação e pico medido >=20**.
-Não se inventa meta de latência/throughput. SC-006/SC-008 acompanham a L2,
-mantendo SC-009 como regressão sobre a migration inicial.
+**Target Platform**: API ASP.NET Core em Linux (Compose v2; PowerShell no Windows para
+o roteiro). Navegadores (L3): duas últimas versões estáveis de Chrome, Edge e Firefox
+desktop (todas com `<dialog>` e `inert` nativos); E2E bloqueante só em Chromium.
 
-**Constraints**: Português Técnico no código, `Id*`, `Excecao*`, `StringsConexao`,
-XML summaries e `HasComment` nos campos persistidos. Propriedades C# herdadas do
-Identity (`Id`, `UserId`) não são renomeáveis; suas colunas são mapeadas para
-`IdUsuario`/`FkIdUsuario`. Propriedades públicas JSON já desenhadas permanecem.
-Constituição 2.2.0: `Id*` é chave técnica UUID v7, nunca código de negócio; FK
-persistida é `FkId*` (sem vazar para Application/DTO); instantes são
-`DateTimeOffset` UTC/`timestamptz` em microssegundos vindos de `TimeProvider`.
-Configuração do produto usa `CodigoAplicacao` (texto, não `Id*`).
-Convenções e exceções em [data-model.md](data-model.md#2-convenções-de-nomes-no-banco).
+**Project Type**: monólito modular web. L2.1 não cria projeto. L3: dois projetos novos
+de backend (`Platform.Modulos`, `App.Composicao`), um projeto `frontend/` e o módulo
+sintético de SC-004 sob `backend/tests/`.
 
-**Scale/Scope**: cinco operações HTTP novas e dois health checks preservados;
-duas instalações reais independentes nos testes; nenhuma conta ou senha padrão.
-Procedimentos operacionais têm alvo explícito e autorização própria, não cookie de usuário.
+**Performance Goals**: L2.1 — no máximo 1 escrita de uso por minuto por sessão; nenhuma
+escrita em requisições negadas; sem `Set-Cookie` em requisições normais. L3 — JavaScript
+inicial ≤ **200 KiB gzip** (NFR-013, bloqueante), SC-001 ≤ 45 min.
+
+**Constraints**: Português Técnico também no TypeScript; pastas físicas em inglês. CSP
+sem `'unsafe-inline'`, nonce ou hash para scripts e estilos. Sem `localStorage`/
+`sessionStorage`/IndexedDB. Sem temporizador de expiração no cliente, requisição periódica
+ou login silencioso. Regras L2 (cookies `__Host-`, CSRF, ordem G2, ADR 0003, nomes,
+`TimeProvider`, UUID v7, sem `ExecuteUpdate`/`ExecuteDelete` em entidade auditável)
+inalteradas.
+
+**Scale/Scope**: L2.1 — 2 chaves de configuração (1 obsoleta rejeitada), 3 colunas/3
+CHECKs, 1 filtro de endpoint + 1 caso de uso, 2 campos aditivos de contrato
+(`idleTimeoutMinutes`, `sessionIdleTimeoutMinutes`), `openapi.json` 2.1.0. L3 — 1 operação
+nova (`GET /api/v1/tenant`), 2 campos aditivos em `/context` (`modules`,
+`permissionDetails`), SPA com sete estados + diálogo de nova entrada, grupo de rotas de
+módulos, módulo sintético de teste.
 
 ## Constitution Check
 
 *GATE: conferir antes da pesquisa e depois do design.*
 
-Constituição: [constitution.md](../../.specify/memory/constitution.md), versão 2.3.0
-(as convenções de nomes, Id e data/hora citadas como “2.2.0” permanecem vigentes).
-PASS refere-se ao **desenho**, nunca a execução ou liberação já comprovadas.
-Reavaliação 2026-11-08 (D21): prazo configurável e `sessao limpar` mantêm todos os
-princípios em PASS e não exigem dependência nova nem exceção — ver notas por linha.
+Constituição [2.3.0](../../.specify/memory/constitution.md). PASS refere-se ao
+**desenho**, não a execução comprovada.
 
-| Princípio | Pré-pesquisa | Pós-design | Evidência / gate de implementação |
+| Princípio | L2.1 (pré / pós) | L3 (pré / pós) | Evidência / gate de implementação |
 |---|---|---|---|
-| I. Arquitetura modular | PASS | PASS | Portas em Application; HTTP na API; Identity/EF em Infrastructure; host operacional só compõe casos de uso. |
-| II. Contratos explícitos | PASS | PASS | APIs de identidade e contexto sem acesso a módulos/DbContexts externos. |
-| III. Stack | PASS | PASS | Stack/pins existentes; mecanismos nativos; sem frontend nesta entrega. |
-| IV. Isolamento | PASS | PASS | Instalação fixa, marcador antes de dados de acesso, chave/cookie/sessão tenant-local, testes A/B. |
-| V. API | PASS | PASS | Contrato atual preservado; alvo L2 separado; Problem Details e nenhuma resposta HTML de autenticação. Categorias de falha, códigos estáveis e JSON estrito conforme ADR 0003 (bloco P1c). |
-| VI. Segurança | PASS condicionado a P0 | PASS condicionado a P0 | Runtime sem owner/DDL, cookies+CSRF, autorização a cada operação, sessão revogável e tooling separado. Prazo limitado a 480 min e validado na inicialização; DELETE de sessões só para o operador individual; registro de limpeza sem ids de sessões/contas. |
-| VII. Qualidade | PASS | PASS | Migration inicial única (banco novo, reaplicação, histórico desconhecido rejeitado); não há versão anterior publicada a atualizar. PostgreSQL real, revogação/concorrência e gates do backend. Limites 5/480 vs 4/481 e retenção 1/365 vs 0/366, fronteira do corte, falha injetada na limpeza e um registro por execução. |
-| VIII. Infraestrutura | PASS condicionado a P0 | PASS condicionado a P0 | Compose local restrito, key ring privado persistente; HTTPS antes de acesso não local. Produção continua L4. |
-| IX. Manutenibilidade | PASS | PASS | Mecanismos nativos e ADR 0002; sem abstrações genéricas. Regras 2.2.0 de Id, FK, nomes de constraints e data/hora com exceções registradas e testes de modelo/arquitetura. Novos nomes em Português Técnico (`PrazoAbsolutoMinutos`, `RetencaoSessoesDias`, `InstanteCorte`, `ck_sessoes_autenticacao_prazo`); corte calculado do `TimeProvider`; delete rastreado, sem `ExecuteDelete`. |
-| X. Evolução | PASS | PASS | FluentValidation é a única dependência nova, justificada na ADR 0003 (alternativa nativa `AddValidation()` avaliada). Construção do zero explicitada (nada publicado, sem dados); login só liberado com todos os controles; L3/L4 preservadas. A partir da primeira publicação, mudanças de esquema passam a ser aditivas. |
+| I. Arquitetura modular | PASS / PASS | PASS / PASS | L2.1: regra de validade em Application (`ValidacaoSessaoAtual`, `CasoUsoRegistrarUsoSessao`), filtro HTTP em App.Api, persistência em Infrastructure. L3: módulos como projetos próprios compostos em `App.Composicao`; frontend sem regra de negócio. |
+| II. Contratos explícitos | PASS / PASS | PASS / PASS | Campos de sessão e `permissionDetails` documentados; descrições declaradas junto do código da permissão; dependências de módulos por contrato com versão maior. |
+| III. Stack | PASS / PASS | PASS cond. Q0 / PASS cond. Q0 | L2.1 sem dependência. L3: pins exatos, TS estrito, desvio TS 7.0.2 → 6.0.3 (D24); nenhuma lib de estado/modal acrescentada (D35). |
+| IV. Isolamento | PASS / PASS | PASS / PASS | Sessão, uso e limpeza no banco da própria instalação; cookie host-only. Interface sem armazenamento no navegador; mesmo bundle para qualquer instalação. A×B segue provado por testes de backend. |
+| V. API | PASS / PASS | PASS / PASS | Mudanças aditivas (FR-021): `expiresAt`/`sessionExpiresAt` mantêm o nome e passam a significar explicitamente o teto; `openapi.json` 2.1.0 promovido **com** a implementação (teste de contrato compara a versão servida). `no-store` em toda a API. |
+| VI. Segurança | PASS / PASS | PASS / PASS | Expiração verificada no servidor a cada requisição; negadas não renovam; uso nunca estende o teto; chave obsoleta impede a inicialização (sem mudança silenciosa de política); registro de uso nunca reativa sessão revogada; 401 genérico sem motivo ao cliente, motivo só no log sem id de sessão/conta, cookie ou IP (D37). L3: conteúdo protegido escondido e inerte atrás do diálogo; sem login silencioso, timer ou keep-alive; gravação nunca reenviada sem ação do usuário. |
+| VII. Qualidade | PASS / PASS | PASS / PASS | Matriz L2.1 com fronteiras 4/5, 240/241, 29/30, 720/721, não inteiro, janela > teto; PostgreSQL real; concorrência determinística. Migration: validada em banco novo; "atualização de versão anterior suportada" não se aplica porque nenhuma versão foi publicada (clarificação 2026-11-06; FR-015 esclarecido em 2026-11-24). L3: E2E adicionais (expiração com conteúdo escondido, troca de conta, gravação não reenviada, várias abas, axe do diálogo). |
+| VIII. Infraestrutura | PASS / PASS | PASS / PASS | L2.1: Compose e `.env.example` com as duas chaves; bancos locais recriados pelo roteiro existente. L3: estágio Node fixado na imagem da API; roteiro SC-001 automatizado. |
+| IX. Manutenibilidade | PASS / PASS | PASS / PASS | Nomes em Português Técnico (`TetoAbsolutoEm`, `UltimoUsoEm`, `JanelaInatividadeMinutos`, `FiltroRegistroUsoSessao`); solução mais simples (sem sliding do handler, sem lib de estado); ADR 0002 revisada; ADRs 0004/0005 na L3. |
+| X. Evolução | PASS / PASS | PASS cond. Q0 / PASS cond. Q0 | L2.1 explicita a migração de comportamento (chave antiga rejeitada, quickstart §7.1, campos aditivos). L3: cada dependência com necessidade/alternativa (D24–D26, D35). |
 
-**ADRs após 2026-11-08.** [ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md)
-continua atendida: expiração absoluta sem sliding/refresh, revogação na próxima
-operação, host operacional sem HTTP e auditoria atômica; a ADR recebeu revisão
-substituindo “30 minutos” por prazo configurável (padrão 30) e registrando a limpeza
-por operador, sem job. [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md)
-não muda: nenhuma rota, status ou código HTTP novo; configuração inválida é falha
-de inicialização (não Problem Details) e `sessao limpar` usa resultado/código
-estável do host (`RETENCAO_INVALIDA`, `CONFLITO_CONCORRENTE`), sem exceção como
-fluxo de regra esperada. Desde G29, `CONFLITO_CONCORRENTE` fica restrito a conflito
-real; exceção inesperada nas operações de conta/permissão é `FALHA_INTERNA` e email
-duplicado é `EMAIL_JA_CADASTRADO` (ver [operations.md](contracts/operations.md)).
+### Gates R0 — L2.1 (bloqueiam a implementação da L2.1)
 
-### P0 — pré-requisitos bloqueantes, sem exceção constitucional
+1. **ADR 0002 revisada** pelo mantenedor: inatividade + teto, registro de uso limitado,
+   chave obsoleta rejeitada, limpeza pela expiração efetiva.
+2. ~~Precisão da limitação de escrita~~ — **resolvido** na clarificação de 2026-11-24
+   (FR-006/SC-002 aceitam negação até 60 s antes, nunca depois).
+3. ~~Migration regenerada~~ — **resolvido** na clarificação de 2026-11-24 (FR-015:
+   "estado anterior suportado" = versão publicada; regenerar até a L4).
+4. ~~Semântica de "requisição aceita"~~ — **resolvido** na clarificação de 2026-11-24
+   (FR-006), como em D33. A chave antiga com valor impedindo a inicialização também foi
+   confirmada (FR-006).
 
-A conclusão informada da L1 não dispensa verificar a configuração usada na L2.
-A leitura do Compose/exemplo atual mostra a conexão runtime exemplificada com
-`owner_cliente_a`, PostgreSQL publicado para depuração e ausência de key ring.
-Não se assume separação de privilégios ou proteção de sessão por existir um comentário.
+### Gates Q0 — L3 (bloqueiam a implementação da L3; exigem L2.1 aceita)
 
-Antes de habilitar login, as tarefas L2 devem:
+1. **Aprovação das dependências** do frontend e da troca do pin TypeScript (D24).
+2. **ADR 0004** — interface servida pela API (mesma origem, CSP/cache/fallback, `buildId`,
+   comportamento sem build por ambiente) e nova entrada no próprio local (D35/D36).
+3. **ADR 0005** — composição de módulos em compilação, regras de id/permissão/descrição/
+   contrato/dependência, módulos sem dados, OpenAPI só da fundação, base `aspnet` da
+   imagem `operations`.
+4. **Interpretação de SC-004 "solução distribuída"** (D29), como no plano anterior.
+5. ~~Pedido de sair negado com 401~~ — **resolvido** na clarificação de 2026-11-24: conclui
+   a saída localmente (descarta, `/entrar` com aviso, avisa as outras abas), sem diálogo.
 
-1. Separar efetivamente runtime, operador de acesso e owner de migrations por
-   credencial/grants; remover credenciais utilizáveis dos exemplos e logs.
-   API jamais recebe conexão de operador/owner; provar que runtime não executa DDL.
-2. Deixar PostgreSQL sem publicação pública; acesso de depuração, quando necessário,
-   limitado explicitamente ao loopback. A/B usam portas, volumes e redes próprios.
-3. Persistir key ring separado por instalação; produção exige certificado externo
-   para proteção em repouso e HTTPS. O Compose atual é Production sobre HTTP:
-   definir modo local Development/loopback ou fornecer HTTPS, nunca relaxar cookies
-   seguros silenciosamente para fazê-lo funcionar.
-   Em Docker, Development HTTP local usa publicação da API no loopback do host;
-   o listener dentro do container pode aceitar sua interface de rede. Não exigir
-   `RemoteIpAddress` loopback dentro do container (o gateway Docker não é loopback)
-   nem confiar só em Host/X-Forwarded-For para provar acesso local.
-4. Validar os scripts de inicialização sempre em banco local criado do zero:
-   o `infra/docker/init-db.sh` (substitui o antigo `init-db.sql`; lê variáveis e cria
-   `<banco>_owner`, `<banco>_runtime`, `<banco>_operador` e o login individual do
-   operador, com CONNECT/USAGE apenas — GRANTs por tabela vêm da migration, G6) só roda
-   na primeira criação do volume, então o ambiente local de desenvolvimento é montado
-   com volumes novos (`down --volumes` faz parte do setup).
-5. Não considerar `.env.example` uma configuração pronta. Secrets locais ficam no
-   `infra/.env.local` privado (mesmo modelo de variáveis do Dokploy, G4); cada serviço
-   recebe somente a própria credencial, o exemplo versionado não tem senha utilizável e
-   `${VAR:?}` falha quando falta valor, sem fabricar valores ausentes.
-
-Não há violação aceita no design. Falha de P0 **bloqueia implementação/liberação da
-superfície autenticada**, não autoriza um login “provisório”. O comando atual é documental.
+Não há violação constitucional aceita no design.
 
 ## Project Structure
 
@@ -168,306 +174,287 @@ superfície autenticada**, não autoriza um login “provisório”. O comando a
 
 ```text
 specs/001-fullstack-foundation/
-├── spec.md                       # requisitos mantidos
-├── plan.md                       # plano vigente L2
-├── research.md                   # decisões históricas + revisão L2
-├── data-model.md                 # modelo completo L2 e convenções
-├── quickstart.md                 # validação L1 e roteiro futuro L2
-├── tasks.md                      # histórico L1 preservado
+├── spec.md                 # requisitos (L2.1 prioritária; recorte L3)
+├── plan.md                 # este plano (L2.1 + L3)
+├── research.md             # D01–D30 preservadas; L2.1 D31–D33; delta L3 D34–D36
+├── data-model.md           # §6 chaves, §7 sessão L2.1, §8 migration regenerada, §9 L3
+├── quickstart.md           # L1/L2 + §7.1 roteiro L2.1 + roteiro L3 (§8–§12)
+├── architecture.md         # arquitetura evolutiva + L2.1 + L3
+├── tasks.md                # L2.1 (T135–T169) e L3 (T170–T219) + históricos L1/L2
 └── contracts/
-    ├── openapi.json              # contrato L2 entregue (promovido na Parada L2-2)
-    └── operations.md             # contratos EF e procedimento restrito L2
+    ├── openapi.json        # contrato L2 2.0.0 servido; 2.1.0 promovido com a L2.1 (delta em operations §4)
+    ├── operations.md       # L2 + §4 “Expiração e uso da sessão (L2.1)” + §7–§9 L3
+    └── ui.md               # contrato observável da interface (com diálogo de nova entrada)
 ```
 
 ### Source Code (repository root)
 
 ```text
 backend/src/
-├── Platform.Domain/              # regras puras, sem Identity/EF/HTTP
+├── Platform.Domain/
+│   └── Access/                      # L3: DefinicaoPermissao, CodigosPermissao.Definicoes e formato com hífen
 ├── Platform.Application/
-│   ├── Configuration/            # OpcoesInstalacaoTenant existente
-│   ├── Tenancy/                  # verificação de identidade existente
-│   └── Access/                   # casos de uso e portas L2
-├── Platform.Infrastructure/
-│   ├── Access/                   # adaptadores Identity e operação restrita L2
-│   └── Persistence/TenantAccess/
-│       ├── AcessoTenantDbContext.cs
-│       ├── Entities/             # UsuarioAplicacao, PermissaoUsuario, IdentidadeBancoTenant + L2
-│       └── Migrations/           # migration inicial única, gerada do modelo completo
+│   ├── Configuration/               # L2.1: OpcoesSessao (InatividadeMinutos, TetoAbsolutoMinutos) + validador
+│   ├── Access/                      # L2.1: ValidacaoSessaoAtual (expiração efetiva), CasoUsoRegistrarUsoSessao,
+│   │                                #   CasoUsoLogin (grava janela/teto/último uso), repetição de revogação;
+│   │                                #   L3: ICatalogoPermissoes com descrições
+│   └── Tenancy/                     # L3: ConsultarIdentidadePublicaTenant
+├── Platform.Infrastructure/         # L2.1: entidade SessaoAutenticacao (TetoAbsolutoEm, JanelaInatividadeMinutos,
+│                                    #   UltimoUsoEm), configuração EF, CHECKs/índices, RepositorioSessoes (registro
+│                                    #   de uso, repetição de revogação), migration inicial regenerada, limpeza pela
+│                                    #   expiração efetiva; L3: CHECK com hífen (nova regeneração)
+├── Platform.Modulos/                # L3 NOVO: IModulo, DeclaracaoModulo (Permissoes = DefinicaoPermissao),
+│                                    #   ValidadorComposicaoModulos, CatalogoPermissoesEfetivo, foundation.autorizacao v1
+├── App.Composicao/                  # L3 NOVO: lista única de módulos (vazia na base)
 ├── App.Api/
-│   ├── Access/                   # endpoints, cookies/store e antiforgery L2
-│   ├── Diagnostics/              # Problem Details existente, ampliado
-│   └── Health/                   # sem lookup de sessão
-└── Platform.Operations/           # novo host pontual L2, sem servidor HTTP
+│   ├── Access/                      # L2.1: FiltroRegistroUsoSessao, emissão (cookie/ticket no teto), respostas
+│   │                                #   com idleTimeoutMinutes/sessionIdleTimeoutMinutes; L3: modules, permissionDetails
+│   ├── Interface/                   # L3 NOVO: arquivos estáticos, fallback, cabeçalhos, buildId
+│   ├── Modules/                     # L3 NOVO: grupo /api/v1/modules/{id} (com registro de uso)
+│   └── Tenancy/                     # L3 NOVO: GET /api/v1/tenant
+└── Platform.Operations/             # L2.1: sessao limpar pela expiração efetiva; L3: catálogo efetivo
 backend/tests/
-├── Platform.UnitTests/
-├── Platform.IntegrationTests/
-└── Platform.ContractTests/
-infra/                            # Compose/perfis/secrets/key ring, sem deploy real
-docs/adr/                         # 0001 preservado; 0002 registra L2
+├── Platform.UnitTests/              # L2.1: opções/faixas, expiração efetiva, limitação; L3: validador, descrições
+├── Platform.IntegrationTests/       # L2.1: matriz de sessão com PostgreSQL real, CHECKs, concorrência, limpeza; L3: interface, SC-004
+├── Platform.ContractTests/          # L2.1: openapi 2.1.0; L3: OpenAPI idêntico, headers, 404 JSON, arquitetura
+└── Modules/                         # L3: Teste.ModuloSintetico(.Contratos)
+frontend/                            # L3 NOVO
+├── package.json / package-lock.json / .nvmrc / orcamento.json
+├── src/
+│   ├── app/          # roteador, layout
+│   ├── api/          # ClienteApi (fetch, fila de leituras pendentes, ErroGravacaoNaoEnviada)
+│   ├── session/      # ProvedorSessao, máquina de estados (inclui reautenticando), BroadcastChannel (logout), revalidação
+│   ├── update/       # buildId, recarga única pelo tipo de navegação
+│   ├── screens/      # TelaEntrada, TelaContexto (validade + permissões com descrição), …
+│   ├── components/   # DialogoNovaEntrada (<dialog>), AreaProtegida (hidden+inert), ValidadeSessao, …
+│   └── styles/
+├── scripts/          # verificar-orcamento.mjs, plugin-id-build.ts (plugin Vite do buildId)
+└── e2e/              # Playwright + axe
+infra/
+├── .env.example / compose.yaml      # L2.1: Sessao__InatividadeMinutos, Sessao__TetoAbsolutoMinutos (remove PrazoAbsoluto)
+├── docker/Dockerfile.api            # L3: estágio Node 24.22.3
+├── docker/Dockerfile.operations     # L3: base aspnet 10.0.12 (D27)
+└── scripts/                         # L3: roteiro de acesso local (SC-001)
+.github/workflows/                   # L3: frontend-ci.yml; backend-ci.yml + SC-004
+docs/adr/                            # L2.1: 0002 revisada; L3: 0004 e 0005
 ```
 
-**Structure Decision**: Application define portas específicas de autenticação,
-sessão, consulta de contexto e manutenção de acesso; não recebe tipos Identity,
-`HttpContext` ou `AuthenticationTicket`. API adapta cookies/`ITicketStore` e DTOs;
-Infrastructure persiste tickets já protegidos como bytes e implementa Identity.
-O adapter de store não captura DbContext scoped nas options: resolve escopo por chamada.
-`Platform.Operations` referencia Application e Infrastructure só na composição.
-Testes arquiteturais devem abranger o novo host.
-
-`EntidadeAuditavel` e `IEntidadeAuditavel` em Domain definem a base comum de
-metadados, sem HTTP/Identity/EF nem PK genérica (permissão tem PK composta).
-`PermissaoUsuario` e `SessaoAutenticacao` herdam essa base.
-`UsuarioAplicacao` mantém `IdentityUser<Guid>` e implementa o mesmo contrato;
-C# não permite uma segunda classe-base. Mapeamento e preenchimento compartilhados
-em Infrastructure garantem o mesmo comportamento sem alterar herança Identity.
-A base não tem PK nem exclusão lógica.
-
-Preenchimento ([D19](research.md#d19--preenchimento-de-auditoria-datahora-e-identificadores-2026-11-06)):
-porta `IContextoOperacao` em Application (`IdOperacao`, autor, `InstanteOperacao`
-lido uma vez do `TimeProvider`), implementada por API, `Platform.Operations` e
-tooling; `InterceptadorAuditoria` em Infrastructure preenche metadados e incrementa
-`Versao` somente em sessões. Token de concorrência por entidade
-([D20](research.md#d20--tabelas-auxiliares-identity-concorrência-por-entidade-relógio-dos-uuids-e-troca-de-sessão-2026-11-07)):
-conta usa `ConcurrencyStamp` do Identity, concessão é imutável (INSERT/DELETE) e
-sessão usa `Versao`. Entidades auditáveis só são alteradas rastreadas; `ExecuteUpdate`/
-`ExecuteDelete` são proibidos nelas. Helper puro `InstanteUtc` em Domain normaliza
-para UTC/microssegundos e valida; não lê relógio. Helper puro `IdentificadorV7` gera
-UUID v7 a partir do `InstanteOperacao`; PKs `Guid` sem geração pelo provider.
-
-Nomes no banco ([data-model §2](data-model.md#2-convenções-de-nomes-no-banco)):
-PK `Id<Entidade>`, FK `FkId<Entidade>[Papel]` só na persistência, colunas PascalCase,
-tabelas snake_case, constraints/índices `pk_/fk_/ix_/uq_/ck_` em minúsculas por
-convenção central no `OnModelCreating`, validadas por teste de modelo.
+**Structure Decision**: a L2.1 não cria projetos: a regra de validade e o registro de uso
+ficam em Application (testáveis sem HTTP), o filtro que decide "requisição aceita" fica
+em App.Api (único ponto que conhece o resultado da autorização) e a persistência em
+Infrastructure. A estrutura L3 permanece a do plano de 2026-11-23: `Platform.Modulos`
+concentra abstração e validação; `App.Composicao` é o único ponto de inclusão de módulos,
+referenciado por `App.Api` e `Platform.Operations`.
 
 ## Phase 0 — pesquisa e decisões
 
-Revisão [D14–D21](research.md#revisão-l2--2026-11-04) resolve os pontos de integração
-(D21: prazo de sessão configurável e limpeza auditada, clarificações de 2026-11-08):
-pipeline cookie/CSRF, revogação sob corrida, persistência de chaves, autorização do
-operador, (D19) mecanismo de auditoria, padrão de data/hora, identificadores,
-nomes no banco e migration inicial única e (D20) tabelas auxiliares Identity,
-concorrência por entidade, relógio dos UUIDs e troca atômica de sessão no login.
-As premissas de preservação/upgrade da L1 em D14, D16 e D17 estão marcadas como
-substituídas pela construção do zero. Não há esclarecimentos técnicos pendentes.
-Exemplos do source browser/branch móvel não provam comportamento do binário fixado:
-as transições de store serão verificadas na implementação com o runtime utilizado.
+| Decisão | Recorte | Tema |
+|---|---|---|
+| D31 | L2.1 | Sessão por inatividade + teto: chaves, campos persistidos, CHECKs, cookie/ticket, API, limpeza (revisa D21 e o trecho de D15) |
+| D32 | L2.1 + L3 | Migration inicial única regenerada em vez de incremental (revisa D28 quanto à migration) |
+| D33 | L2.1 | Registro de uso: o que renova, limitação de 1 escrita/min, concorrência e tolerância nos testes |
+| D22–D30 | L3 | Mantidas (interface servida pela API, `buildId`, stack, CSP, composição, OpenAPI, CI) |
+| D34 | L3 | Descrição pt-BR das permissões em código; `permissionDetails` em `/context` |
+| D35 | L3 | Nova entrada no próprio local; estado preservado sem biblioteca (revisa D25) |
+| D36 | L3 | Aviso entre abas só no logout; recarga única sem armazenamento (revisa D25) |
+| D37 | L2.1 | Motivo da negação de sessão só no log (`EventId 1002 SessaoNegada`); 401 inalterado |
+| D38 | L3 | 409 `SESSION_CONFLICT` no diálogo de nova entrada → uma única revalidação de `/me` |
+
+Não há `NEEDS CLARIFICATION` pendente. Conflitos resolvidos no design:
+(a) o plano L3 previa migration aditiva e "não reescrever a migration inicial", o que
+contraria a clarificação de 2026-11-06 → regeneração (D32);
+(b) o marcador `sessionStorage['bps-recarga']` (D25) contrariava a orientação de não gravar
+nada no navegador → tipo de navegação (D36);
+(c) D25 descartava o estado em 401 e avisava as outras abas → nova entrada e aviso só no
+logout (D35/D36);
+(d) gravar uso em toda requisição conflitaria com `Versao` e com revogações → limitação e
+repetição de revogação (D33).
 
 ## Phase 1 — design e contratos
 
-### Pipeline HTTP e autorização
+### L2.1 — modelo de sessão (executar e aceitar antes da L3)
 
-1. Tratar erros/correlação com o mecanismo existente, ampliado conforme
-   [Tratamento de erros e validação](#tratamento-de-erros-e-validação); aceitar forwarded headers
-   somente de proxies explicitamente confiáveis. Limiter usa IP efetivo, não header livre.
-2. Separar health/OpenAPI/rotas não mapeadas do fluxo de sessão. `AllowAnonymous`
-   sozinho não impede autenticação automática. Health ignora cookies e header tenant;
-   liveness não toca banco/key ring; readiness verifica banco/versão e proteção de chaves.
-3. Em `/api/v1` mapeado, exigir exatamente um `X-Tenant-Id` UUID não vazio.
-   Validar instalação e marcador antes de consultar conta/sessão; nunca resolver outro banco.
-   Runtime/readiness exigem a cadeia de migrations conhecida completa, sem
-   pendentes nem IDs desconhecidos; apenas “nenhuma pendente” não detecta banco
-   de versão futura. Tooling aceita um prefixo válido dessa cadeia para upgrade
-   (relevante a partir da segunda migration); qualquer ID fora da cadeia conhecida
-   é rejeitado.
-4. Autenticar cookies apenas onde necessário: login/antiforgery permitem ausência de
-   sessão; `/me`, `/context` e logout exigem sessão local válida.
-   Cookie não desprotegível não provoca lookup nem autentica.
-5. Conferir conta ativa, lockout, stamp, sessão, epoch e expiração a cada operação.
-   `/me` autoriza a leitura da própria identidade pela correspondência conta/sessão;
-   `/context` exige também `foundation.context.read` vigente. Logout só pode revogar
-   a própria sessão, sem exigir permissão de contexto ou instalação ativa.
-   GET antiforgery deve permitir obter o token dessa sessão mesmo com instalação
-   inativa, sem liberar `/me`, `/context` ou dados.
-6. Validar antiforgery explicitamente em login/logout JSON. Respostas de acesso e
-   erros usam `Cache-Control: no-store`; dados de senha/cookie/ticket nunca são logados.
+1. **Configuração** ([data-model §6](data-model.md#6-configuração-sem-entidade-de-catálogo)):
+   `Sessao:InatividadeMinutos` (30; 5–240) e `Sessao:TetoAbsolutoMinutos` (600; 30–720),
+   parse estrito, ausente/vazio = padrão, `ValidateOnStart`; inatividade > teto, fora da
+   faixa ou não inteiro → a API não inicia com diagnóstico seguro; `Sessao:PrazoAbsolutoMinutos`
+   com valor → a API não inicia. `OpcoesSessao` substitui a propriedade de prazo único.
+2. **Emissão** (login, inclusive troca atômica): `TetoAbsolutoEm = CriadoEm + teto`,
+   `JanelaInatividadeMinutos = inatividade`, `UltimoUsoEm = CriadoEm`, todos do mesmo
+   `InstanteOperacao`. Cookie `Expires` e ticket `ExpiresUtc` = `TetoAbsolutoEm`;
+   `SlidingExpiration = false` mantido. Resposta 201 com `expiresAt` (teto) e
+   `idleTimeoutMinutes`.
+3. **Validação** (`ValidacaoSessaoAtual`): `agora < min(UltimoUsoEm + janela, TetoAbsolutoEm)`
+   + condições L2. Expirada → 401 `AUTH_REQUIRED` sem revogar. `/me` devolve
+   `sessionExpiresAt` (teto) e `sessionIdleTimeoutMinutes`.
+4. **Registro de uso** ([D33](research.md#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência)):
+   `FiltroRegistroUsoSessao` no grupo de rotas protegidas (`/me`, `/context`; na L3,
+   módulos), após autorização e antes do handler; grava se `agora − UltimoUsoEm ≥ 60 s`;
+   conflito descartado; falha de banco → 503. Login, logout, antiforgery, health, OpenAPI,
+   `/tenant` e arquivos estáticos nunca renovam. Revalidações da interface (`/me` por
+   carga, foco ou navegação) são requisições aceitas comuns e renovam (clarificação
+   2026-11-24); o servidor não as distingue.
 
-Header divergente: 401 genérico no login; 403 nas demais operações com header válido.
-Header ausente/duplicado/inválido: 400. Sessão ausente/inválida: 401.
-Instalação inativa: login 401; `/me` e `/context` com sessão válida retornam 409.
-Login que perde a disputa pela mesma sessão anterior: 409 SESSION_CONFLICT.
-Logout de sessão própria ainda válida permanece permitido, com CSRF, e só confirma
-204 após revogação persistida; GET antiforgery não exige instalação ativa.
-Inativação da instalação suspende consultas, mas não revoga sessões ou muda epoch.
-Após reativar, só sessões ainda válidas/não revogadas podem retomar;
-o prazo fixado na emissão continua contando, sem reiniciar ou pausar.
-Marcador divergente ou dependência indisponível: 503 seguro; nunca tentar outro alvo.
-A ordem detalhada e os códigos constam em [operations.md](contracts/operations.md).
+   **Motivo da negação** ([D37](research.md#d37--motivo-da-negação-de-sessão-só-no-log-2026-11-24)):
+   `ValidacaoSessaoAtual` devolve `MotivoNegacaoSessao` (`Inatividade`, `TetoAbsoluto`,
+   `Revogada`, `Invalida`, `Ausente`), guardado em `IContextoNegacaoSessao` (scoped) pelo
+   Retrieve; o ponto que escreve o 401 de sessão registra `EventId 1002 SessaoNegada`
+   (`Information`) com motivo, `TraceId` e `IdOperacao`, sem id de sessão/conta, cookie
+   ou IP. Resposta e `openapi.json` inalterados.
+5. **Revogações**: logout, troca no login, revogação de todas (reset, desativação,
+   bloqueio, operacional) repetem até 3 vezes quando o conflito de `Versao` vem só de
+   registro de uso; disputa real mantém a regra L2 (409 no login); esgotado → 503.
+6. **Persistência e migration**: colunas, CHECKs (`ck_sessoes_autenticacao_teto`,
+   `…_janela_inatividade`, `…_ultimo_uso`) e índices (`…_ultimo_uso_em`,
+   `…_teto_absoluto_em`) da [§7](data-model.md#sessaoautenticacao--accesssessoes_autenticacao);
+   **regenerar** `EsquemaInicialAcessoTenant` (D32); GRANTs inalterados (runtime sem DELETE).
+7. **Limpeza**: `sessao limpar` elegível por `RevogadaEm < corte` ou expiração efetiva
+   `< corte`, com pré-filtro `UltimoUsoEm < corte`; demais regras de D21.
+8. **Contratos**: [operations §4](contracts/operations.md#expiração-e-uso-da-sessão-l21);
+   `openapi.json` 2.0.0 → 2.1.0 conforme o delta descrito ali, **no mesmo conjunto de
+   mudanças** dos endpoints (o teste de contrato compara `info.version` servida).
+9. **Infra e docs**: `.env.example`/Compose com as duas chaves (sem a antiga), README e
+   quickstart §7.1, ADR 0002 revisada.
+10. **Mantidos** (regressão): troca atômica, 409 `SESSION_CONFLICT`, bloqueio invalidando
+    sessões, sessões por dispositivo, logout só da corrente, revogação operacional de
+    todas, instalação inativa (não pausa), retenção da limpeza.
 
-### Tratamento de erros e validação
+### Superfície da interface no backend (L3, inalterada)
 
-Decisões em [ADR 0003](../../docs/adr/0003-tratamento-de-erros-e-validacao.md);
-aplicam-se às rotas L2 e a todo módulo futuro.
+Como no plano de 2026-11-23 e [operations §8](contracts/operations.md#8-superfície-da-interface-servida-pela-api):
+arquivos do build em `wwwroot/` (Production sem build não inicia; Development/Testes
+iniciam e respondem 404 JSON), `/api/*`/`/openapi/*`/`/health*` nunca devolvem a
+interface, fallback `{*path:nonfile}`, arquivo com extensão inexistente → 404, CSP estrita
++ `nosniff` + `Referrer-Policy: no-referrer` em todas as respostas, `/assets/*` imutável,
+`index.html` e toda a API `no-store`, static files e fallback sem lookup de sessão.
 
-1. Três categorias de falha: entrada malformada (400 `INPUT_INVALID` + `errors`),
-   regra de negócio esperada (`Resultado`/`Resultado<T>` → 403/404/409/422) e falha
-   inesperada (exceção `Excecao*` → `ManipuladorExcecaoSeguro` → 500/503).
-2. `Erro`, `TipoErro`, `Resultado` e `Resultado<T>` em `Platform.Domain/Resultados`,
-   sem dependências. Catálogo por módulo `Erros<Modulo>`; o `TipoErro` define o status.
-3. JSON estrito: `UnmappedMemberHandling.Disallow`, `RespectNullableAnnotations`,
-   `RespectRequiredConstructorParameters` e `RouteHandlerOptions.ThrowOnBadRequest = true`
-   em todos os ambientes; `BadHttpRequestException` vira 400 sem ecoar valor nem
-   mensagem original. `JsonUnmappedMemberHandling.Skip` só em `*.Integracoes.*`.
-4. FluentValidation para DTOs `Requisicao*` em `Platform.Application`, aplicado por
-   filtro no grupo `/api/v1`; sem banco, relógio ou regras assíncronas.
-   Chaves de `errors` em camelCase sem `$.` (ex.: `tarefas[0].emailResponsavel`).
-5. `ConfiguracaoProblemDetails` ganha fábricas para 400 (validação/desserialização,
-   `TENANT_REQUIRED`, `CSRF_INVALID`), 401 (`TipoErro.NaoAutenticado`, restrito a
-   `ErrosAcesso`, G5), 403, 404, 409, 422 e 429 (`RATE_LIMITED` + `Retry-After`). As rotas L2 continuam emitindo apenas os códigos de
-   plataforma de [operations.md](contracts/operations.md); 422 e códigos
-   `<MODULO>_<REGRA>` ficam disponíveis para módulos de negócio.
-6. O login valida seu DTO pela mesma via, sempre antes de qualquer lookup de conta
-   (o logout é `DELETE` sem corpo, G15). Ordem nas cinco rotas (G2 revisada, G9): rate
-   limiter (só login) → `X-Tenant-Id` (400) → tenant coincide (401 login / 403 demais) →
-   marcador/versão (503) → autenticação do cookie (logout sem sessão → 401) → corpo +
-   FluentValidation (login) → CSRF → estado da instalação → credenciais/autorização.
-   Detalhe em [operations.md §4](contracts/operations.md#ordem-de-validação).
+### Operação pública `GET /api/v1/tenant` (L3, inalterada)
 
-**Rotas REST (G15)**: `GET /api/v1/antiforgery-token`, `POST /api/v1/sessions` (login,
-201 Created), `DELETE /api/v1/sessions/current` (logout, 204), `GET /api/v1/me` e
-`GET /api/v1/context`.
+Anônima, sem `X-Tenant-Id`, cookies ignorados; `200 { id, displayName, buildId }` com
+instalação ativa ou inativa quando configuração e marcador conferem; senão 503 genérico;
+`no-store`; não renova sessão. Detalhes em [operations §7](contracts/operations.md#7-contrato-http-l3).
 
-### Sessão e proteção
+### Interface (SPA) — L3 com deltas
 
-Cookie de produção `__Host-bps-session`, HttpOnly/Secure/SameSite=Lax,
-Path `/`, sem Domain. Development HTTP localhost usa `bps-session`;
-modo inseguro fora desse escopo é erro. Cookie antiforgery é separado.
-O ticket contém só referências e stamp, não concessões permanentes.
+Contrato observável em [ui.md](contracts/ui.md). Pontos de projeto:
 
-Store usa referência protegida `IdTenant/EpocaAcesso/IdSessao`.
-Login com sessão corrente válida faz a **troca atômica** (FR-008, clarificação
-2026-11-07): numa única transação revoga a anterior com `Versao` esperada e insere
-a nova; commit antes de emitir `Set-Cookie`. `StoreAsync` usa a unidade de trabalho
-da requisição; o login nunca chama `RenewAsync` com a chave anterior (evita
-reutilização de chave pelo handler). Conflito de `Versao` (outro login, logout,
-Renew ou revogação concorrente) faz rollback e retorna 409 SESSION_CONFLICT;
-falha de persistência faz rollback e retorna 503. Nos dois casos a anterior mantém
-estado e prazo, nenhuma sessão é criada e repetir exige novo GET antiforgery.
-Logout só responde 204 após commit da revogação.
-Sessões em outros clientes/dispositivos da mesma conta permanecem independentes:
-novo login rotaciona apenas a referência do cookie corrente; logout revoga somente
-essa sessão. Reset, desativação, lockout e revogação operacional revogam todas
-as sessões da conta, sem afetar outro tenant.
-Expiração absoluta, sem sliding expiration, remember-me ou refresh. Prazo em
-`Sessao:PrazoAbsolutoMinutos` (clarificação 2026-11-08,
-[D21](research.md#d21--prazo-de-sessão-configurável-e-limpeza-auditada-de-sessões-2026-11-08)):
-inteiro 5–480 inclusive, padrão 30 quando ausente; fora da faixa ou não inteiro
-impede a inicialização (`ValidateOnStart`, diagnóstico seguro). Fixado na criação:
-`ExpiraEm = CriadoEm + prazo configurado`, ambos do mesmo `InstanteOperacao`;
-ticket e cookie usam esse `ExpiraEm`. Retrieve/Renew comparam com o `ExpiraEm`
-gravado e nunca recalculam pela configuração atual. CHECK no banco limita
-`ExpiraEm - CriadoEm` a 5–480 minutos.
-Renew é atualização rastreada de sessão ativa com `Versao` esperada, nunca upsert,
-nem extensão de prazo; só altera metadados se o ticket mudar.
-Store não usa cache de autorização; erro de banco não é tratado como “sessão ausente”.
-A API não remove sessões nem executa job em background; a remoção de registros
-encerrados é o comando restrito `sessao limpar` (abaixo).
+- **Rotas**: `/entrar`, `/contexto` (protegida), `/` → `/contexto`, outras → "Página não
+  encontrada". Após login pela tela de entrada, sempre `/contexto`; nenhum destino vem da URL.
+- **Carga**: `GET /api/v1/tenant` → `GET /api/v1/me` → `GET /api/v1/context`. Falha na
+  identidade do tenant → indisponibilidade sem formulário.
+- **Tela de contexto (delta)**: permissões a partir de `permissionDetails` (descrição +
+  código, sem tabela local); validade em texto estático no fuso local:
+  "Sessão válida até 18:35, ou após 30 min sem uso" (`sessionExpiresAt` +
+  `sessionIdleTimeoutMinutes`; data incluída se o teto não for hoje). Sem contagem
+  regressiva, aviso prévio ou renovar.
+- **Nova entrada no próprio local (delta, [D35](research.md#d35--nova-entrada-no-próprio-local-e-estado-preservado-revisa-d25))**:
+  401 em chamada de aba autenticada (exceto o pedido de sair) → estado `reautenticando`: `AreaProtegida` aplica
+  `hidden` + `inert` (árvore montada, estado preservado em memória) e `DialogoNovaEntrada`
+  (`<dialog>` modal, Esc bloqueado, campos vazios, Entrar/Sair) é aberto. Leituras negadas
+  aguardam na fila do `ClienteApi`; gravações negadas falham com `ErroGravacaoNaoEnviada`.
+  Mesma conta (`/me.id`) → restaura, devolve o foco, repete leituras e revalida `/context`;
+  outra conta → descarta tudo e mostra o contexto da nova conta; Sair → descarta e vai a
+  `/entrar`. Empresa inativa continua "empresa indisponível", só sair.
+  409 `SESSION_CONFLICT` no diálogo ([D38](research.md#d38--conflito-de-sessão-no-diálogo-de-nova-entrada-2026-11-24))
+  → uma única revalidação de `/me` (a mesma do foco): mesma conta restaura sem diálogo,
+  outra conta descarta, 401 mantém o diálogo com a mensagem de conflito; o login nunca é
+  reenviado.
+- **Várias abas (delta, [D36](research.md#d36--várias-abas-e-recarga-única-sem-armazenamento-revisa-d25))**:
+  `BroadcastChannel('bps-sessao')` só com `{ tipo: 'logout' }` após logout explícito (204 ou 401 ao sair). Expiração/
+  revogação não descartam outras abas; cada aba aplica a nova entrada na próxima negação ou
+  na revalidação de foco; revalidação com sessão válida da mesma conta restaura sem diálogo;
+  outra conta descarta.
+- **Login/logout**: novo token antiforgery antes de cada envio; envio único; sem
+  retentativa automática (exceto leituras pendentes após restauração da mesma conta e a
+  única revalidação de `/me` após 409 no diálogo, D38).
+  Logout com falha de rede/5xx permanece autenticado com "Tentar sair novamente"; logout
+  401 → saída concluída localmente com aviso de sessão encerrada e aviso às outras abas
+  (clarificação 2026-11-24), sem diálogo.
+- **Atualização (delta)**: `buildId` diferente → aviso de nova versão; `vite:preloadError`
+  → uma recarga só se a navegação atual não for recarga (sem marcador gravado); suspensa
+  durante a nova entrada.
+- **Proibições**: nada no armazenamento do navegador; sem timer de expiração, keep-alive ou
+  login silencioso. A revalidação por foco que obtém 200 conta como uso (D33) — é
+  disparada por ação do usuário, não por temporizador.
 
-Identity valida senha/hash e lockout: cinco falhas por conta, 15 minutos de bloqueio,
-com atualização concorrente segura. `GerenciadorUsuariosAplicacao : UserManager<UsuarioAplicacao>`
-em Infrastructure sobrescreve `AccessFailedAsync`/`IsLockedOutAsync` com `TimeProvider` +
-`InstanteUtc`, porque o `UserManager` 10.0.12 lê `DateTimeOffset.UtcNow` no lockout (G13). Ao confirmar o bloqueio, revogar todas as
-sessões da conta e atualizar stamp na mesma transação; fim do bloqueio só permite
-novo login, nunca retomada de sessão antiga. Limiter nativo por IP efetivo (uma instalação por deploy): cinco pedidos
-de login/minuto, janela fixa, fila zero, 429/Retry-After. Login inválido não enumera
-email/tenant; não criar contas ou permissões por startup/login.
+### Extensão modular (L3) — delta de permissões
 
-### Operação restrita e evolução do banco
+Regras do plano de 2026-11-23 e [operations §9](contracts/operations.md#9-composição-de-módulos)
+mantidas, com: `DeclaracaoModulo.Permissoes` = lista de `DefinicaoPermissao(Codigo,
+Descricao)`; descrição pt-BR obrigatória (1–200, sem espaços nas pontas nem controle) para
+fundação e módulos, validada por `ValidadorComposicaoModulos` (`PERMISSAO_DESCRICAO_INVALIDA`)
+na inicialização dos dois hosts e por teste de arquitetura; `/context.permissionDetails`
+com as permissões efetivas (inertes omitidas); rotas de módulos registram uso da sessão
+após a autorização. CHECK de `CodigoPermissao` com hífen entra na migration inicial
+regenerada (D32), validada em banco novo.
 
-Host pontual L2 cria/desativa/reativa contas, redefine senha, concede/retira a
-permissão declarada, revoga sessões de uma conta e remove sessões encerradas além
-da retenção (`sessao limpar`). Usa UserManager, alvo explícito,
-credencial individual de operador distinta, preflight e auditoria persistida.
-Login PostgreSQL por operador, não compartilhado, é atribuído ao responsável
-autenticado e gravado em `LoginOperador` com a correlação. Não aceita
-`--actor` como autorização, senha em argumentos, conta global ou chamadas por HTTP.
-Contrato e política de senha em [operations.md](contracts/operations.md).
+### Aceite e ordem de execução
 
-`sessao limpar` (clarificação 2026-11-08, [operations §5](contracts/operations.md#sessao-limpar)):
-retenção `OperacaoAcesso:RetencaoSessoesDias`, inteiro 1–365, padrão 30, sem argumento
-que a altere; inválida encerra antes de conectar. Remove somente sessões revogadas
-com `RevogadaEm < corte` ou não revogadas com `ExpiraEm < corte`
-(`corte = InstanteOperacao - retenção`); sessão válida nunca é elegível. Uma
-transação com delete rastreado (`Versao` esperada, sem `ExecuteDelete`) e registro;
-falha faz rollback total e grava registro `Falha` separado. Exatamente um
-`RegistroOperacaoAcesso` imutável por execução com alvo validado, atribuído ao
-`LoginOperador` individual, com retenção, instante de corte, quantidade removida,
-resultado e correlação, sem ids de sessões ou contas e sem autoria Sistema.
-Somente o operador tem DELETE em sessões; runtime não. Sem job na API.
+**L2.1 — rastreabilidade**
 
-Contas/permissões/sessões possuem autor/data da criação e última alteração e
-correlação, preenchidos centralmente por contexto confiável de execução.
-Identidade do operador é o login individual verificado; usuário vem da
-autenticação/credencial validada; ação automática ou anônima é identificada como
-tal, sem tomar email/Id externo como autoria. Dados e metadados persistem na mesma
-transação. Histórico operacional é append-only, não herda base mutável.
-
-O esquema nasce de uma migration inicial única com todo o modelo
-([data-model §8](data-model.md#8-migration-inicial-e-validação)). Lockout fica
-habilitado em toda conta desde a criação. Bancos locais A/B são criados do zero.
-Validar banco novo, reaplicação, rejeição de histórico desconhecido, alvo errado e
-runtime sem DDL.
-Executar com owner via factory/preflight existentes; sem seed de usuários.
-GRANTs por tabela para `<banco>_runtime` e `<banco>_operador` são emitidos pela própria
-migration inicial, com nomes derivados de `current_database()` (G6).
-Registro de preparação/migration na L2 (FR-014, G14): exit code e diagnóstico seguro do
-preflight mais `foundation.__EFMigrationsHistory` do próprio banco; auditoria persistente
-de preparação/migration fica para a L4, com backup/restauração.
-Downgrade de imagem não reverte automaticamente os dados.
-
-### Aceite e ordem de execução para a próxima etapa
-
-| Rastreabilidade L2 | Evidência exigida |
+| Requisito | Evidência exigida |
 |---|---|
-| US2; FR-005 a FR-008, FR-033; SC-002 | Login/logout, sessão vinculada, revogação/expiração, conta/permissão e operação restrita independentes em A/B. Prazo configurável: 5 e 480 aceitos, ausente = 30, 4/481/não inteiro bloqueiam a inicialização; expiração no `ExpiraEm` fixado na emissão, inclusive após mudar a configuração. Limpeza: com retenção padrão remove 100% das encerradas há mais de 30 dias e 0% das válidas ou encerradas há 30 dias ou menos (fronteira exata do corte); um registro por execução, inclusive sem remoções e com falha injetada, atribuído ao operador; retenção 0/366 rejeitada. |
-| US3; FR-009, FR-011 a FR-016; SC-003 | Marcador/estado antes do acesso, migration inicial única, alvo errado bloqueado e carga 200/100/100/pico >=20. |
-| US5; FR-020 a FR-023; SC-005 | Consumidor independente usa somente contrato, cookie jar/CSRF e distingue erros; sem frontend. |
-| US1/US6; FR-002/003, FR-024 a FR-028; SC-006/008 | Execução reproduzível, configuração explícita, CI bloqueante e documentação/evidências da superfície L2. |
-| FR-034; SC-009 | Regressão da base sobre a migration inicial: estrutura/persistência A/B, reaplicação e backend executável, sem credenciais padrão. |
-| NFR-001 a NFR-008 e NFR-010 | Secrets/menor privilégio, isolamento concorrente, reprodutibilidade, diagnósticos seguros e compatibilidade contratual. |
+| FR-006, SC-002 (sessão) | Matriz da [quickstart §7.1](quickstart.md#71-l21--sessão-por-inatividade-e-teto-absoluto-alvo-ainda-não-implementado): inatividade 30 nega (29:59 aceita); uso a cada 29 min e a cada 1 min até 600 (599:59 aceita, 600:00 nega); negadas não renovam (403, 409, CSRF); inativação não pausa; limites 4/5, 240/241, 29/30, 720/721; não inteiro; inatividade > teto; chave obsoleta; fixado na emissão; limitação de escrita; CHECKs; concorrência registro de uso × revogação/login; revalidação por `/me` renovando. |
+| NFR-006 (motivo da negação) | Cinco motivos com relógio controlado: respostas 401 idênticas exceto `traceId`; `SessaoNegada` com motivo e `TraceId` corretos em `CapturaLogs`; nenhum cookie, id de sessão/conta ou IP no log (D37). |
+| FR-008 e controles L2 | Regressão integral da §6 (troca atômica, conflito, bloqueio, sessões por dispositivo, A×B). |
+| FR-033 (`sessao limpar`) | Corte pela expiração efetiva com fronteira exata; um registro por execução. |
+| SC-005, SC-009 | Consumidor independente com campos aditivos; migration inicial regenerada validada em banco novo, reaplicação e rejeição de histórico desconhecido. |
+| FR-027, SC-006 | Backend CI verde; `openapi.json` 2.1.0 igual ao servido; Gitleaks e vulnerabilidades. |
 
-FR-004/017 a FR-019 e SC-001/004 continuam L3; provisionamento/ativação no
-Dokploy de FR-010, FR-029 a FR-032, NFR-009 e SC-007 continuam L4.
-L2 verifica o estado configurado e prepara proteção de sessões, sem declarar
-esses critérios futuros concluídos.
+**L3 — rastreabilidade (deltas em negrito)**
+
+| Requisito | Evidência exigida |
+|---|---|
+| US com FR-004; NFR-011/012/013; SC-001 | E2E Chromium do plano anterior (entrada, contexto, sem permissão, saída e falha de saída, empresa indisponível, 429, indisponibilidade com referência, nova versão e recarga única, deep link, página não encontrada) **mais: validade da sessão em texto estático; permissões com descrição e código; expiração com conteúdo escondido e restauração pela mesma conta; troca de conta descartando o estado; gravação não reenviada (teste de componente bloqueante com gravação sintética + E2E provando que só leituras são repetidas após a restauração); sair com sessão já revogada (saída local + aviso às abas); várias abas (logout × expiração/revogação, restauração por foco); novas entradas simultâneas com 409 resolvido por uma revalidação de `/me` (um único `POST /sessions` por aba, D38); axe do diálogo (zero sério/crítico, foco preso e devolvido, Esc não fecha); armazenamento do navegador vazio**. Componentes: estados, envio duplo bloqueado, sem retentativa, **fila de leituras e rejeição de gravações**. Backend: cabeçalhos, cache, fallback, 404 JSON, `/tenant`, ausência de build por ambiente. Orçamento ≤200 KiB. SC-001 manual + CI ≤45 min. |
+| FR-017 a FR-019, FR-021; SC-004 | Validador com todos os casos negativos **incluindo `PERMISSAO_DESCRICAO_INVALIDA` para fundação e módulo**; inicialização falha nos dois hosts; arquitetura de referências; variantes sem/com módulo (200/403/404, `modules`, **`permissionDetails`**, concessão inerte, OpenAPI idêntico); zero referências ao módulo de teste em `src/**`, publish e imagens. |
+| FR-027; SC-006/SC-008 | `frontend-ci.yml` bloqueante, Gitleaks em `frontend/` e no build; ADRs 0004/0005; README/quickstart. |
+| Regressão: SC-002 (com L2.1)/003/005/009 | Suites L2 e L2.1 verdes; **migration regenerada em banco novo**; consumidor independente válido com campos aditivos. |
+
+**Blocos**
 
 | Bloco | Depende de | Resultado verificável |
 |---|---|---|
-| P0 — configuração/segredos/privilégios | L1 | Runtime/operador/owner distintos, bancos isolados e modo local/HTTPS explícito. |
-| P1a — fundações de modelo | P0 | `InstanteUtc`, `IdentificadorV7`, `TimeProvider` registrado, `IContextoOperacao`, `EntidadeAuditavel`/`IEntidadeAuditavel`/`IEntidadeVersionada`, `InterceptadorAuditoria` com token por entidade; código existente alinhado ao modelo (sem `DateTimeOffset.UtcNow` em `PermissaoUsuario`/preflight, validação de offset, sem `ConcedidaEm`, concessão sem `Versao`, FKs `FkIdUsuario`/`FkIdTenant`, colunas Identity e auxiliares mapeadas, PKs `Guid` com `ValueGeneratedNever`, `CodigoAplicacao` em código/env/Compose/testes); convenção central de nomes de constraints; testes de arquitetura (relógio, `Guid.NewGuid`/`CreateVersion7()` sem argumento, `ExecuteUpdate`) e de modelo (PK `Id*`, FK `FkId*`, UUID v7 com timestamp do relógio de teste, exceções em lista fechada, nomes de constraints ≤63, catálogo `CodigosPermissao`). |
-| P1b — migration | P1a | Migration de rascunho descartada; migration inicial única gerada do modelo completo; bancos A/B criados do zero; SC-009 e rejeição de histórico desconhecido. |
-| P1c — erros e validação (ADR 0003) | P1b (execução sequencial) | `Resultado`/`Resultado<T>`/`Erro` no Domain; `ConfiguracaoProblemDetails` com 400/401/403/404/409/422/429 e ordem de validação G2; JSON estrito com `ThrowOnBadRequest`; FluentValidation com filtro no grupo `/api/v1`; testes de contrato (formato, chaves camelCase, nenhum valor ecoado) e de arquitetura (validador por `Requisicao*`, validador sem I/O, padrão/unicidade de códigos, `Skip` só em `*.Integracoes.*`). Executado após P1b (decisão de execução sequencial, 2026-11-08). |
-| P2 — sessão e controles HTTP | P1, P1c | Cookies/store, CSRF, limiter, autorização e saúde isolada. Opção `Sessao:PrazoAbsolutoMinutos` validada na inicialização (5/480 aceitos, 4/481/não inteiro rejeitados, ausente = 30), `ExpiraEm` fixado na emissão e CHECK de prazo; runtime sem DELETE em sessões e sem job de limpeza. |
-| P3 — operação restrita | P2 (execução sequencial; reutiliza adaptadores de sessão/DI) | Casos de uso autorizados/auditáveis sem endpoint administrativo, incluindo `sessao limpar`: retenção 1–365 (padrão 30), critério de corte com fronteira exata, delete rastreado atômico e um registro imutável por execução (sucesso, zero removidas e falha) com campos de limpeza e CHECK. Executado após P2. |
-| P4 — contratos e aceite | P2 e P3 | SC-002/003/005, regressões da base (SC-009), CI/documentação e consumidor independente. |
+| **R0 — decisões L2.1** | L2 | ADR 0002 revisada (demais itens resolvidos na clarificação de 2026-11-24). |
+| **R1 — opções e persistência** | R0 | `OpcoesSessao` + validador (faixas, cruzada, chave obsoleta; `.env.local` com a chave antiga vazia continua aceito); entidade com teto/janela/último uso e expiração efetiva; configuração EF, CHECKs, índices; migration inicial regenerada; testes de unidade e de CHECK com PostgreSQL real. |
+| **R2 — emissão, validação, uso e revogações** | R1 | Login grava os três campos; cookie/ticket no teto; `ValidacaoSessaoAtual` com `MotivoNegacaoSessao` e log `SessaoNegada` (D37); `FiltroRegistroUsoSessao` + `CasoUsoRegistrarUsoSessao`; repetição de revogações; `/me` e login com campos novos; `openapi.json` 2.1.0 no mesmo conjunto; matriz §7.1 com relógio controlado. |
+| **R3 — limpeza, infra, docs e aceite L2.1** | R2 | `sessao limpar` pela expiração efetiva; `.env.example`/Compose; README/quickstart §7.1; regressão completa §6; Backend CI verde; registro de evidências em tasks.md. **Fim da L2.1 — só então Q0.** |
+| Q0 — decisões L3 | R3 | Dependências e pin TS aprovados; ADRs 0004/0005; SC-004 confirmado; projetos `Platform.Modulos`/`App.Composicao` e esqueleto `frontend/` com `buildId` criados (antecipados para que a imagem da Q1 já tenha `buildId`). |
+| Q1 — superfície da interface (backend) | Q0 | Como no plano anterior; `openapi.json` atualizado com `/tenant`. |
+| Q2 — modularidade (backend) | Q0 | Como no plano anterior **+ `DefinicaoPermissao`/descrições, `PERMISSAO_DESCRICAO_INVALIDA`, `permissionDetails`, registro de uso no grupo de módulos, CHECK com hífen por migration regenerada**. |
+| Q3 — SC-004 | Q2 | Módulo sintético (com descrição de permissão), variantes, verificação de referências/imagem. |
+| Q4 — frontend | Q0 (Q1 para integração real) | Projeto, pins, lint/tipos/formato, `ClienteApi` com fila, provedor com `reautenticando`, `AreaProtegida`, `DialogoNovaEntrada`, validade da sessão, permissões com descrição, multi-aba por logout, recarga sem armazenamento, testes de componente, orçamento. |
+| Q5 — E2E, CI e aceite L3 | Q1, Q4 (Q3 para o job completo) | Playwright + axe com os cenários novos de [ui.md §9](contracts/ui.md#9-cenários-e2e-bloqueantes-acrescentados-l3), `frontend-ci.yml`, roteiro SC-001, quickstart §8–§12, regressão L2/L2.1. |
 
-SC-003 usa operações sintéticas exclusivamente no host de testes, passando pelos
-mesmos controles de acesso e persistência. A distribuição não ganha CRUD de teste.
-Medir operações realmente em voo por barreiras/contadores: 200 tarefas agendadas
-não provam pico >=20. Provar resultados válidos e efeitos de rollback, não só negativas.
+R1 → R2 → R3 são sequenciais (mesma entidade e migration). Q1 e Q2 independentes; Q4 pode
+começar com stubs após Q0. `openapi.json` é promovido no mesmo conjunto de mudanças de
+cada rota/campo (R2: 2.1.0; Q1: `/tenant`; Q2: `modules`/`permissionDetails`), nunca antes.
 
-Ao implementar, atualizar `openapi.json` e o documento servido para L2 no mesmo
-conjunto de mudanças dos endpoints e testes; não anunciar rotas antes disso.
-O contrato futuro preserva nomes JSON camelCase existentes. Apenas a ausência
-intencional das cinco rotas L2 muda de 404 para o comportamento novo;
-health, erros e rotas desconhecidas mantêm seu contrato.
-Readiness L2 acrescenta intencionalmente key ring à condição de prontidão:
-chaves indisponíveis causam 503 mesmo com banco pronto. Preservar formato/status
-da superfície L1 não significa manter exatamente seu conjunto de dependências.
+### Riscos
+
+| Risco | Mitigação |
+|---|---|
+| Imprecisão de até 60 s na inatividade pela limitação de escrita | Sempre a favor da segurança; documentada (D33), testes de fronteira com intervalos ≥ 60 s; aceita na spec (FR-006/SC-002). |
+| Registro de uso disputando `Versao` com revogação ou troca de sessão | Repetição limitada só quando a sessão continua ativa; disputa real preservada; testes com barreira. |
+| Produto derivado com a chave antiga configurada | API não inicia, diagnóstico indica as chaves novas (sem mudança silenciosa de política). |
+| Bancos locais/CI antigos após regenerar a migration | Recusados por histórico desconhecido (comportamento L2); roteiro §3 recria do zero; CI usa Testcontainers. A partir da L4, só migrations incrementais. |
+| Revalidação por foco estendendo a inatividade | Confirmado na spec (FR-006, clarificação 2026-11-24): é ação do usuário, não periódica; sem polling nem timer; teto absoluto inalterado. |
+| Log de negação vazar dado de sessão ou virar ruído | Campos fechados (motivo, `TraceId`, `IdOperacao`), nível `Information`, teste negativo de conteúdo (D37). |
+| Duas abas substituindo a sessão uma da outra na nova entrada | 409 resolvido por uma revalidação de `/me`, sem reenviar login (D38); E2E com duas abas. |
+| Conteúdo protegido no DOM durante o diálogo | `hidden` + `inert` (invisível, não focável, fora da árvore de acessibilidade); E2E verifica ausência de texto visível/acessível; dado continua só em memória da aba, como antes. |
+| Garantia "gravação não reenviada" sem gravação real na interface L3 | Teste de componente bloqueante com gravação sintética; E2E prova que só leituras são repetidas; revalidar com o primeiro módulo de negócio que tiver gravação. |
+| `<dialog>`/`inert` em navegador fora do suporte | Fora da matriz suportada (Chrome/Edge/Firefox atuais têm suporte nativo). |
 
 ## Complexity Tracking
 
-Sem exceções constitucionais. O novo host operacional e a auditoria têm consumidor
-concreto (FR-033) e evitam expor uma API administrativa ou usar SQL manual para senhas.
-Reutilizam as quatro camadas, Identity e o único banco local; ver ADR 0002.
+| Item | Por que é necessário | Alternativa mais simples rejeitada porque |
+|---|---|---|
+| Registro de uso com limitação de 1 escrita/min e repetição de revogações (L2.1) | Renovar a inatividade sem gravar a cada requisição nem quebrar revogações (FR-006) | Gravar sempre: dobra escritas e gera conflitos de `Versao` entre requisições paralelas e com revogações; sliding do handler: não respeita teto nem "negada não renova" |
+| Regenerar a migration inicial (L2.1 e L3) | Clarificação de 2026-11-06: esquema por uma migration inicial única, sem dados publicados | Migration incremental: cria caminho de upgrade e backfill para estado inexistente |
+| Dois projetos novos (`Platform.Modulos`, `App.Composicao`) (L3) | Composição única compartilhada pelos dois hosts (FR-017/019) | Lista em cada host: divergência silenciosa entre API e operador |
+| Imagem `operations` em base `aspnet` (L3) | `Platform.Modulos` referencia o framework ASP.NET Core | Separar declaração e HTTP com duas listas: mais projetos e dois pontos de edição |
+| Árvore protegida mantida montada sob `hidden` + `inert` (L3) | Preservar todo o estado da aba sem serializar nem gravar no navegador (FR-004) | Desmontar e guardar store global: perde estado local; biblioteca de estado: não resolve estado local e adiciona dependência |
 
-Exceções registradas a regras não críticas (Constituição IX), sem prazo por serem
-permanentes e justificadas, detalhadas em [data-model.md](data-model.md#3-política-de-identificadores):
-`IdUnico` inteiro do marcador; `CodigoPermissao` na PK da concessão (catálogo fechado
-no código-fonte, nunca reutilizado); tabelas auxiliares Identity com PK `int` ou
-composta textual imposta pelo framework, mantidas vazias, sem grants de escrita e
-sem uso na L2 (D20). Propriedades Identity `Id`/`UserId` seguem o
-padrão pelo nome da coluna, não da propriedade.
-Gerar o esquema numa migration inicial única não é exceção à Constituição X: o
-projeto está em construção, nada foi publicado e não há dados a migrar.
-O próximo passo é gerar tarefas L2; este comando termina no design da Phase 1.
+O item "marcador em `sessionStorage`" do plano anterior foi **removido** (D36).
+Exceções registradas da L2 permanecem (data-model §3). A L2.1 e a L3 não acrescentam
+exceção de nomes ou identificadores. Tasks geradas em 2026-11-24 (T135–T219, Phases
+19–29, preservando o histórico L1/L2); próximo passo: gate R0 (T135).

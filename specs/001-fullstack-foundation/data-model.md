@@ -3,6 +3,11 @@
 **Date**: 2026-11-06
 **Sources**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md).
 **Revisão**: 2026-11-08 — decisões G6/G7/G13 de [tasks.md](tasks.md).
+2026-11-23 — L3: formato de permissão, catálogo efetivo e estado da interface
+([§9](#9-l3--catálogo-efetivo-de-permissões-e-estado-da-interface)).
+2026-11-24 — **L2.1**: sessão por inatividade + teto absoluto (§6, §7, §8; research
+D31–D33) e migration inicial regenerada (D32); delta L3: descrições de permissão e
+estado `reautenticando` da interface (§9; D34–D36).
 **Status**: design L2, em **construção do zero**: nada foi publicado e não há
 dados. Todo o modelo abaixo é novo e o esquema é criado por uma migration inicial
 única (ver §8). Nomes seguem a Constituição 2.2.0.
@@ -117,7 +122,7 @@ identidade técnica textual, não chave técnica (Constituição IX).
   autenticado, inclusive na limpeza de sessões). Nunca vem de DTO ou argumento do
   consumidor. `Sistema` permanece no enum, sem produtor na L2.
 - `InstanteOperacao` é lido **uma vez** do `TimeProvider` por operação e normalizado
-  por `InstanteUtc`; o mesmo valor alimenta `CriadoEm`/`AlteradoEm`, `ExpiraEm`,
+  por `InstanteUtc`; o mesmo valor alimenta `CriadoEm`/`AlteradoEm`, `TetoAbsolutoEm`, `UltimoUsoEm`,
   `RevogadaEm` e `RegistradaEm` daquela operação.
 - `InterceptadorAuditoria` (`SaveChangesInterceptor`) em Infrastructure percorre o
   ChangeTracker: em `Added` preenche criação; em `Modified` com alteração efetiva
@@ -174,7 +179,7 @@ CHECKs (`ck_<tabela>_auditoria_*`) mantêm pares consistentes:
 | Fonte | `TimeProvider` injetado (`TimeProvider.System` registrado na API, em `Platform.Operations` e no tooling; nos testes, implementação controlável própria, sem pacote novo). |
 | Precisão | `InstanteUtc.Normalizar` converte para UTC e trunca para microssegundos, como o PostgreSQL, evitando divergência após gravar e ler. |
 | Validação | `InstanteUtc.Validar(valor, nomeCampo)` rejeita `default` e offset diferente de zero; chamado pelos `Validar()` das entidades. |
-| Relógio único | Sem `now()`/`HasDefaultValueSql` em colunas de data e sem comparação com o relógio do banco; `agora` vai como parâmetro (ex.: `agora >= ExpiraEm`). Sem exceções. |
+| Relógio único | Sem `now()`/`HasDefaultValueSql` em colunas de data e sem comparação com o relógio do banco; `agora` vai como parâmetro (ex.: `agora >= TetoAbsolutoEm`). Sem exceções. |
 | Proibições | `DateTime.Now/UtcNow/Today` e `DateTimeOffset.Now/UtcNow` fora dos testes, barrados por teste de arquitetura. |
 | Valor padrão | Entidades não inicializam datas com o relógio; a ausência é detectada pela validação. |
 | Saída JSON | Serialização padrão de `DateTimeOffset` (ISO 8601 com `+00:00`); teste de contrato fixa offset zero. |
@@ -199,7 +204,9 @@ fuso: não é controlável em teste, e conversão de exibição não é papel do
 | `ProtecaoDados:ArquivoCertificado` / `ArquivoSenhaCertificado` | Arquivos privados externos; produção exige certificado e acesso à chave privada. Não argv/build/Git. |
 | `OperacaoAcesso:LoginAutorizado` | Login PostgreSQL individual exato do operador autorizado (membro de `<banco>_operador`, não o grupo); configuração protegida do host pontual e segredo não compartilhado. |
 | `CabecalhosEncaminhados:ProxiesConfiaveis` | API; lista de proxies confiáveis. Vazio/ausente (padrão L2) = não processar `X-Forwarded-*` (G7). |
-| `Sessao:PrazoAbsolutoMinutos` | API somente; inteiro decimal 5–480 inclusive, ausente = 30. Fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro ([D21](research.md#d21--prazo-de-sessão-configurável-e-limpeza-auditada-de-sessões-2026-11-08)). Aplicado só na emissão. |
+| `Sessao:InatividadeMinutos` | **L2.1**. API somente; inteiro decimal 5–240 inclusive, ausente ou vazio = 30. Janela sem requisição autenticada aceita após a qual a sessão expira ([D31](research.md#d31--sessão-por-inatividade-com-teto-absoluto-revisa-d21-2026-11-24)). Aplicado só na emissão. |
+| `Sessao:TetoAbsolutoMinutos` | **L2.1**. API somente; inteiro decimal 30–720 inclusive, ausente ou vazio = 600. Prazo máximo contado da criação, nunca estendido pelo uso. Aplicado só na emissão. Fora da faixa, não inteiro, ou `InatividadeMinutos` maior que `TetoAbsolutoMinutos` impede a inicialização com diagnóstico seguro (cita só chaves e faixas). |
+| `Sessao:PrazoAbsolutoMinutos` | **Obsoleta (L2.1)**. Presente com valor não vazio impede a inicialização, com diagnóstico que indica as duas chaves acima; nunca é reinterpretada. |
 | `OperacaoAcesso:RetencaoSessoesDias` | `Platform.Operations` somente; inteiro decimal 1–365 inclusive, ausente = 30. Fora da faixa ou não inteiro impede `sessao limpar` antes de qualquer acesso ao banco. |
 
 Para variáveis hierárquicas usar `__`, por exemplo `StringsConexao__BancoApp`.
@@ -268,7 +275,7 @@ e `InstanteUtc` (G13); nenhum caminho de produção grava `LockoutEnd` pelo rel�
 | Campo | Tipo / regra |
 |---|---|
 | `FkIdUsuario` | UUID, FK local (`fk_permissoes_usuario_usuarios`), parte da PK. |
-| `CodigoPermissao` | string de 1 a 128 do catálogo `CodigosPermissao`, parte da PK (exceção da §3); formato `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$` (G7) validado por CHECK; L2 admite `foundation.context.read`. |
+| `CodigoPermissao` | string de 1 a 128 do catálogo `CodigosPermissao`, parte da PK (exceção da §3); formato `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$` (G7) validado por CHECK; L2 admite `foundation.context.read`. **L3**: formato passa a aceitar hífen no primeiro segmento e o catálogo passa a ser o efetivo (fundação + módulos) — ver [§9](#9-l3--catálogo-efetivo-de-permissões-e-estado-da-interface). |
 | Base auditável | Campos da §4; `CriadoEm` é o instante da concessão. Concessão é imutável: sem `Versao`, metadados de alteração sempre nulos. |
 
 Ausência significa negar. `/context` lê a concessão atual, não confia em claims
@@ -283,15 +290,20 @@ operação. `/me` só autoriza a própria conta validada; logout, só a própria
 | `FkIdUsuario` | UUID, FK local (`fk_sessoes_autenticacao_usuarios`), exclusão restrita para preservar rastreabilidade. |
 | `EpocaAcesso` | UUID não vazio, cópia da geração vigente na emissão. |
 | `TicketProtegido` | `bytea` anulável; serialização nativa protegida por Data Protection; inserido na emissão e removido na revogação. Pode permanecer após expiração até a remoção da linha por `sessao limpar`, mas nunca autoriza uso. |
-| `ExpiraEm` | UTC, `CriadoEm` + `Sessao:PrazoAbsolutoMinutos` vigente na emissão (padrão 30); imutável. CHECK `ck_sessoes_autenticacao_prazo`: diferença entre 5 e 480 minutos. Mudança posterior da configuração não altera sessões emitidas. |
+| `TetoAbsolutoEm` | **L2.1** (substitui `ExpiraEm`). UTC, `CriadoEm` + `Sessao:TetoAbsolutoMinutos` vigente na emissão (padrão 600); imutável. CHECK `ck_sessoes_autenticacao_teto`: diferença entre 30 e 720 minutos. |
+| `JanelaInatividadeMinutos` | **L2.1**. Inteiro, `Sessao:InatividadeMinutos` vigente na emissão (padrão 30); imutável. CHECK `ck_sessoes_autenticacao_janela_inatividade`: entre 5 e 240 e não maior que `TetoAbsolutoEm − CriadoEm`. |
+| `UltimoUsoEm` | **L2.1**. UTC; igual a `CriadoEm` na emissão; atualizado somente pelo registro de uso (no máximo 1 escrita/minuto, [D33](research.md#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência)); só cresce. CHECK `ck_sessoes_autenticacao_ultimo_uso`: `CriadoEm ≤ UltimoUsoEm < TetoAbsolutoEm`. |
+| *Expiração efetiva* (derivada, não persistida) | `min(UltimoUsoEm + JanelaInatividadeMinutos, TetoAbsolutoEm)`. Sessão válida somente se `agora <` esse valor. Mudança posterior da configuração não altera teto nem janela de sessões emitidas. |
 | `RevogadaEm` | UTC anulável; estado da sessão (não metadado de auditoria), preenchido na revogação com o mesmo instante de `AlteradoEm`. |
 | `Versao` | int64 positivo, token de concorrência incrementado pelo `InterceptadorAuditoria`. |
 | Base auditável | Campos da §4; `CriadoEm` é o instante de emissão. |
 
 Índices: PK `IdSessao`, `ix_sessoes_autenticacao_fk_id_usuario` para revogação da
-conta, `ix_sessoes_autenticacao_expira_em` e `ix_sessoes_autenticacao_revogada_em`
-para o critério de `sessao limpar`. CHECKs: UUIDs válidos, prazo de 5–480 minutos
-e sessão revogada sem ticket. Expiração é verificada no uso; não depende de limpeza,
+conta, `ix_sessoes_autenticacao_ultimo_uso_em` (pré-filtro da limpeza: expiração
+efetiva `< corte` implica `UltimoUsoEm < corte`), `ix_sessoes_autenticacao_teto_absoluto_em`
+e `ix_sessoes_autenticacao_revogada_em` (substituem `ix_sessoes_autenticacao_expira_em`, L2.1).
+CHECKs: UUIDs válidos, teto 30–720 minutos, janela 5–240 e ≤ teto, último uso dentro
+de `[CriadoEm, TetoAbsolutoEm)` e sessão revogada sem ticket. Expiração é verificada no uso; não depende de limpeza,
 e a API não executa remoção em segundo plano. O índice por conta não é único: uma conta pode ter
 sessões simultâneas em clientes/dispositivos distintos. Não modelar fingerprint de
 dispositivo. Não há coluna de tenant duplicada: a conta tem FK ao marcador único;
@@ -307,11 +319,12 @@ mantidos; nomes dos novos tipos internos são portugueses.
 |---|---|
 | Ausente → ativa | Store somente após validar instalação, conta e senha; INSERT antes do sucesso HTTP. |
 | Anterior ativa → revogada + nova ativa (login com cookie) | Uma transação: revoga a anterior com `Versao` esperada e insere a nova; commit antes do `Set-Cookie`. Conflito de `Versao` faz rollback (409 SESSION_CONFLICT); falha de persistência faz rollback (503). Em ambos a anterior mantém estado e prazo e nenhuma sessão nova existe. |
-| Ativa → ativa (Renew) | Carrega a sessão rastreada, confere ativa/não expirada e epoch/stamp, e salva com `Versao` esperada; não altera criação/expiração. Só é alteração (metadados + versão) se `TicketProtegido` mudar; bytes iguais são no-op. Sem upsert. |
-| Ativa → revogada | Carrega rastreada e salva com `Versao` esperada: `RevogadaEm` preenchido, ticket removido, metadados de alteração e versão pelo interceptor. |
-| Ativa → expirada | `agora >= ExpiraEm`; nenhum Retrieve/Renew concede acesso. |
+| Ativa → ativa (Renew) | Carrega a sessão rastreada, confere ativa/não expirada e epoch/stamp, e salva com `Versao` esperada; não altera criação, teto, janela nem último uso. Só é alteração (metadados + versão) se `TicketProtegido` mudar; bytes iguais são no-op. Sem upsert. |
+| Ativa → ativa (registro de uso, **L2.1**) | Requisição autenticada aceita (chegou ao handler de operação protegida) com `InstanteOperacao − UltimoUsoEm ≥ 60 s`: `UltimoUsoEm = InstanteOperacao`, salva com `Versao` esperada (metadados e versão pelo interceptor). Abaixo de 60 s: nenhuma escrita. Conflito de `Versao`: descartado sem repetir; falha de banco: 503. Nunca altera teto, janela, ticket ou revogação ([D33](research.md#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência)). |
+| Ativa → revogada | Carrega rastreada e salva com `Versao` esperada: `RevogadaEm` preenchido, ticket removido, metadados de alteração e versão pelo interceptor. **L2.1**: conflito causado só por registro de uso (sessão ainda ativa após recarregar) repete até 3 vezes; revogação concorrente real segue a regra L2; esgotado → 503. |
+| Ativa → expirada | `agora >= min(UltimoUsoEm + janela, TetoAbsolutoEm)` (inatividade ou teto, o que ocorrer primeiro); nenhum Retrieve/Renew/registro de uso concede acesso. Requisição negada não renova. |
 | Revogada/expirada → ativa | Proibido; novo login exige outra `IdSessao`. |
-| Revogada/expirada → removida | Somente `sessao limpar`, quando `RevogadaEm < corte` ou (`RevogadaEm` nulo e `ExpiraEm < corte`), com `corte = InstanteOperacao - RetencaoSessoesDias`. Delete rastreado com `Versao` esperada, na transação do registro da execução. Ativa → removida é impossível pelo critério. |
+| Revogada/expirada → removida | Somente `sessao limpar`, quando `RevogadaEm < corte` ou (`RevogadaEm` nulo e `min(UltimoUsoEm + janela, TetoAbsolutoEm) < corte`), com `corte = InstanteOperacao - RetencaoSessoesDias`: retenção contada da expiração efetiva ou da revogação. Delete rastreado com `Versao` esperada, na transação do registro da execução. Ativa → removida é impossível pelo critério. |
 
 Logout só confirma após commit. Disputa Renew/logout não pode restaurar ticket;
 conflito de `Versao` (zero linhas atualizadas) nunca autoriza INSERT.
@@ -323,7 +336,8 @@ revogação da própria sessão ainda válida; nenhuma transição de volta para
 é necessária para encerrar o acesso.
 Inativação da instalação não é revogação de conta/sessão: mantém epoch, registros
 e prazos, bloqueando somente o uso. Reativação permite sessão ainda válida e
-não revogada; tempo inativo conta normalmente para a expiração.
+não revogada; tempo inativo conta normalmente para o teto **e para a inatividade**
+(requisições negadas com 409 não registram uso).
 Login com cookie anterior não reutiliza sua chave: revogar e emitir nova referência
 na mesma transação; `StoreAsync` participa da unidade de trabalho da requisição e o
 login nunca chama `RenewAsync` com a chave anterior. Dois logins com a mesma sessão
@@ -381,6 +395,13 @@ processo. Não gravar nada num banco de identidade divergente apenas para regist
    Designer e snapshot) é descartada e gerada de novo a partir do modelo.
 2. Bancos locais A/B são criados do zero pelos scripts de banco/grants (runtime,
    operador e owner distintos), e a migration é aplicada pelo owner.
+3. **L2.1 (D32)**: a migration inicial é **regenerada** (novo timestamp, Designer e
+   snapshot) com as colunas e CHECKs de sessão da §7, sem migration incremental: não há
+   publicação nem dados (clarificação de 2026-11-06). Bancos locais e de CI anteriores
+   são recriados do zero; banco antigo é recusado por histórico desconhecido (regra
+   abaixo). A L3 repete a regeneração para o CHECK de `CodigoPermissao` (§9). A partir
+   da primeira publicação (L4), toda mudança passa a ser migration incremental com
+   upgrade validado.
 
 Histórico segue em `foundation.__EFMigrationsHistory`.
 Runtime/readiness aceitam somente a cadeia conhecida completa. Tooling aceita
@@ -393,8 +414,14 @@ Testes devem provar: banco novo A/B, reaplicação sem duplicação ou perda,
 rejeição de histórico desconhecido, restrições/transações,
 revogação/expiração/stamp/epoch, disputa Renew/logout, reset/bloqueio de A sem
 efeito em B, preenchimento/imutabilidade de auditoria, autoria
-individual/anônima (sem produtor de Sistema), `ExpiraEm` com prazos 5/30/480 e CHECK
-de prazo, limpeza com fronteira exata do corte e um registro por execução, SC-003 com resultados persistidos corretos, instantes
+individual/anônima (sem produtor de Sistema), sessão L2.1 (D31/D33): padrões 30/600
+fixados na emissão, CHECKs de teto/janela/último uso rejeitando 29/721 de teto, 4/241
+de janela, janela maior que o teto e último uso fora do intervalo, expiração por
+inatividade (último uso + 29:59 aceita, + 30:00 nega), uso a cada 29 min e a cada
+1 min válido até o teto (599:59 aceita, 600:00 nega), requisição negada sem renovar,
+limitação de 1 escrita/minuto (uso a +30 s não grava), conflito do registro de uso
+descartado e revogação repetindo após conflito com registro de uso, limpeza pela
+expiração efetiva com fronteira exata do corte e um registro por execução, SC-003 com resultados persistidos corretos, instantes
 com offset zero e microssegundos iguais após gravar e ler, conflito de `Versao` em
 Renew/revogação/troca de sessão no login (falha preserva a anterior; disputa conclui
 uma única troca), `ConcurrencyStamp` na conta sem `Versao`, concessão imutável,
@@ -406,3 +433,75 @@ código de produção.
 O modelo não adiciona dado de negócio, seed de conta ou tabelas centrais.
 Restauração, retenção de auditoria e políticas de backup de produção continuam L4,
 antes de uso real; logs e auditoria ficam restritos ao operador.
+
+## 9. L3 — catálogo efetivo de permissões e estado da interface
+
+**Revisão**: 2026-11-23 ([research D27–D28](research.md#revisão-l3--2026-11-23));
+2026-11-24 (D32, D34–D36: migration regenerada, descrição de permissões, nova entrada
+no próprio local). Pré-requisito: L2.1 aceita (§7).
+A L3 não cria tabela nem coluna. Módulos não têm dados persistidos (declaração de dados
+vazia; o contrário falha a inicialização). Persistência de módulo (schema/migrations
+próprios) exige novo plano no primeiro módulo de negócio.
+
+### CHECK de `CodigoPermissao` na migration inicial regenerada
+
+| Objeto | L2/L2.1 | L3 |
+|---|---|---|
+| `ck_permissoes_usuario_codigo_permissao` | `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$`, ≤128 | `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9]*)+$`, ≤128 |
+
+Somente o CHECK muda (mais permissivo). Por D32 a mudança entra na **migration inicial
+única regenerada**, não em migration aditiva: a cadeia continua com uma migration.
+Validar: banco novo, reaplicação idempotente, concessão `teste-sintetico.eco.ler`
+aceita e `Meu-Modulo.x` rejeitada pelo CHECK, grants preservados.
+
+### Declaração de módulo (código, não persistida)
+
+| Elemento | Regra |
+|---|---|
+| `IdModulo` | `^[a-z][a-z0-9-]{1,31}$` (2–32, começa por letra, sem ponto); `foundation` reservado; único na composição. Texto declarado em código, não é `Id*` persistido. |
+| `Responsabilidade` | texto obrigatório, 1–500. |
+| `DadosGerenciados` | lista; na L3 DEVE ser vazia. |
+| `ContratosPublicados` | `IdContrato` = `<IdModulo>.<nome>` (`nome` `^[a-z][a-z0-9-]*$`), `VersaoMaior` inteiro ≥1; `IdContrato` único na composição. |
+| `Dependencias` | `IdContrato` + `VersaoMaiorExigida`; atendida só por contrato publicado com a mesma versão maior (fundação inclusive). |
+| `Permissoes` | lista de `DefinicaoPermissao(Codigo, Descricao)` ([D34](research.md#d34--descrição-pt-br-das-permissões-declarada-em-código)). `Codigo`: `<IdModulo>.<segmento>(.<segmento>)*`, formato de `CodigosPermissao`, único no catálogo efetivo. `Descricao`: pt-BR, 1–200 caracteres, sem espaços nas pontas nem caracteres de controle; ausente/inválida → `PERMISSAO_DESCRICAO_INVALIDA`. |
+
+Fundação: `IdModulo` `foundation`, contrato `foundation.autorizacao` v1, permissões
+de `CodigosPermissao.Definicoes` (`foundation.context.read` → "Consultar o próprio
+contexto de acesso"), sujeitas à mesma regra de descrição. Ciclo = ciclo no grafo módulo → módulo
+provedor do contrato exigido, inclusive auto-dependência.
+
+### Catálogo efetivo e concessões
+
+`ICatalogoPermissoes` (Application) = fundação + módulos compostos. Concessão
+(`permissao conceder`) exige código no catálogo efetivo; revogação aceita código de
+formato válido existente na conta. `PermissaoUsuario` (Infrastructure) valida apenas o
+formato; pertencimento é regra de Application. Concessão cujo código não está no
+catálogo efetivo é **inerte**: não autoriza, não aparece em `/context.permissions`,
+permanece no banco. Registro de operação mantém `CodigoPermissao` sem CHECK de formato
+(inalterado). Descrições vivem só no código: `/context.permissionDetails` as lê do
+catálogo efetivo; nada é persistido.
+
+### Estado da interface (somente memória da aba)
+
+| Estado | Entrada | Dados mantidos | Saídas |
+|---|---|---|---|
+| `carregando` | carga inicial, revalidação | nenhum novo | qualquer estado abaixo |
+| `indisponivel` | falha em `GET /api/v1/tenant` ou 503/rede na carga | `traceId` se houver | `carregando` (tentar novamente manual) |
+| `anonimo` | `/me` 401 na carga, logout concluído (204 ou 401 ao sair), aviso de logout de outra aba, "Sair" no diálogo | tenant (id, nome) | `autenticado`, `semPermissaoContexto` |
+| `autenticado` | login 201 ou `/me` 200 + `/context` 200 | tenant, usuário (com `sessionExpiresAt` e `sessionIdleTimeoutMinutes`), `permissionDetails`, estado da árvore de telas | `anonimo`, `reautenticando`, `empresaIndisponivel` |
+| `semPermissaoContexto` | `/me` 200 + `/context` 403 | tenant, usuário | `anonimo`, `reautenticando`, `empresaIndisponivel` |
+| `reautenticando` | 401 `AUTH_REQUIRED` em chamada de aba autenticada (expirada por inatividade/teto, revogada ou ausente), inclusive na revalidação de foco; **não** no pedido de sair (401 ao sair → `anonimo` com aviso e aviso às outras abas) | **todo o estado anterior preservado e escondido** (árvore montada com `hidden` + `inert`), `id` da conta preservada, fila de leituras pendentes | mesma conta (diálogo ou foco) → estado anterior restaurado; outra conta → `autenticado`/`semPermissaoContexto` com estado novo; "Sair" → `anonimo`; `/me` 409 → `empresaIndisponivel` |
+| `empresaIndisponivel` | 409 `TENANT_UNAVAILABLE` | tenant | `anonimo` (sair), `reautenticando` |
+
+Transições que **descartam** usuário, permissões, fila e toda a árvore protegida
+(remontagem com nova chave): ida a `anonimo`, nova entrada com **outra** conta e aviso
+de logout de outra aba. `reautenticando` **preserva** e só esconde: nenhum dado
+protegido fica visível ou acessível atrás do diálogo; leituras pendentes podem ser
+repetidas após a mesma conta entrar; gravações negadas nunca são reenviadas
+([D35](research.md#d35--nova-entrada-no-próprio-local-e-estado-preservado-revisa-d25)).
+Nada é gravado em `localStorage`, `sessionStorage`, IndexedDB ou cookies acessíveis por
+script — nem mesmo marcador de recarga ([D36](research.md#d36--várias-abas-e-recarga-única-sem-armazenamento-revisa-d25)).
+O estado existe só em memória da aba e se perde ao fechá-la.
+Instantes recebidos (UTC) são exibidos no fuso do navegador (§5); a tela de contexto
+mostra o teto (`sessionExpiresAt`) e a regra de inatividade
+(`sessionIdleTimeoutMinutes`) como texto estático.
