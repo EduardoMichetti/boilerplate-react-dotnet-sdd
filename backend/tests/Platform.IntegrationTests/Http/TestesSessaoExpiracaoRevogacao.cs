@@ -9,8 +9,9 @@ using Platform.IntegrationTests.Http.Suporte;
 using Xunit;
 
 /// <summary>
-/// T091: prazo absoluto configurável fixado na emissão, sem extensão por uso, revogação
-/// confirmada antes do 204, independência entre sessões e isolamento A/B.
+/// T091/T149: sessão por inatividade + teto absoluto (D31, quickstart §7.1) fixados na emissão,
+/// renovação só por requisição aceita, revogação confirmada antes do 204, independência entre
+/// sessões e isolamento A/B.
 /// </summary>
 public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fixture)
     : TesteHttpBase(fixture), IClassFixture<FixtureInstalacaoPostgres>
@@ -18,87 +19,265 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
     private static readonly TimeSpan Microssegundo = TimeSpan.FromTicks(10);
 
     [Fact]
-    public async Task PrazoPadrao_2959Autoriza_3000Retorna401()
+    public async Task InatividadePadrao_UltimoUsoMais2959Autoriza_Mais3000Retorna401SemRevogar()
     {
-        (ClienteAcessoHttp cliente, _) = await EntrarAsync(CriarApi(A));
-
-        Relogio.Avancar(TimeSpan.FromMinutes(29) + TimeSpan.FromSeconds(59));
-        using (HttpResponseMessage antes = await cliente.MeAsync())
-        {
-            Assert.Equal(HttpStatusCode.OK, antes.StatusCode);
-        }
-
-        Relogio.Avancar(TimeSpan.FromSeconds(1));
-        using HttpResponseMessage depois = await cliente.MeAsync();
-        await AssegurarProblemaAsync(depois, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
-    }
-
-    [Theory]
-    [InlineData("5", 5)]
-    [InlineData("480", 480)]
-    [InlineData("", 30)]
-    public async Task PrazosConfigurados_ExpiramExatamente(string valor, int minutos)
-    {
-        FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { PrazoAbsolutoMinutos = valor });
+        FabricaApiInstalacao api = CriarApi(A);
         (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(api);
-        SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
-        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(minutos), sessao.TetoAbsolutoEm);
 
-        Relogio.Avancar(TimeSpan.FromMinutes(minutos) - Microssegundo);
+        DateTimeOffset usoAceito = InstanteInicial.AddMinutes(29).AddSeconds(59);
+        Relogio.DefinirAgora(usoAceito);
         using (HttpResponseMessage antes = await cliente.MeAsync())
         {
             Assert.Equal(HttpStatusCode.OK, antes.StatusCode);
         }
 
-        Relogio.Avancar(Microssegundo);
-        using HttpResponseMessage depois = await cliente.MeAsync();
-        await AssegurarProblemaAsync(depois, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
-    }
+        Assert.Equal(usoAceito, (await api.SessaoCorrenteAsync(id)).UltimoUsoEm);
 
-    [Theory]
-    [InlineData("4")]
-    [InlineData("481")]
-    [InlineData("0")]
-    [InlineData("30.5")]
-    [InlineData("texto")]
-    [InlineData(" 30")]
-    public void PrazoInvalido_ImpedeInicializacaoComDiagnosticoSeguro(string valor)
-    {
-        FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { PrazoAbsolutoMinutos = valor });
+        Relogio.DefinirAgora(usoAceito.AddMinutes(30));
+        using (HttpResponseMessage depois = await cliente.MeAsync())
+        {
+            await AssegurarProblemaAsync(depois, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
+        }
 
-        string diagnostico = api.ExigirFalhaInicializacao();
-        Assert.Contains("Sessao:PrazoAbsolutoMinutos", diagnostico, StringComparison.Ordinal);
-        Assert.Contains("5–480", diagnostico, StringComparison.Ordinal);
-        Assert.DoesNotContain(A.SenhaExecucao, diagnostico, StringComparison.Ordinal);
+        SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
+        Assert.Null(sessao.RevogadaEm);
+        Assert.NotNull(sessao.TicketProtegido);
+        Assert.Equal(usoAceito, sessao.UltimoUsoEm);
     }
 
     [Fact]
-    public async Task SessaoEmitidaCom30_ApiReiniciadaCom5_MantemExpiraEmOriginal_EUsoNaoEstende()
+    public async Task UsoACada29Minutos_ValidoAte59959_60000Retorna401MesmoEmUso()
     {
-        FabricaApiInstalacao trinta = CriarApi(A);
-        (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(trinta);
+        (ClienteAcessoHttp cliente, _) = await EntrarAsync(CriarApi(A));
 
-        FabricaApiInstalacao cinco = CriarApi(A, new OpcoesFabricaApi { PrazoAbsolutoMinutos = "5", DiretorioChaves = trinta.DiretorioChaves });
-        ClienteAcessoHttp reiniciado = CriarCliente(cinco);
-        CopiarCookies(cliente, reiniciado);
-
-        foreach (int minuto in new[] { 10, 20, 29 })
+        for (int minuto = 29; minuto < 600; minuto += 29)
         {
-            Relogio.DefinirAgora(TesteHttpBase.InstanteInicial.AddMinutes(minuto));
-            using HttpResponseMessage me = await reiniciado.MeAsync();
-            JsonElement corpo = await AssegurarSucessoAsync(me);
-            Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), corpo.GetProperty("sessionExpiresAt").GetDateTimeOffset());
+            Relogio.DefinirAgora(InstanteInicial.AddMinutes(minuto));
+            using HttpResponseMessage uso = await cliente.ContextoAsync();
+            Assert.True(uso.StatusCode == HttpStatusCode.OK, $"Uso no minuto {minuto} deveria ser aceito.");
         }
 
-        Relogio.DefinirAgora(TesteHttpBase.InstanteInicial.AddMinutes(30));
-        using (HttpResponseMessage expirada = await reiniciado.MeAsync())
+        await AssegurarTetoAsync(cliente, 600);
+    }
+
+    [Fact]
+    public async Task UsoACada1Minuto_ValidoAte59959_60000Retorna401MesmoEmUso()
+    {
+        (ClienteAcessoHttp cliente, _) = await EntrarAsync(CriarApi(A));
+
+        for (int minuto = 1; minuto < 600; minuto++)
+        {
+            Relogio.DefinirAgora(InstanteInicial.AddMinutes(minuto));
+            using HttpResponseMessage uso = await cliente.MeAsync();
+            Assert.True(uso.StatusCode == HttpStatusCode.OK, $"Uso no minuto {minuto} deveria ser aceito.");
+        }
+
+        await AssegurarTetoAsync(cliente, 600);
+    }
+
+    [Fact]
+    public async Task RevalidacaoSoPorMe_ACada29Minutos_MantemAteOTeto_E30MinutosSemChamadaRetorna401()
+    {
+        FabricaApiInstalacao api = CriarApi(A);
+        (ClienteAcessoHttp revalidada, _) = await EntrarAsync(api);
+        (ClienteAcessoHttp parada, _) = await EntrarAsync(api);
+
+        for (int minuto = 29; minuto < 600; minuto += 29)
+        {
+            Relogio.DefinirAgora(InstanteInicial.AddMinutes(minuto));
+            using HttpResponseMessage me = await revalidada.MeAsync();
+            Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+        }
+
+        using (HttpResponseMessage semChamada = await parada.MeAsync())
+        {
+            await AssegurarProblemaAsync(semChamada, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
+        }
+
+        await AssegurarTetoAsync(revalidada, 600);
+    }
+
+    [Theory]
+    [InlineData("5", null, 5, 600)]
+    [InlineData("240", null, 240, 600)]
+    [InlineData(null, "30", 30, 30)]
+    [InlineData(null, "720", 30, 720)]
+    [InlineData("", "", 30, 600)]
+    [InlineData(null, null, 30, 600)]
+    public async Task FaixasAceitas_FixadasNaEmissao_ExpiramExatamente(string? inatividade, string? teto, int janelaEsperada, int tetoEsperado)
+    {
+        FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { InatividadeMinutos = inatividade, TetoAbsolutoMinutos = teto });
+        string email = ContasSinteticas.NovoEmail("faixa");
+        Guid id = await ContasSinteticas.CriarContaAsync(A, Relogio, email, ContasSinteticas.SenhaPadraoA);
+        ClienteAcessoHttp expira = CriarCliente(api);
+        ClienteAcessoHttp usa = CriarCliente(api);
+        JsonElement login = await expira.EntrarAsync(email, ContasSinteticas.SenhaPadraoA);
+        await usa.EntrarAsync(email, ContasSinteticas.SenhaPadraoA);
+
+        Assert.Equal(InstanteInicial.AddMinutes(tetoEsperado), login.GetProperty("expiresAt").GetDateTimeOffset());
+        Assert.Equal(janelaEsperada, login.GetProperty("idleTimeoutMinutes").GetInt32());
+        foreach (SessaoAutenticacao sessao in await ContasSinteticas.SessoesAsync(A, id))
+        {
+            Assert.Equal(InstanteInicial.AddMinutes(tetoEsperado), sessao.TetoAbsolutoEm);
+            Assert.Equal(janelaEsperada, sessao.JanelaInatividadeMinutos);
+            Assert.Equal(sessao.CriadoEm, sessao.UltimoUsoEm);
+        }
+
+        // Inatividade (ou teto, se menor): sem uso, válida até limite − 1 µs e negada no limite.
+        int limite = Math.Min(janelaEsperada, tetoEsperado);
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(limite) - Microssegundo);
+        using (HttpResponseMessage valida = await usa.MeAsync())
+        {
+            Assert.Equal(HttpStatusCode.OK, valida.StatusCode);
+        }
+
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(limite));
+        using (HttpResponseMessage expirada = await expira.MeAsync())
         {
             await AssegurarProblemaAsync(expirada, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
         }
 
+        // Teto: mantida em uso a cada (janela − 1) minutos, válida até teto − 1 µs e negada no teto.
+        DateTimeOffset ultimoUso = InstanteInicial.AddMinutes(limite) - Microssegundo;
+        DateTimeOffset tetoAbsoluto = InstanteInicial.AddMinutes(tetoEsperado);
+        while (ultimoUso.AddMinutes(janelaEsperada) < tetoAbsoluto)
+        {
+            ultimoUso = ultimoUso.AddMinutes(janelaEsperada - 1);
+            Relogio.DefinirAgora(ultimoUso < tetoAbsoluto ? ultimoUso : tetoAbsoluto - Microssegundo);
+            using HttpResponseMessage uso = await usa.MeAsync();
+            Assert.Equal(HttpStatusCode.OK, uso.StatusCode);
+        }
+
+        await AssegurarTetoAsync(usa, tetoEsperado);
+    }
+
+    [Theory]
+    [InlineData("4", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData("241", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData("30.5", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData(" 30", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData("-5", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData("texto", null, null, "Sessao:InatividadeMinutos", "5–240")]
+    [InlineData(null, "29", null, "Sessao:TetoAbsolutoMinutos", "30–720")]
+    [InlineData(null, "721", null, "Sessao:TetoAbsolutoMinutos", "30–720")]
+    [InlineData(null, "texto", null, "Sessao:TetoAbsolutoMinutos", "30–720")]
+    [InlineData("60", "30", null, "Sessao:InatividadeMinutos maior que Sessao:TetoAbsolutoMinutos", "")]
+    [InlineData(null, null, "30", "Sessao:PrazoAbsolutoMinutos", "Sessao:TetoAbsolutoMinutos")]
+    public void FaixasRejeitadas_ImpedemInicializacaoComDiagnosticoSeguro(
+        string? inatividade, string? teto, string? obsoleta, string trechoChave, string trechoFaixa)
+    {
+        FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi
+        {
+            InatividadeMinutos = inatividade,
+            TetoAbsolutoMinutos = teto,
+            PrazoAbsolutoMinutosObsoleto = obsoleta,
+        });
+
+        string diagnostico = api.ExigirFalhaInicializacao();
+        Assert.Contains(trechoChave, diagnostico, StringComparison.Ordinal);
+        Assert.Contains(trechoFaixa, diagnostico, StringComparison.Ordinal);
+        Assert.DoesNotContain(A.SenhaExecucao, diagnostico, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InatividadeIgualAoTeto_Inicia()
+    {
+        FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { InatividadeMinutos = "30", TetoAbsolutoMinutos = "30" });
+        (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(api);
+
+        using HttpResponseMessage me = await cliente.MeAsync();
+        Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+        SessaoAutenticacao sessao = await api.SessaoCorrenteAsync(id);
+        Assert.Equal(30, sessao.JanelaInatividadeMinutos);
+        Assert.Equal(InstanteInicial.AddMinutes(30), sessao.TetoAbsolutoEm);
+    }
+
+    [Fact]
+    public async Task SessaoEmitidaCom30E600_ApiReiniciadaCom5E30_MantemJanelaETetoOriginais()
+    {
+        FabricaApiInstalacao original = CriarApi(A);
+        (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(original);
+
+        FabricaApiInstalacao reiniciada = CriarApi(A, new OpcoesFabricaApi
+        {
+            InatividadeMinutos = "5",
+            TetoAbsolutoMinutos = "30",
+            DiretorioChaves = original.DiretorioChaves,
+        });
+        ClienteAcessoHttp aposReinicio = CriarCliente(reiniciada);
+        CopiarCookies(cliente, aposReinicio);
+
+        foreach (int minuto in new[] { 29, 58, 87 })
+        {
+            Relogio.DefinirAgora(InstanteInicial.AddMinutes(minuto));
+            using HttpResponseMessage me = await aposReinicio.MeAsync();
+            JsonElement corpo = await AssegurarSucessoAsync(me);
+            Assert.Equal(InstanteInicial.AddMinutes(600), corpo.GetProperty("sessionExpiresAt").GetDateTimeOffset());
+            Assert.Equal(30, corpo.GetProperty("sessionIdleTimeoutMinutes").GetInt32());
+        }
+
         SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
-        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), sessao.TetoAbsolutoEm);
-        Assert.Equal(1, sessao.Versao);
+        Assert.Equal(InstanteInicial.AddMinutes(600), sessao.TetoAbsolutoEm);
+        Assert.Equal(30, sessao.JanelaInatividadeMinutos);
+        Assert.Equal(InstanteInicial.AddMinutes(87), sessao.UltimoUsoEm);
+    }
+
+    [Fact]
+    public async Task InstalacaoInativa_NaoPausa_ReativacaoApos30MinutosSemUsoAceitoRetorna401()
+    {
+        FabricaApiInstalacao ativa = CriarApi(A);
+        (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(ativa);
+
+        FabricaApiInstalacao inativa = CriarApi(A, new OpcoesFabricaApi { Estado = EstadoTenant.Inativo, DiretorioChaves = ativa.DiretorioChaves });
+        ClienteAcessoHttp duranteInativacao = CriarCliente(inativa);
+        CopiarCookies(cliente, duranteInativacao);
+        foreach (int minuto in new[] { 10, 20, 29 })
+        {
+            Relogio.DefinirAgora(InstanteInicial.AddMinutes(minuto));
+            using HttpResponseMessage me = await duranteInativacao.MeAsync();
+            await AssegurarProblemaAsync(me, HttpStatusCode.Conflict, "TENANT_UNAVAILABLE");
+        }
+
+        Assert.Equal(InstanteInicial, (await ativa.SessaoCorrenteAsync(id)).UltimoUsoEm);
+
+        FabricaApiInstalacao reativada = CriarApi(A, new OpcoesFabricaApi { DiretorioChaves = ativa.DiretorioChaves });
+        ClienteAcessoHttp aposReativar = CriarCliente(reativada);
+        CopiarCookies(cliente, aposReativar);
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(30));
+        using HttpResponseMessage expirada = await aposReativar.MeAsync();
+        await AssegurarProblemaAsync(expirada, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
+    }
+
+    [Fact]
+    public async Task FalhaInjetadaNaTrocaDoLogin_PreservaTetoJanelaEUltimoUsoDaAnterior()
+    {
+        FabricaApiInstalacao api = CriarApi(A);
+        string email = ContasSinteticas.NovoEmail("troca");
+        Guid id = await ContasSinteticas.CriarContaAsync(A, Relogio, email, ContasSinteticas.SenhaPadraoA);
+        ClienteAcessoHttp cliente = CriarCliente(api);
+        await cliente.EntrarAsync(email, ContasSinteticas.SenhaPadraoA);
+
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(5));
+        using (HttpResponseMessage uso = await cliente.MeAsync())
+        {
+            Assert.Equal(HttpStatusCode.OK, uso.StatusCode);
+        }
+
+        SessaoAutenticacao antes = await api.SessaoCorrenteAsync(id);
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(10));
+        api.Falhas.FalharProximosCommits(1);
+        using (HttpResponseMessage login = await cliente.LoginAsync(email, ContasSinteticas.SenhaPadraoA))
+        {
+            await AssegurarProblemaAsync(login, HttpStatusCode.ServiceUnavailable, "DEPENDENCY_UNAVAILABLE");
+        }
+
+        SessaoAutenticacao depois = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
+        Assert.Equal(antes.IdSessao, depois.IdSessao);
+        Assert.Equal(antes.TetoAbsolutoEm, depois.TetoAbsolutoEm);
+        Assert.Equal(antes.JanelaInatividadeMinutos, depois.JanelaInatividadeMinutos);
+        Assert.Equal(InstanteInicial.AddMinutes(5), depois.UltimoUsoEm);
+        Assert.Equal(antes.Versao, depois.Versao);
+        Assert.Null(depois.RevogadaEm);
     }
 
     [Fact]
@@ -214,35 +393,6 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
     }
 
     [Fact]
-    public async Task Reativacao_RetomaSoSessaoDentroDoPrazoOriginal()
-    {
-        FabricaApiInstalacao ativa = CriarApi(A);
-        (ClienteAcessoHttp cliente, _) = await EntrarAsync(ativa);
-
-        FabricaApiInstalacao inativa = CriarApi(A, new OpcoesFabricaApi { Estado = EstadoTenant.Inativo, DiretorioChaves = ativa.DiretorioChaves });
-        ClienteAcessoHttp duranteInativacao = CriarCliente(inativa);
-        CopiarCookies(cliente, duranteInativacao);
-        Relogio.DefinirAgora(TesteHttpBase.InstanteInicial.AddMinutes(10));
-        using (HttpResponseMessage me = await duranteInativacao.MeAsync())
-        {
-            await AssegurarProblemaAsync(me, HttpStatusCode.Conflict, "TENANT_UNAVAILABLE");
-        }
-
-        FabricaApiInstalacao reativada = CriarApi(A, new OpcoesFabricaApi { DiretorioChaves = ativa.DiretorioChaves });
-        ClienteAcessoHttp aposReativar = CriarCliente(reativada);
-        CopiarCookies(cliente, aposReativar);
-        Relogio.DefinirAgora(TesteHttpBase.InstanteInicial.AddMinutes(20));
-        using (HttpResponseMessage me = await aposReativar.MeAsync())
-        {
-            Assert.Equal(HttpStatusCode.OK, me.StatusCode);
-        }
-
-        Relogio.DefinirAgora(TesteHttpBase.InstanteInicial.AddMinutes(31));
-        using HttpResponseMessage expirada = await aposReativar.MeAsync();
-        await AssegurarProblemaAsync(expirada, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
-    }
-
-    [Fact]
     public async Task Restart_ComMesmoKeyRingMantemSessao_ComOutroKeyRingNaoAutentica()
     {
         FabricaApiInstalacao original = CriarApi(A);
@@ -269,6 +419,22 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
         }
 
         destino.TokenCsrf = origem.TokenCsrf;
+    }
+
+    /// <summary>
+    /// Teto: válida em teto − 1 µs (registrando uso) e negada no teto, mesmo com uso recente.
+    /// </summary>
+    private async Task AssegurarTetoAsync(ClienteAcessoHttp cliente, int tetoMinutos)
+    {
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(tetoMinutos) - Microssegundo);
+        using (HttpResponseMessage antes = await cliente.MeAsync())
+        {
+            Assert.Equal(HttpStatusCode.OK, antes.StatusCode);
+        }
+
+        Relogio.DefinirAgora(InstanteInicial.AddMinutes(tetoMinutos));
+        using HttpResponseMessage noTeto = await cliente.MeAsync();
+        await AssegurarProblemaAsync(noTeto, HttpStatusCode.Unauthorized, "AUTH_REQUIRED");
     }
 
     private async Task<(ClienteAcessoHttp Cliente, Guid IdUsuario)> EntrarAsync(FabricaApiInstalacao api, string? emailExistenteEmOutra = null)

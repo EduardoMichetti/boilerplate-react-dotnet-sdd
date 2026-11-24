@@ -126,6 +126,36 @@ public sealed class TestesContratoHealthEOpenApi
     }
 
     [Fact]
+    public async Task OpenApi_210_ExigeJanelaDeInatividade_NoLoginENoUsuarioAtual()
+    {
+        await using FabricaApiContrato aplicacao = new();
+        using HttpClient cliente = aplicacao.CriarCliente();
+        using HttpResponseMessage resposta = await cliente.GetAsync("/openapi/v1.json", TestContext.Current.CancellationToken);
+        using JsonDocument servido = JsonDocument.Parse(await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        using JsonDocument contrato = JsonDocument.Parse(await File.ReadAllTextAsync(CaminhoContrato(), TestContext.Current.CancellationToken));
+
+        Assert.Equal("2.1.0", contrato.RootElement.GetProperty("info").GetProperty("version").GetString());
+        Assert.Equal("2.1.0", servido.RootElement.GetProperty("info").GetProperty("version").GetString());
+        const string DescricaoExpiracao =
+            "Expiração por inatividade (padrão 30 min, 5–240) ou teto absoluto (padrão 600 min, 30–720), o que ocorrer primeiro, " +
+            "ambos fixados na emissão; o uso renova só a inatividade";
+        foreach (JsonDocument documento in new[] { servido, contrato })
+        {
+            string descricao = documento.RootElement.GetProperty("info").GetProperty("description").GetString()!;
+            Assert.Contains(DescricaoExpiracao, descricao, StringComparison.Ordinal);
+            Assert.DoesNotContain("5 a 480", descricao, StringComparison.Ordinal);
+        }
+
+        JsonElement schemasContrato = contrato.RootElement.GetProperty("components").GetProperty("schemas");
+        AssegurarCampoJanela(schemasContrato.GetProperty("LoginResponse"), "idleTimeoutMinutes");
+        AssegurarCampoJanela(schemasContrato.GetProperty("CurrentUser"), "sessionIdleTimeoutMinutes");
+
+        // Servido: os schemas das respostas 201 do login e 200 de /me declaram os campos aditivos.
+        AssegurarPropriedade(servido.RootElement, "/api/v1/sessions", "post", "201", "idleTimeoutMinutes");
+        AssegurarPropriedade(servido.RootElement, "/api/v1/me", "get", "200", "sessionIdleTimeoutMinutes");
+    }
+
+    [Fact]
     public async Task OpenApiServido_TemSessionCookieEEnumDeCodigosDaPlataforma()
     {
         await using FabricaApiContrato aplicacao = new();
@@ -194,6 +224,29 @@ public sealed class TestesContratoHealthEOpenApi
         }
 
         return operacoes;
+    }
+
+    private static void AssegurarCampoJanela(JsonElement schema, string campo)
+    {
+        Assert.Contains(campo, schema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        JsonElement propriedade = schema.GetProperty("properties").GetProperty(campo);
+        Assert.Equal("integer", propriedade.GetProperty("type").GetString());
+        Assert.Equal(5, propriedade.GetProperty("minimum").GetInt32());
+        Assert.Equal(240, propriedade.GetProperty("maximum").GetInt32());
+    }
+
+    private static void AssegurarPropriedade(JsonElement documento, string rota, string metodo, string status, string campo)
+    {
+        JsonElement schema = documento.GetProperty("paths").GetProperty(rota).GetProperty(metodo)
+            .GetProperty("responses").GetProperty(status).GetProperty("content").GetProperty("application/json").GetProperty("schema");
+        if (schema.TryGetProperty("$ref", out JsonElement referencia))
+        {
+            string nome = referencia.GetString()!.Split('/')[^1];
+            schema = documento.GetProperty("components").GetProperty("schemas").GetProperty(nome);
+        }
+
+        Assert.True(schema.GetProperty("properties").TryGetProperty(campo, out _), $"{rota} {status} sem {campo}.");
+        Assert.Contains(campo, schema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
     }
 
     private static IEnumerable<string> EnumCodigo(JsonElement documento) =>

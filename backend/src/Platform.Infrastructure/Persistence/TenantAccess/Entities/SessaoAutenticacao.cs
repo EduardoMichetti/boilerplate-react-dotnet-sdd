@@ -1,5 +1,6 @@
 namespace Platform.Infrastructure.Persistence.TenantAccess.Entities;
 
+using Platform.Application.Access;
 using Platform.Application.Configuration;
 using Platform.Domain.Auditoria;
 using Platform.Domain.Tempo;
@@ -64,12 +65,13 @@ public sealed class SessaoAutenticacao : EntidadeAuditavel, IEntidadeVersionada
     public UsuarioAplicacao? Usuario { get; set; }
 
     /// <summary>
-    /// Indica se a sessão não está revogada e o teto absoluto ainda não venceu
-    /// (<c>agora &lt; TetoAbsolutoEm</c>). A inatividade passa a ser aplicada no R2 (Phase 21).
+    /// Indica se a sessão não está revogada e ainda não expirou:
+    /// <c>agora &lt; min(UltimoUsoEm + JanelaInatividadeMinutos, TetoAbsolutoEm)</c> (D31).
     /// </summary>
     /// <param name="agora">Instante atual vindo do <see cref="TimeProvider"/>.</param>
     /// <returns><c>true</c> quando ativa.</returns>
-    public bool EstaAtivaEm(DateTimeOffset agora) => RevogadaEm is null && agora < TetoAbsolutoEm;
+    public bool EstaAtivaEm(DateTimeOffset agora) =>
+        RevogadaEm is null && ExpiracaoSessao.Avaliar(agora, UltimoUsoEm, JanelaInatividadeMinutos, TetoAbsolutoEm) is null;
 
     /// <summary>
     /// Registra uso da sessão: avança <see cref="UltimoUsoEm"/> para <paramref name="instante"/>.

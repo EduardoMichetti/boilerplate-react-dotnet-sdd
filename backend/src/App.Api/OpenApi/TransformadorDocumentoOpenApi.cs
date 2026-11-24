@@ -24,7 +24,7 @@ public sealed class TransformadorDocumentoOpenApi : IOpenApiDocumentTransformer,
     public const string SchemaProblema = "ProblemDetails";
 
     /// <summary>Versão do contrato L2 publicado.</summary>
-    public const string VersaoContrato = "2.0.0";
+    public const string VersaoContrato = "2.1.0";
 
     /// <summary>
     /// Códigos de erro emitidos pelas rotas do contrato: <see cref="ErrosAcesso"/> ∪ <see cref="ErrosPlataforma"/>.
@@ -41,7 +41,8 @@ public sealed class TransformadorDocumentoOpenApi : IOpenApiDocumentTransformer,
             "Autenticação e acesso local ao tenant (L2). Rotas REST de recurso: GET /api/v1/antiforgery-token, " +
             "POST /api/v1/sessions (login, 201), DELETE /api/v1/sessions/current (logout, 204), GET /api/v1/me e GET /api/v1/context. " +
             "As cinco operações de acesso exigem X-Tenant-Id coincidente com a instalação; o header nunca seleciona conexão. " +
-            "Sessão por cookie HttpOnly com expiração absoluta fixada na emissão (padrão 30 minutos, 5 a 480), CSRF explícito e concessões lidas a cada operação.";
+            "Sessão por cookie HttpOnly. Expiração por inatividade (padrão 30 min, 5–240) ou teto absoluto (padrão 600 min, 30–720), o que ocorrer primeiro, " +
+            "ambos fixados na emissão; o uso renova só a inatividade. CSRF explícito e concessões lidas a cada operação.";
         document.Extensions ??= new Dictionary<string, IOpenApiExtension>();
         document.Extensions["x-increment"] = new JsonNodeExtension(JsonValue.Create("I2"));
 

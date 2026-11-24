@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.Options;
 using Platform.Application;
+using Platform.Application.Access;
 using Platform.Application.Access.CasosUso;
 using Platform.Application.Access.Portas;
 using Platform.Application.Auditoria;
@@ -51,9 +52,10 @@ public sealed record ReferenciaSessao(Guid IdTenant, Guid EpocaAcesso, Guid IdSe
 /// <summary>
 /// <see cref="ITicketStore"/> das sessões persistidas. Escopo resolvido por chamada pelo
 /// <see cref="HttpContext"/> (sem capturar DbContext nas options). <c>RetrieveAsync</c> valida
-/// referência, sessão, conta, lockout, stamp, época e <c>TetoAbsolutoEm</c> a cada operação; erros de
-/// dependência propagam (nunca viram <c>null</c>). <c>RenewAsync</c> nunca faz upsert, reativação
-/// ou extensão; <c>RemoveAsync</c> revoga. <c>StoreAsync</c> não é usado: a emissão é exclusiva do
+/// referência, sessão, conta, lockout, stamp, época e a expiração efetiva (inatividade ou teto, D31) a
+/// cada operação, sem gravar, e guarda o motivo da negação em <see cref="IContextoNegacaoSessao"/>;
+/// erros de dependência propagam (nunca viram <c>null</c>). <c>RenewAsync</c> nunca faz upsert,
+/// reativação, extensão nem altera <c>UltimoUsoEm</c>; <c>RemoveAsync</c> revoga. <c>StoreAsync</c> não é usado: a emissão é exclusiva do
 /// login, com troca atômica e cookie escrito após o commit (G21).
 /// </summary>
 /// <param name="acessorContexto">Acesso ao contexto para as sobrecargas sem <see cref="HttpContext"/>.</param>
@@ -81,16 +83,25 @@ public sealed class ArmazenamentoTicketsSessao(IHttpContextAccessor acessorConte
     {
         ArgumentNullException.ThrowIfNull(httpContext);
         IServiceProvider servicos = httpContext.RequestServices;
+        IContextoNegacaoSessao negacao = servicos.GetRequiredService<IContextoNegacaoSessao>();
         OpcoesInstalacaoTenant instalacao = servicos.GetRequiredService<IOptions<OpcoesInstalacaoTenant>>().Value;
         if (!ReferenciaSessao.TentarLer(key, out ReferenciaSessao? referencia) || referencia!.IdTenant != instalacao.IdTenant)
         {
+            negacao.Registrar(MotivoNegacaoSessao.Invalida);
             return null;
         }
 
         IRepositorioSessoes sessoes = servicos.GetRequiredService<IRepositorioSessoes>();
         EstadoSessaoPersistida? estado = await sessoes.ObterAsync(referencia.IdSessao, cancellationToken);
-        if (estado?.TicketProtegido is null)
+        if (estado is null)
         {
+            negacao.Registrar(MotivoNegacaoSessao.Invalida);
+            return null;
+        }
+
+        if (estado.RevogadaEm is not null || estado.TicketProtegido is null)
+        {
+            negacao.Registrar(MotivoNegacaoSessao.Revogada);
             return null;
         }
 
@@ -107,13 +118,18 @@ public sealed class ArmazenamentoTicketsSessao(IHttpContextAccessor acessorConte
             && string.Equals(principal.FindFirstValue(ClaimsSessao.Usuario), estado.IdUsuario.ToString(), StringComparison.Ordinal)
             && string.Equals(principal.FindFirstValue(ClaimsSessao.Tenant), instalacao.IdTenant.ToString(), StringComparison.Ordinal);
 
-        if (!referenciasConferem
-            || !ValidacaoSessaoAtual.EhValida(estado, referencia.EpocaAcesso, epocaMarcador, principal.FindFirstValue(ClaimsSessao.Carimbo), agora))
+        MotivoNegacaoSessao? motivo = referenciasConferem
+            ? ValidacaoSessaoAtual.Avaliar(estado, referencia.EpocaAcesso, epocaMarcador, principal.FindFirstValue(ClaimsSessao.Carimbo), agora)
+            : MotivoNegacaoSessao.Invalida;
+        if (motivo is { } negada)
         {
+            // Expirada não revoga a linha; só o motivo fica para o log (D37). Retrieve nunca grava.
+            negacao.Registrar(negada);
             return null;
         }
 
-        estadoRequisicao.Sessao = new SessaoCorrente(estado.IdSessao, estado.IdUsuario, estado.Versao, estado.TetoAbsolutoEm);
+        estadoRequisicao.Sessao = new SessaoCorrente(
+            estado.IdSessao, estado.IdUsuario, estado.Versao, estado.TetoAbsolutoEm, estado.JanelaInatividadeMinutos, estado.UltimoUsoEm);
         return ticket;
     }
 

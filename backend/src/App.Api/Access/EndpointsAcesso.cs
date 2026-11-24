@@ -9,6 +9,7 @@ using Platform.Application.Access.CasosUso;
 using Platform.Application.Access.Contratos;
 using Platform.Application.Access.Portas;
 using Platform.Application.Configuration;
+using Platform.Domain.Access;
 using Platform.Domain.Resultados;
 
 /// <summary>
@@ -38,6 +39,7 @@ public static class EndpointsAcesso
         servicos.AddScoped<CasoUsoLogout>();
         servicos.AddScoped<CasoUsoConsultarIdentidade>();
         servicos.AddScoped<CasoUsoConsultarContexto>();
+        servicos.AddScoped<CasoUsoRegistrarUsoSessao>();
         return servicos;
     }
 
@@ -84,9 +86,12 @@ public static class EndpointsAcesso
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // G31: autorização de recurso próprio → instalação ativa → registro de uso → handler.
         grupo.MapGet("/me", ConsultarIdentidadeAsync)
             .WithMetadata(new RotaAcessoL2())
             .RequireAuthorization(ConfiguracaoAutenticacaoSessao.PoliticaRecursoProprio)
+            .ExigirInstalacaoAtiva()
+            .RegistrarUsoSessao()
             .WithName("getCurrentUser")
             .WithTags("Identity")
             .WithSummary("Consultar identidade e validade da própria sessão")
@@ -97,9 +102,13 @@ public static class EndpointsAcesso
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // G31: autorização → instalação ativa → foundation.context.read → registro de uso → handler.
         grupo.MapGet("/context", ConsultarContextoAsync)
             .WithMetadata(new RotaAcessoL2())
             .RequireAuthorization(ConfiguracaoAutenticacaoSessao.PoliticaRecursoProprio)
+            .ExigirInstalacaoAtiva()
+            .ExigirPermissao(CodigosPermissao.FundacaoContextoLer)
+            .RegistrarUsoSessao()
             .WithName("getTenantContext")
             .WithTags("TenantContext")
             .WithSummary("Consultar o próprio contexto de acesso no tenant validado")
@@ -145,7 +154,7 @@ public static class EndpointsAcesso
         SessaoEmitida sessao = resultado.Valor;
         emissor.Emitir(contexto, new ReferenciaSessao(sessao.IdTenant, sessao.EpocaAcesso, sessao.IdSessao), sessao.TetoAbsolutoEm);
         SemCache(contexto);
-        return Results.Created("/api/v1/sessions/current", new RespostaLogin(sessao.IdTenant, sessao.TetoAbsolutoEm));
+        return Results.Created("/api/v1/sessions/current", new RespostaLogin(sessao.IdTenant, sessao.TetoAbsolutoEm, sessao.JanelaInatividadeMinutos));
     }
 
     private static async Task<IResult> EncerrarSessaoAsync(
@@ -163,13 +172,13 @@ public static class EndpointsAcesso
 
         if (estado.Sessao is not { } sessao)
         {
-            return ConfiguracaoProblemDetails.Resultado(ErrosAcesso.AutenticacaoNecessaria);
+            return RegistroNegacaoSessao.Resultado(contexto);
         }
 
         Resultado resultado = await casoUso.ExecutarAsync(sessao, tokenCancelamento);
         if (!resultado.EhSucesso)
         {
-            return ConfiguracaoProblemDetails.Resultado(resultado.Erro!);
+            return ResultadoErro(contexto, resultado.Erro!);
         }
 
         // Revogação confirmada: só então remove o cookie e responde 204.
@@ -186,13 +195,13 @@ public static class EndpointsAcesso
     {
         if (estado.Sessao is not { } sessao)
         {
-            return ConfiguracaoProblemDetails.Resultado(ErrosAcesso.AutenticacaoNecessaria);
+            return RegistroNegacaoSessao.Resultado(contexto);
         }
 
         Resultado<IdentidadeAtual> resultado = await casoUso.ExecutarAsync(sessao, tokenCancelamento);
         if (!resultado.EhSucesso)
         {
-            return ConfiguracaoProblemDetails.Resultado(resultado.Erro!);
+            return ResultadoErro(contexto, resultado.Erro!);
         }
 
         SemCache(contexto);
@@ -207,13 +216,13 @@ public static class EndpointsAcesso
     {
         if (estado.Sessao is not { } sessao)
         {
-            return ConfiguracaoProblemDetails.Resultado(ErrosAcesso.AutenticacaoNecessaria);
+            return RegistroNegacaoSessao.Resultado(contexto);
         }
 
         Resultado<ContextoAcesso> resultado = await casoUso.ExecutarAsync(sessao, tokenCancelamento);
         if (!resultado.EhSucesso)
         {
-            return ConfiguracaoProblemDetails.Resultado(resultado.Erro!);
+            return ResultadoErro(contexto, resultado.Erro!);
         }
 
         ContextoAcesso dados = resultado.Valor;
@@ -226,7 +235,16 @@ public static class EndpointsAcesso
     }
 
     private static RespostaUsuarioAtual ParaResposta(IdentidadeAtual identidade) =>
-        new(identidade.IdUsuario, identidade.IdTenant, identidade.Email, identidade.NomeExibicao, identidade.SessaoExpiraEm);
+        new(identidade.IdUsuario, identidade.IdTenant, identidade.Email, identidade.NomeExibicao, identidade.SessaoExpiraEm, identidade.SessaoJanelaInatividadeMinutos);
+
+    /// <summary>
+    /// <c>AUTH_REQUIRED</c> devolvido pelo caso de uso (mudança posterior à autenticação) passa pelo
+    /// ponto único que registra o motivo (D37); demais erros seguem o mapeamento padrão.
+    /// </summary>
+    private static IResult ResultadoErro(HttpContext contexto, Erro erro) =>
+        string.Equals(erro.Codigo, ErrosAcesso.AutenticacaoNecessaria.Codigo, StringComparison.Ordinal)
+            ? RegistroNegacaoSessao.Resultado(contexto)
+            : ConfiguracaoProblemDetails.Resultado(erro);
 
     private static async Task<bool> CsrfValidoAsync(HttpContext contexto, IAntiforgery antiforgery)
     {

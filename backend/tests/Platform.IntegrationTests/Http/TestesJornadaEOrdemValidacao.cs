@@ -51,7 +51,8 @@ public sealed class TestesJornadaEOrdemValidacao(FixtureInstalacaoPostgres fixtu
             {
                 JsonElement corpo = await AssegurarSucessoAsync(login, HttpStatusCode.Created);
                 Assert.Equal(api.IdTenant, corpo.GetProperty("tenantId").GetGuid());
-                Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), corpo.GetProperty("expiresAt").GetDateTimeOffset());
+                Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(600), corpo.GetProperty("expiresAt").GetDateTimeOffset());
+                Assert.Equal(30, corpo.GetProperty("idleTimeoutMinutes").GetInt32());
                 Assert.Equal("/api/v1/sessions/current", login.Headers.Location?.OriginalString);
                 Assert.True(cliente.Cookies.ContainsKey("bps-session"));
             }
@@ -66,7 +67,8 @@ public sealed class TestesJornadaEOrdemValidacao(FixtureInstalacaoPostgres fixtu
                 Assert.Equal(api.IdTenant, corpo.GetProperty("tenantId").GetGuid());
                 Assert.Equal(email, corpo.GetProperty("email").GetString());
                 Assert.Equal(nome, corpo.GetProperty("displayName").GetString());
-                Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), corpo.GetProperty("sessionExpiresAt").GetDateTimeOffset());
+                Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(600), corpo.GetProperty("sessionExpiresAt").GetDateTimeOffset());
+                Assert.Equal(30, corpo.GetProperty("sessionIdleTimeoutMinutes").GetInt32());
             }
 
             using (HttpResponseMessage contexto = await cliente.ContextoAsync())

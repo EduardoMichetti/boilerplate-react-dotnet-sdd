@@ -50,6 +50,9 @@ public sealed class TestesAuditoriaSessaoHttp(FixtureInstalacaoPostgres fixture)
         Assert.Equal(instanteLogin, criada.CriadoEm);
         Assert.NotEqual(Guid.Empty, criada.IdOperacaoCriacao);
         Assert.Null(criada.AlteradoEm);
+        Assert.Equal(instanteLogin.AddMinutes(600), criada.TetoAbsolutoEm);
+        Assert.Equal(30, criada.JanelaInatividadeMinutos);
+        Assert.Equal(criada.CriadoEm, criada.UltimoUsoEm);
 
         // Login válido zerou a contagem já com autoria do usuário verificado.
         UsuarioAplicacao aposLogin = await ContasSinteticas.ContaAsync(A, id);

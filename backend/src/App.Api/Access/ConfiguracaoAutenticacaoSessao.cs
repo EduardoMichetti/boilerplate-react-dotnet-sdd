@@ -306,6 +306,8 @@ public static class ConfiguracaoAutenticacaoSessao
 
         servicos.AddHttpContextAccessor();
         servicos.AddScoped<EstadoRequisicaoAcesso>();
+        servicos.AddScoped<ContextoNegacaoSessao>();
+        servicos.AddScoped<Platform.Application.Access.Portas.IContextoNegacaoSessao>(p => p.GetRequiredService<ContextoNegacaoSessao>());
         servicos.AddSingleton<ProtetorTicketSessao>();
         servicos.AddSingleton<Platform.Application.Access.Portas.IProtetorTicketSessao>(p => p.GetRequiredService<ProtetorTicketSessao>());
         servicos.AddSingleton<ArmazenamentoTicketsSessao>();
@@ -330,8 +332,8 @@ public static class ConfiguracaoAutenticacaoSessao
                 opcoes.SlidingExpiration = false;
                 opcoes.Events = new CookieAuthenticationEvents
                 {
-                    OnRedirectToLogin = contexto => ConfiguracaoProblemDetails.EscreverAsync(
-                        contexto.HttpContext, ConfiguracaoProblemDetails.DeErro(ErrosAcesso.AutenticacaoNecessaria)),
+                    // Ponto único do 401 de sessão: resposta genérica + EventId 1002 com o motivo (D37).
+                    OnRedirectToLogin = contexto => RegistroNegacaoSessao.EscreverAsync(contexto.HttpContext),
                     OnRedirectToAccessDenied = contexto => ConfiguracaoProblemDetails.EscreverAsync(
                         contexto.HttpContext, ConfiguracaoProblemDetails.DeErro(ErrosAcesso.AcessoTenantNegado)),
                     OnRedirectToLogout = _ => Task.CompletedTask,

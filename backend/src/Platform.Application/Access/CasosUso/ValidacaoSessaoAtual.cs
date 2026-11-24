@@ -3,9 +3,10 @@ namespace Platform.Application.Access.CasosUso;
 using Platform.Application.Access.Portas;
 
 /// <summary>
-/// Regra única de validade de uma sessão a cada operação: registro ativo e não revogado,
-/// <c>agora &lt; TetoAbsolutoEm</c> gravado (nunca recalculado pela configuração atual), conta ativa e
-/// fora do bloqueio, carimbo de segurança e época coincidentes com a referência e o marcador.
+/// Regra única de validade de uma sessão a cada operação (D31, D37): registro não revogado e com
+/// ticket, <c>agora &lt; min(UltimoUsoEm + JanelaInatividadeMinutos, TetoAbsolutoEm)</c> com os valores
+/// gravados na emissão (nunca recalculados pela configuração atual), conta ativa e fora do bloqueio,
+/// carimbo de segurança e época coincidentes com a referência e o marcador. Não grava nada.
 /// </summary>
 public static class ValidacaoSessaoAtual
 {
@@ -16,9 +17,13 @@ public static class ValidacaoSessaoAtual
     /// <param name="epocaReferencia">Época contida na referência do cookie.</param>
     /// <param name="epocaMarcador">Época vigente no marcador da instalação.</param>
     /// <param name="carimboTicket">Carimbo de segurança gravado no ticket na emissão.</param>
-    /// <param name="agora">Instante da operação corrente.</param>
-    /// <returns><c>true</c> somente quando todas as condições são atendidas.</returns>
-    public static bool EhValida(
+    /// <param name="agora">Instante da operação corrente (do <see cref="TimeProvider"/>).</param>
+    /// <returns>
+    /// <c>null</c> quando válida; senão o motivo: <see cref="MotivoNegacaoSessao.Revogada"/>,
+    /// <see cref="MotivoNegacaoSessao.TetoAbsoluto"/>, <see cref="MotivoNegacaoSessao.Inatividade"/> ou
+    /// <see cref="MotivoNegacaoSessao.Invalida"/> (conta, bloqueio, carimbo ou época).
+    /// </returns>
+    public static MotivoNegacaoSessao? Avaliar(
         EstadoSessaoPersistida estado,
         Guid epocaReferencia,
         Guid epocaMarcador,
@@ -27,13 +32,22 @@ public static class ValidacaoSessaoAtual
     {
         ArgumentNullException.ThrowIfNull(estado);
 
-        bool sessaoAtiva = estado.RevogadaEm is null && estado.TicketProtegido is not null && agora < estado.TetoAbsolutoEm;
+        if (estado.RevogadaEm is not null || estado.TicketProtegido is null)
+        {
+            return MotivoNegacaoSessao.Revogada;
+        }
+
+        if (ExpiracaoSessao.Avaliar(agora, estado.UltimoUsoEm, estado.JanelaInatividadeMinutos, estado.TetoAbsolutoEm) is { } expirada)
+        {
+            return expirada;
+        }
+
         bool contaLiberada = estado.ContaAtiva && !(estado.BloqueioHabilitado && estado.BloqueioAte is { } fim && fim > agora);
         bool carimboConfere = carimboTicket is not null
             && estado.CarimboSeguranca is not null
             && string.Equals(carimboTicket, estado.CarimboSeguranca, StringComparison.Ordinal);
         bool epocaConfere = estado.EpocaAcesso == epocaReferencia && epocaReferencia == epocaMarcador;
 
-        return sessaoAtiva && contaLiberada && carimboConfere && epocaConfere;
+        return contaLiberada && carimboConfere && epocaConfere ? null : MotivoNegacaoSessao.Invalida;
     }
 }

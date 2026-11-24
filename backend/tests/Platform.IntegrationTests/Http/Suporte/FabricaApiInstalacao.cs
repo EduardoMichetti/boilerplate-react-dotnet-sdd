@@ -31,8 +31,14 @@ public sealed record OpcoesFabricaApi
     /// <summary>Estado configurado da instalação.</summary>
     public EstadoTenant Estado { get; init; } = EstadoTenant.Ativo;
 
-    /// <summary>Valor bruto de <c>Sessao:PrazoAbsolutoMinutos</c> (nulo = ausente).</summary>
-    public string? PrazoAbsolutoMinutos { get; init; }
+    /// <summary>Valor bruto de <c>Sessao:InatividadeMinutos</c> (nulo = ausente).</summary>
+    public string? InatividadeMinutos { get; init; }
+
+    /// <summary>Valor bruto de <c>Sessao:TetoAbsolutoMinutos</c> (nulo = ausente).</summary>
+    public string? TetoAbsolutoMinutos { get; init; }
+
+    /// <summary>Valor bruto da chave obsoleta <c>Sessao:PrazoAbsolutoMinutos</c> (nulo = ausente; só para provar a recusa).</summary>
+    public string? PrazoAbsolutoMinutosObsoleto { get; init; }
 
     /// <summary>Diretório do key ring; nulo cria um temporário por instância.</summary>
     public string? DiretorioChaves { get; init; }
@@ -110,6 +116,18 @@ public sealed class FabricaApiInstalacao : WebApplicationFactory<Program>
     }
 
     /// <summary>
+    /// Lê (com o owner, sem rastreamento) a linha da sessão corrente da conta: a única não revogada,
+    /// a mais recente. Expõe <c>UltimoUsoEm</c>, <c>Versao</c>, <c>TetoAbsolutoEm</c> e <c>JanelaInatividadeMinutos</c>.
+    /// </summary>
+    /// <param name="idUsuario">Conta dona da sessão.</param>
+    /// <returns>Linha da sessão corrente.</returns>
+    public async Task<SessaoAutenticacao> SessaoCorrenteAsync(Guid idUsuario)
+    {
+        List<SessaoAutenticacao> sessoes = await ContasSinteticas.SessoesAsync(_instalacao, idUsuario);
+        return sessoes.Last(s => s.RevogadaEm is null);
+    }
+
+    /// <summary>
     /// Confere que cookie handler e <see cref="UserManager{TUser}"/> usam o relógio controlável (G11, G13).
     /// </summary>
     public void AssegurarRelogioControlavel()
@@ -152,9 +170,19 @@ public sealed class FabricaApiInstalacao : WebApplicationFactory<Program>
         builder.UseSetting("EstadoTenant", _opcoes.Estado.ToString());
         builder.UseSetting("StringsConexao:BancoApp", _instalacao.StringConexaoExecucao);
         builder.UseSetting("ProtecaoDados:DiretorioChaves", DiretorioChaves);
-        if (_opcoes.PrazoAbsolutoMinutos is not null)
+        if (_opcoes.InatividadeMinutos is not null)
         {
-            builder.UseSetting("Sessao:PrazoAbsolutoMinutos", _opcoes.PrazoAbsolutoMinutos);
+            builder.UseSetting("Sessao:InatividadeMinutos", _opcoes.InatividadeMinutos);
+        }
+
+        if (_opcoes.TetoAbsolutoMinutos is not null)
+        {
+            builder.UseSetting("Sessao:TetoAbsolutoMinutos", _opcoes.TetoAbsolutoMinutos);
+        }
+
+        if (_opcoes.PrazoAbsolutoMinutosObsoleto is not null)
+        {
+            builder.UseSetting("Sessao:PrazoAbsolutoMinutos", _opcoes.PrazoAbsolutoMinutosObsoleto);
         }
 
         foreach ((string chave, string? valor) in _opcoes.Extras)
@@ -216,9 +244,28 @@ public sealed class FalhasInjetadas
     private int _commits;
     private int _conflitosUsuario;
     private int _gravacoesSessao;
+    private int _registrosUso;
+    private int _conflitosRevogacao;
 
     /// <summary>Barreira opcional executada antes do commit (sincronização determinística).</summary>
     public Func<Task>? AntesDoCommit { get; set; }
+
+    /// <summary>
+    /// Barreira opcional executada antes de cada gravação que altera uma sessão existente
+    /// (registro de uso ou revogação), antes do SQL (sincronização determinística).
+    /// </summary>
+    public Func<Task>? AntesDeGravarSessao { get; set; }
+
+    /// <summary>Próximas gravações do registro de uso (só <c>UltimoUsoEm</c>) falharão com <see cref="ExcecaoBancoInjetada"/>.</summary>
+    /// <param name="quantidade">Quantidade.</param>
+    public void FalharProximosRegistrosUso(int quantidade) => Volatile.Write(ref _registrosUso, quantidade);
+
+    /// <summary>
+    /// Próximas gravações de revogação de sessão terão conflito de <c>Versao</c>, como se um registro
+    /// de uso concorrente tivesse vencido (a sessão continua ativa no banco).
+    /// </summary>
+    /// <param name="quantidade">Quantidade.</param>
+    public void ConflitarProximasRevogacoesSessao(int quantidade) => Volatile.Write(ref _conflitosRevogacao, quantidade);
 
     /// <summary>Barreira opcional executada logo após o início de cada transação explícita.</summary>
     public Func<Task>? AoIniciarTransacao { get; set; }
@@ -237,6 +284,10 @@ public sealed class FalhasInjetadas
     internal bool ConsumirConflitoUsuario() => Consumir(ref _conflitosUsuario);
 
     internal bool ConsumirGravacaoSessao() => Consumir(ref _gravacoesSessao);
+
+    internal bool ConsumirRegistroUso() => Consumir(ref _registrosUso);
+
+    internal bool ConsumirConflitoRevogacao() => Consumir(ref _conflitosRevogacao);
 
     private static bool Consumir(ref int contador)
     {
@@ -307,8 +358,34 @@ internal sealed class InterceptadorTeste(FalhasInjetadas falhas, ConcurrentQueue
         return falhas.ConsumirCommit() ? throw new ExcecaoBancoInjetada() : result;
     }
 
-    public ValueTask<InterceptionResult<int>> SavingChangesAsync(
+    public async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    {
+        List<Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<SessaoAutenticacao>> sessoesAlteradas = eventData.Context?.ChangeTracker
+            .Entries<SessaoAutenticacao>()
+            .Where(e => e.State == Microsoft.EntityFrameworkCore.EntityState.Modified)
+            .ToList() ?? [];
+        if (sessoesAlteradas.Count > 0 && falhas.AntesDeGravarSessao is { } barreira)
+        {
+            await barreira();
+        }
+
+        bool revogaSessao = sessoesAlteradas.Any(e => e.Property(s => s.RevogadaEm).IsModified);
+        if (revogaSessao && falhas.ConsumirConflitoRevogacao())
+        {
+            throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("Conflito de revogação injetado pelo teste.");
+        }
+
+        bool registraUso = !revogaSessao && sessoesAlteradas.Any(e => e.Property(s => s.UltimoUsoEm).IsModified);
+        if (registraUso && falhas.ConsumirRegistroUso())
+        {
+            throw new ExcecaoBancoInjetada();
+        }
+
+        return Avaliar(eventData, result);
+    }
+
+    private InterceptionResult<int> Avaliar(DbContextEventData eventData, InterceptionResult<int> result)
     {
         bool gravaUsuario = eventData.Context?.ChangeTracker.Entries<UsuarioAplicacao>()
             .Any(e => e.State == Microsoft.EntityFrameworkCore.EntityState.Modified) ?? false;
@@ -324,7 +401,7 @@ internal sealed class InterceptadorTeste(FalhasInjetadas falhas, ConcurrentQueue
             throw new ExcecaoBancoInjetada();
         }
 
-        return ValueTask.FromResult(result);
+        return result;
     }
 }
 
