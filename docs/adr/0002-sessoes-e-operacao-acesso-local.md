@@ -5,8 +5,8 @@
 2026-11-08 — prazo de sessão configurável e limpeza auditada (research D21);
 2026-11-24 — **Revisão L2.1** (sessão por inatividade + teto absoluto), status próprio na
 seção [Revisão L2.1](#revisão-l21-2026-11-24).
-**Status**: aceito (2026-11-12, mantenedor) para o texto original; a Revisão L2.1 está
-em **revisão proposta**. Implementado nas Paradas L2-2 (sessão HTTP) e
+**Status**: aceito (2026-11-12, mantenedor) para o texto original; Revisão L2.1
+**aceita** (2026-11-24, mantenedor). Implementado nas Paradas L2-2 (sessão HTTP) e
 L2-3 (host operacional e `sessao limpar`), com evidências no checkpoint da Phase 18 de
 [tasks.md](../../specs/001-fullstack-foundation/tasks.md).
 **Contexto**: [plano L2](../../specs/001-fullstack-foundation/plan.md),
@@ -98,9 +98,9 @@ Este ADR não afirma que essas provas já foram executadas.
 
 ## Revisão L2.1 (2026-11-24)
 
-**Status**: revisão proposta — aguarda aceite do mantenedor (gate R0, T135 de
+**Status**: aceita (gate R0, T135 de
 [tasks.md](../../specs/001-fullstack-foundation/tasks.md)).
-**Aceite**: _(data e responsável a registrar pelo mantenedor)_
+**Aceite**: 2026-11-24, mantenedor (inclui a ordem de filtros G31).
 **Origem**: FR-006 e SC-002 revisados (clarificações de 2026-11-23 e 2026-11-24);
 research D31, D32, D33, D37 e decisão G31 de tasks.md.
 **Substitui** no texto acima: "Expiração absoluta (padrão 30 minutos, configurável de 5
