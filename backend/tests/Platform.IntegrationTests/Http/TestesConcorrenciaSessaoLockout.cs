@@ -46,7 +46,7 @@ public sealed class TestesConcorrenciaSessaoLockout(FixtureInstalacaoPostgres fi
         SessaoAutenticacao depois = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
         Assert.Equal(anterior.IdSessao, depois.IdSessao);
         Assert.Null(depois.RevogadaEm);
-        Assert.Equal(anterior.ExpiraEm, depois.ExpiraEm);
+        Assert.Equal(anterior.TetoAbsolutoEm, depois.TetoAbsolutoEm);
         Assert.Equal(anterior.Versao, depois.Versao);
         await cliente.ObterTokenAsync();
         using HttpResponseMessage me = await cliente.MeAsync();
@@ -118,14 +118,14 @@ public sealed class TestesConcorrenciaSessaoLockout(FixtureInstalacaoPostgres fi
         Guid id = await ContasSinteticas.CriarContaAsync(A, Relogio, email, ContasSinteticas.SenhaPadraoA);
         ContextoOperacaoTeste operacao = ContextoOperacaoTeste.Criar(Relogio, TipoAutor.Usuario, id.ToString());
         Guid idSessao = IdentificadorV7.Gerar(operacao.InstanteOperacao);
-        DateTimeOffset expiraEm = operacao.InstanteOperacao.AddMinutes(30);
+        DateTimeOffset tetoAbsolutoEm = operacao.InstanteOperacao.AddMinutes(30);
 
         await using (AcessoTenantDbContext contexto = BancoTeste.CriarContexto(A.StringConexaoExecucao, operacao))
         {
             RepositorioSessoes repositorio = Repositorio(contexto, operacao);
             Guid epoca = await repositorio.ObterEpocaAcessoAsync(TestContext.Current.CancellationToken);
             Resultado<SessaoEmitida> emitida = await repositorio.EmitirAsync(
-                new NovaSessao(idSessao, id, epoca, expiraEm, [1, 2, 3]), null, TestContext.Current.CancellationToken);
+                new NovaSessao(idSessao, id, epoca, tetoAbsolutoEm, 30, [1, 2, 3]), null, TestContext.Current.CancellationToken);
             Assert.True(emitida.EhSucesso);
         }
 
@@ -144,7 +144,7 @@ public sealed class TestesConcorrenciaSessaoLockout(FixtureInstalacaoPostgres fi
         SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
         Assert.NotNull(sessao.RevogadaEm);
         Assert.Null(sessao.TicketProtegido);
-        Assert.Equal(expiraEm, sessao.ExpiraEm);
+        Assert.Equal(tetoAbsolutoEm, sessao.TetoAbsolutoEm);
         Assert.Equal(2, sessao.Versao);
     }
 

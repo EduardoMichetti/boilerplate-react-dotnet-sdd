@@ -41,7 +41,7 @@ public sealed class CasoUsoConsultarContexto(IOptions<OpcoesInstalacaoTenant> in
             return ErrosAcesso.AcessoTenantNegado;
         }
 
-        IdentidadeAtual usuario = new(conta.IdUsuario, config.IdTenant, conta.Email, conta.NomeExibicao, atual.ExpiraEm);
+        IdentidadeAtual usuario = new(conta.IdUsuario, config.IdTenant, conta.Email, conta.NomeExibicao, atual.TetoAbsolutoEm);
         return new ContextoAcesso(usuario, config.IdTenant, config.NomeExibicaoTenant!, conta.Permissoes);
     }
 }

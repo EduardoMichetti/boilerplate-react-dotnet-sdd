@@ -42,7 +42,7 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
         FabricaApiInstalacao api = CriarApi(A, new OpcoesFabricaApi { PrazoAbsolutoMinutos = valor });
         (ClienteAcessoHttp cliente, Guid id) = await EntrarAsync(api);
         SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
-        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(minutos), sessao.ExpiraEm);
+        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(minutos), sessao.TetoAbsolutoEm);
 
         Relogio.Avancar(TimeSpan.FromMinutes(minutos) - Microssegundo);
         using (HttpResponseMessage antes = await cliente.MeAsync())
@@ -97,7 +97,7 @@ public sealed class TestesSessaoExpiracaoRevogacao(FixtureInstalacaoPostgres fix
         }
 
         SessaoAutenticacao sessao = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
-        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), sessao.ExpiraEm);
+        Assert.Equal(TesteHttpBase.InstanteInicial.AddMinutes(30), sessao.TetoAbsolutoEm);
         Assert.Equal(1, sessao.Versao);
     }
 

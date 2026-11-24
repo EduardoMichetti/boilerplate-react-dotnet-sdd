@@ -17,7 +17,7 @@ public sealed class RepositorioLimpezaSessoes(AcessoTenantDbContext contexto) : 
         var stubs = await contexto.Sessoes
             .AsNoTracking()
             .Where(s => (s.RevogadaEm != null && s.RevogadaEm < instanteCorte)
-                     || (s.RevogadaEm == null && s.ExpiraEm < instanteCorte))
+                     || (s.RevogadaEm == null && s.TetoAbsolutoEm < instanteCorte))
             .Select(s => new { s.IdSessao, s.Versao })
             .ToListAsync(tokenCancelamento);
 

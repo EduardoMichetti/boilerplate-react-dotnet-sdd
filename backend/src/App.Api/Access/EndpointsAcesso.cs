@@ -143,9 +143,9 @@ public static class EndpointsAcesso
 
         // Somente após o commit da troca: cookie novo com a chave nova (G21).
         SessaoEmitida sessao = resultado.Valor;
-        emissor.Emitir(contexto, new ReferenciaSessao(sessao.IdTenant, sessao.EpocaAcesso, sessao.IdSessao), sessao.ExpiraEm);
+        emissor.Emitir(contexto, new ReferenciaSessao(sessao.IdTenant, sessao.EpocaAcesso, sessao.IdSessao), sessao.TetoAbsolutoEm);
         SemCache(contexto);
-        return Results.Created("/api/v1/sessions/current", new RespostaLogin(sessao.IdTenant, sessao.ExpiraEm));
+        return Results.Created("/api/v1/sessions/current", new RespostaLogin(sessao.IdTenant, sessao.TetoAbsolutoEm));
     }
 
     private static async Task<IResult> EncerrarSessaoAsync(

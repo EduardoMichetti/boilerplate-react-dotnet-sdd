@@ -15,10 +15,10 @@ public sealed record RespostaTokenAntiforgery(
 /// <c>LoginResponse</c> do contrato.
 /// </summary>
 /// <param name="IdTenant">Tenant da instalação.</param>
-/// <param name="ExpiraEm">Prazo absoluto da sessão emitida.</param>
+/// <param name="TetoAbsolutoEm">Teto absoluto da sessão emitida.</param>
 public sealed record RespostaLogin(
     [property: JsonPropertyName("tenantId")] Guid IdTenant,
-    [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiraEm);
+    [property: JsonPropertyName("expiresAt")] DateTimeOffset TetoAbsolutoEm);
 
 /// <summary>
 /// <c>CurrentUser</c> do contrato.

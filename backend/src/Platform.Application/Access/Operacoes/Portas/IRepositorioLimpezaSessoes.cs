@@ -7,7 +7,7 @@ namespace Platform.Application.Access.Operacoes.Portas;
 public interface IRepositorioLimpezaSessoes
 {
     /// <summary>
-    /// Remove sessões encerradas (<c>RevogadaEm &lt; instanteCorte</c> ou <c>RevogadaEm == null &amp;&amp; ExpiraEm &lt; instanteCorte</c>)
+    /// Remove sessões encerradas (<c>RevogadaEm &lt; instanteCorte</c> ou <c>RevogadaEm == null &amp;&amp; TetoAbsolutoEm &lt; instanteCorte</c>)
     /// rastreando cada uma com sua versão esperada.
     /// </summary>
     /// <param name="instanteCorte">Instante de corte UTC calculado a partir da retenção.</param>

@@ -66,8 +66,13 @@ public sealed class RepositorioSessoes(
                 IdSessao = nova.IdSessao,
                 FkIdUsuario = nova.IdUsuario,
                 EpocaAcesso = nova.EpocaAcesso,
-                ExpiraEm = nova.ExpiraEm,
+                TetoAbsolutoEm = nova.TetoAbsolutoEm,
+                JanelaInatividadeMinutos = nova.JanelaInatividadeMinutos,
                 TicketProtegido = nova.TicketProtegido,
+
+                // Mesmo InstanteOperacao que o interceptador grava em CriadoEm (UltimoUsoEm = CriadoEm na emissão).
+                CriadoEm = agora,
+                UltimoUsoEm = agora,
             };
             sessao.Validar();
             contexto.Sessoes.Add(sessao);
@@ -86,7 +91,7 @@ public sealed class RepositorioSessoes(
             throw new ExcecaoDependenciaIndisponivel("Falha ao persistir a troca de sessão.", ex);
         }
 
-        return new SessaoEmitida(nova.IdSessao, nova.IdUsuario, instalacao.Value.IdTenant, nova.EpocaAcesso, nova.ExpiraEm);
+        return new SessaoEmitida(nova.IdSessao, nova.IdUsuario, instalacao.Value.IdTenant, nova.EpocaAcesso, nova.TetoAbsolutoEm);
     }
 
     /// <inheritdoc />
@@ -98,7 +103,7 @@ public sealed class RepositorioSessoes(
                 s.IdSessao,
                 s.FkIdUsuario,
                 s.EpocaAcesso,
-                s.ExpiraEm,
+                s.TetoAbsolutoEm,
                 s.RevogadaEm,
                 s.Versao,
                 s.TicketProtegido,
@@ -175,7 +180,7 @@ public sealed class RepositorioSessoes(
     {
         DateTimeOffset agora = operacao.InstanteOperacao;
         List<SessaoAutenticacao> ativas = await contexto.Sessoes
-            .Where(s => s.FkIdUsuario == idUsuario && s.RevogadaEm == null && s.ExpiraEm > agora)
+            .Where(s => s.FkIdUsuario == idUsuario && s.RevogadaEm == null && s.TetoAbsolutoEm > agora)
             .ToListAsync(tokenCancelamento);
 
         foreach (SessaoAutenticacao sessao in ativas)

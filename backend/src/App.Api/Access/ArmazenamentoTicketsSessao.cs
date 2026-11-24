@@ -51,7 +51,7 @@ public sealed record ReferenciaSessao(Guid IdTenant, Guid EpocaAcesso, Guid IdSe
 /// <summary>
 /// <see cref="ITicketStore"/> das sessões persistidas. Escopo resolvido por chamada pelo
 /// <see cref="HttpContext"/> (sem capturar DbContext nas options). <c>RetrieveAsync</c> valida
-/// referência, sessão, conta, lockout, stamp, época e <c>ExpiraEm</c> a cada operação; erros de
+/// referência, sessão, conta, lockout, stamp, época e <c>TetoAbsolutoEm</c> a cada operação; erros de
 /// dependência propagam (nunca viram <c>null</c>). <c>RenewAsync</c> nunca faz upsert, reativação
 /// ou extensão; <c>RemoveAsync</c> revoga. <c>StoreAsync</c> não é usado: a emissão é exclusiva do
 /// login, com troca atômica e cookie escrito após o commit (G21).
@@ -113,7 +113,7 @@ public sealed class ArmazenamentoTicketsSessao(IHttpContextAccessor acessorConte
             return null;
         }
 
-        estadoRequisicao.Sessao = new SessaoCorrente(estado.IdSessao, estado.IdUsuario, estado.Versao, estado.ExpiraEm);
+        estadoRequisicao.Sessao = new SessaoCorrente(estado.IdSessao, estado.IdUsuario, estado.Versao, estado.TetoAbsolutoEm);
         return ticket;
     }
 
@@ -136,8 +136,8 @@ public sealed class ArmazenamentoTicketsSessao(IHttpContextAccessor acessorConte
             return;
         }
 
-        // Prazo é sempre o gravado: o ticket renovado nunca estende ExpiraEm.
-        ticket.Properties.ExpiresUtc = atual.ExpiraEm;
+        // Prazo é sempre o gravado: o ticket renovado nunca estende TetoAbsolutoEm.
+        ticket.Properties.ExpiresUtc = atual.TetoAbsolutoEm;
         byte[] protegido = servicos.GetRequiredService<ProtetorTicketSessao>().ProtegerTicket(ticket);
         await servicos.GetRequiredService<IRepositorioSessoes>().RenovarAsync(atual.IdSessao, atual.Versao, protegido, cancellationToken);
     }

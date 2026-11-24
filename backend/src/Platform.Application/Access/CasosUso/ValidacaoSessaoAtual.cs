@@ -4,7 +4,7 @@ using Platform.Application.Access.Portas;
 
 /// <summary>
 /// Regra única de validade de uma sessão a cada operação: registro ativo e não revogado,
-/// <c>agora &lt; ExpiraEm</c> gravado (nunca recalculado pela configuração atual), conta ativa e
+/// <c>agora &lt; TetoAbsolutoEm</c> gravado (nunca recalculado pela configuração atual), conta ativa e
 /// fora do bloqueio, carimbo de segurança e época coincidentes com a referência e o marcador.
 /// </summary>
 public static class ValidacaoSessaoAtual
@@ -27,7 +27,7 @@ public static class ValidacaoSessaoAtual
     {
         ArgumentNullException.ThrowIfNull(estado);
 
-        bool sessaoAtiva = estado.RevogadaEm is null && estado.TicketProtegido is not null && agora < estado.ExpiraEm;
+        bool sessaoAtiva = estado.RevogadaEm is null && estado.TicketProtegido is not null && agora < estado.TetoAbsolutoEm;
         bool contaLiberada = estado.ContaAtiva && !(estado.BloqueioHabilitado && estado.BloqueioAte is { } fim && fim > agora);
         bool carimboConfere = carimboTicket is not null
             && estado.CarimboSeguranca is not null

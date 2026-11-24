@@ -24,6 +24,15 @@ public sealed class InterceptadorAuditoria(IContextoOperacao contexto) : SaveCha
         nameof(IEntidadeAuditavel.IdOperacaoCriacao),
     ];
 
+    /// <summary>
+    /// Campos da sessão fixados na emissão (D31): teto e janela nunca mudam depois da criação.
+    /// </summary>
+    private static readonly HashSet<string> CamposImutaveisSessao =
+    [
+        nameof(SessaoAutenticacao.TetoAbsolutoEm),
+        nameof(SessaoAutenticacao.JanelaInatividadeMinutos),
+    ];
+
     private static readonly HashSet<string> CamposAlteracao =
     [
         nameof(IEntidadeAuditavel.AlteradoEm),
@@ -117,11 +126,11 @@ public sealed class InterceptadorAuditoria(IContextoOperacao contexto) : SaveCha
             string nome = propriedade.Metadata.Name;
             bool mudou = !propriedade.Metadata.GetValueComparer().Equals(propriedade.OriginalValue, propriedade.CurrentValue);
 
-            if (CamposCriacao.Contains(nome))
+            if (CamposCriacao.Contains(nome) || (entrada.Entity is SessaoAutenticacao && CamposImutaveisSessao.Contains(nome)))
             {
                 if (mudou)
                 {
-                    throw new InvalidOperationException($"Metadado de criação {nome} é imutável.");
+                    throw new InvalidOperationException($"Campo {nome} é imutável após a criação.");
                 }
 
                 continue;

@@ -61,7 +61,7 @@ public sealed class ProtetorTicketSessao(IDataProtectionProvider provedor) : IPr
         AuthenticationProperties propriedades = new()
         {
             IssuedUtc = dados.EmitidaEm,
-            ExpiresUtc = dados.ExpiraEm,
+            ExpiresUtc = dados.TetoAbsolutoEm,
             IsPersistent = true,
             AllowRefresh = false,
         };

@@ -55,7 +55,7 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
         Guid idSessaoRevogadaDepoisCorte = IdentificadorV7.Gerar(agora);
 
         // Insere as sessões via conexão de runtime com seus respectivos instantes de emissão
-        // 1. Ativa: ExpiraEm no futuro, não revogada
+        // 1. Ativa: TetoAbsolutoEm no futuro, não revogada
         await InserirSessaoAsync(tenant, idSessaoAtiva, idUsuario, agora.AddHours(1), null, cancelamento);
         // 2. Expirada anterior ao corte: elegível
         await InserirSessaoAsync(tenant, idSessaoExpiradaAnterior, idUsuario, corte - umMicrossegundo, null, cancelamento);
@@ -208,11 +208,11 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
         InstalacaoTestePostgres tenant,
         Guid idSessao,
         Guid idUsuario,
-        DateTimeOffset expiraEm,
+        DateTimeOffset tetoAbsolutoEm,
         DateTimeOffset? revogadaEm,
         CancellationToken cancelamento)
     {
-        DateTimeOffset criadoEm = expiraEm.AddMinutes(-30);
+        DateTimeOffset criadoEm = tetoAbsolutoEm.AddMinutes(-30);
         ContextoOperacaoTeste contexto = ContextoOperacaoTeste.Criar(
             new RelogioControlavel(criadoEm), TipoAutor.Sistema, "api_runtime");
 
@@ -222,7 +222,9 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
             IdSessao = idSessao,
             FkIdUsuario = idUsuario,
             EpocaAcesso = Guid.NewGuid(),
-            ExpiraEm = expiraEm,
+            TetoAbsolutoEm = tetoAbsolutoEm,
+            JanelaInatividadeMinutos = 30,
+            UltimoUsoEm = contexto.InstanteOperacao,
             RevogadaEm = revogadaEm,
             TicketProtegido = revogadaEm is null ? [1, 2, 3] : null,
         };
