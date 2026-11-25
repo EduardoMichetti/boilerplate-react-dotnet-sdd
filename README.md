@@ -43,6 +43,7 @@ Cada operador tem **login PostgreSQL individual** (`LOGIN_OPERADOR_ACESSO`, ex.:
 | :---: | :--- | :---: |
 | **L1** | Fundação do backend e persistência: modelo de usuários/permissões, migrations versionadas, liveness/readiness, Compose local e CI. | **Concluído** |
 | **L2** | Autenticação e acesso local ao tenant: sessão por cookie revogável, antiforgery, `/me` e `/context`, host operacional de contas/permissões e `sessao limpar`. | **Concluído** |
+| **L2.1** | Sessão por inatividade (padrão 30 min) + teto absoluto (padrão 600 min), registro de uso, motivo da negação só no log, limpeza pela expiração efetiva e contrato 2.1.0. | Implementado (aceite pendente do Backend CI) |
 | **L3** | Frontend React 19 + TypeScript + Vite consumindo o contrato OpenAPI; extensão modular. | Planejado |
 | **L4** | Publicação Dokploy/VPS, TLS, backups e restauração por instalação, agendamento externo de `sessao limpar`. | Planejado |
 
@@ -100,7 +101,9 @@ Preencha os valores marcados como “definir valor privado”. Arquivos `infra/.
 | `SENHA_OWNER` | Somente o serviço `migrations`. |
 | `SENHA_RUNTIME` | Somente a `api`. |
 | `LOGIN_OPERADOR_ACESSO`, `SENHA_OPERADOR_ACESSO` | Somente o serviço `operations` (login individual). |
-| `Sessao__PrazoAbsolutoMinutos` | Opcional. Prazo absoluto da sessão, inteiro **5–480**, padrão **30**. Vazio = padrão; fora da faixa ou não inteiro impede a API de iniciar. |
+| `Sessao__InatividadeMinutos` | Opcional. Janela de inatividade da sessão, inteiro **5–240**, padrão **30**; não pode ser maior que o teto. Vazio = padrão; fora da faixa ou não inteiro impede a API de iniciar. |
+| `Sessao__TetoAbsolutoMinutos` | Opcional. Teto absoluto da sessão desde o login, inteiro **30–720**, padrão **600**. Vazio = padrão; fora da faixa ou não inteiro impede a API de iniciar. |
+| `Sessao__PrazoAbsolutoMinutos` | **Obsoleta (L2.1).** Não defina: com valor, a API não inicia e o diagnóstico indica as duas chaves acima. |
 | `OperacaoAcesso__RetencaoSessoesDias` | Opcional. Retenção do `sessao limpar`, inteiro **1–365**, padrão **30**. |
 | `Migracoes__PermitirInicializarBancoVazio` | Somente tooling: `true` apenas na primeira inicialização de banco vazio aprovado. |
 | `PORTA_POSTGRES_DEPURACAO` | Somente com `infra/compose.depuracao.yaml` (PostgreSQL publicado no loopback). |
@@ -131,6 +134,8 @@ docker compose --project-name boilerplate-a -f $compose --env-file infra/.env.lo
 
 Isso apaga dados e key ring locais da instalação A. Nunca faça isso com dados de cliente.
 
+**L2.1 — migration regenerada:** a migration inicial `EsquemaInicialAcessoTenant` foi regenerada (sem publicação nem dados a preservar). Um banco criado antes da L2.1 é **recusado** pelo tooling e pela readiness como histórico desconhecido; recrie A e B com `down --volumes` (acima, com o `--project-name`/`--env-file` de cada instalação) e reaplique a migration.
+
 ### 3. Contas e permissões pelo host operacional (perfil `operations`)
 
 Não há painel nem cadastro por HTTP. Contas e permissões são preparadas pelo `Platform.Operations`, publicado apenas no perfil pontual `operations`:
@@ -148,7 +153,7 @@ $op = "docker compose --project-name boilerplate-a -f $compose --env-file infra/
 | `conta revogar-sessoes --id-tenant UUID --id-ambiente UUID --id-usuario UUID` | Revoga todas as sessões da conta. |
 | `permissao conceder --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read` | Concede permissão. |
 | `permissao revogar --id-tenant UUID --id-ambiente UUID --id-usuario UUID --codigo foundation.context.read` | Revoga permissão. |
-| `sessao limpar --id-tenant UUID --id-ambiente UUID` | Remove sessões encerradas há mais que `OperacaoAcesso__RetencaoSessoesDias` (padrão 30). |
+| `sessao limpar --id-tenant UUID --id-ambiente UUID` | Remove sessões encerradas há mais que `OperacaoAcesso__RetencaoSessoesDias` (padrão 30), contados da expiração efetiva (inatividade ou teto, o que ocorrer primeiro) ou da revogação; sessão ativa nunca é removida. |
 
 Exemplo: `Invoke-Expression "$op conta criar --id-tenant <IdTenant> --id-ambiente <IdAmbiente> --email acesso@example.invalid --nome-exibicao 'Teste A'"`.
 
@@ -196,7 +201,13 @@ Para validar A e B juntas, use `--project-name boilerplate-b`, `--env-file infra
 
 - **Modo local = Development + loopback.** O Compose roda a API com `ASPNETCORE_ENVIRONMENT=Development` e publica a porta só em `127.0.0.1`. Nesse modo, os cookies são `bps-session`/`bps-csrf` e aceitam HTTP. Não publique esse modo para acesso remoto.
 - **Fora de Development, HTTPS é obrigatório:** cookies `__Host-bps-session`/`__Host-bps-csrf` com `Secure`, `HttpOnly`, `SameSite`, `Path=/` e sem `Domain`; use um host por instalação.
-- **Sessão:** prazo absoluto fixado na emissão (`Sessao__PrazoAbsolutoMinutos`, 5–480, padrão 30), sem sliding expiration nem refresh; mudar a configuração não altera sessões já emitidas. Logout revoga no banco antes do 204.
+- **Sessão (L2.1):** expira por **inatividade** (`Sessao__InatividadeMinutos`, 5–240, padrão 30) ou pelo **teto absoluto** desde o login (`Sessao__TetoAbsolutoMinutos`, 30–720, padrão 600), o que ocorrer primeiro. Janela e teto são **fixados na emissão**: mudar a configuração só afeta sessões novas.
+  - Só requisições autenticadas **aceitas** (`/me`, `/context` depois de instalação ativa e permissão) renovam a inatividade; respostas negadas (401/403/409, `CSRF_INVALID`), login, logout, antiforgery, health e OpenAPI não renovam. O uso **nunca** estende o teto.
+  - O registro de uso grava no máximo **1 vez por minuto** por sessão, então a inatividade pode expirar até **60 s antes** do nominal (tolerância a favor da segurança). Não há `Set-Cookie` em `/me`/`/context`.
+  - Login devolve `expiresAt` (teto) e `idleTimeoutMinutes`; `/me` devolve `sessionExpiresAt` (teto) e `sessionIdleTimeoutMinutes`. O instante de expiração por inatividade não é exposto.
+  - Sem remember-me, refresh token nem renovação por login silencioso. Logout revoga no banco antes do 204.
+  - Toda sessão negada responde o mesmo 401 `AUTH_REQUIRED`; o **motivo** (`Inatividade`, `TetoAbsoluto`, `Revogada`, `Invalida`, `Ausente`) vai **só para o log**, no evento `EventId 1002 SessaoNegada` (`Information`), com `TraceId` e `IdOperacao`, sem cookie, ids de sessão/conta, email ou IP.
+  - A chave obsoleta `Sessao__PrazoAbsolutoMinutos` com valor impede a inicialização.
 - **Key ring por instalação:** `ProtecaoDados__DiretorioChaves` aponta para um volume privado da instalação (`chaves_protecao_dados` no Compose). O discriminador do Data Protection combina `CodigoAplicacao/IdAmbiente/IdTenant`. Perder o volume invalida as sessões em curso.
 - **Certificado em produção:** fora de Development, `ProtecaoDados__ArquivoCertificado` (PFX com chave privada) é obrigatório e `ProtecaoDados__ArquivoSenhaCertificado` aponta para um arquivo com a senha. Monte ambos como arquivos privados; nunca em Git, imagem ou build argument.
 - **Proxies:** `X-Forwarded-*` não é processado na L2 (`CabecalhosEncaminhados:ProxiesConfiaveis` vazio).

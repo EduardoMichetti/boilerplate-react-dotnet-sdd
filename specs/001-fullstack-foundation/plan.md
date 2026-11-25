@@ -7,8 +7,10 @@ não uma troca de branch Git.
 **Input**: atualizar o plano para os esclarecimentos de 2026-11-23: primeiro a reabertura
 da L2 (sessão por inatividade + teto absoluto, recorte **L2.1**), depois a L3 sobre o novo
 modelo de sessão, registrando somente o delta.
-**Status**: design; nenhum código, migration, container ou teste é implementado ou
-executado neste comando. L3 corresponde a I3 nos artefatos anteriores.
+**Status**: **L2.1 implementada** (R0–R3, Phases 19–22 de [tasks.md](tasks.md), branch
+`feat/l2.1-sessao`; aceite local registrado no checkpoint R3, **pendente o Backend CI
+verde no push** para fechar a L2.1). **L3**: design; nada implementado (bloqueada até o
+checkpoint R3). L3 corresponde a I3 nos artefatos anteriores.
 **Revisões**: 2026-11-23 (plano L3); **2026-11-24** (L2.1 prioritária; deltas L3 de
 permissões com descrição, validade da sessão na tela, nova entrada no próprio local,
 várias abas, nenhum armazenamento no navegador; migration inicial regenerada);
@@ -182,7 +184,7 @@ specs/001-fullstack-foundation/
 ├── architecture.md         # arquitetura evolutiva + L2.1 + L3
 ├── tasks.md                # L2.1 (T135–T169) e L3 (T170–T219) + históricos L1/L2
 └── contracts/
-    ├── openapi.json        # contrato L2 2.0.0 servido; 2.1.0 promovido com a L2.1 (delta em operations §4)
+    ├── openapi.json        # contrato 2.1.0 servido (promovido com a L2.1; delta em operations §4)
     ├── operations.md       # L2 + §4 “Expiração e uso da sessão (L2.1)” + §7–§9 L3
     └── ui.md               # contrato observável da interface (com diálogo de nova entrada)
 ```

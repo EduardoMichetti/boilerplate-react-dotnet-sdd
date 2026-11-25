@@ -47,8 +47,11 @@ services:
       NomeExibicaoTenant: ${NomeExibicaoTenant:?defina NomeExibicaoTenant no env privado}
       EstadoTenant: ${EstadoTenant:?defina EstadoTenant no env privado}
       StringsConexao__BancoApp: Host=postgres;Port=5432;Database=${BANCO_APP};Username=${BANCO_APP}_runtime;Password=${SENHA_RUNTIME}
-      # Opcional: vazio equivale a ausente (padrão 30), G10.
-      Sessao__PrazoAbsolutoMinutos: ${Sessao__PrazoAbsolutoMinutos:-}
+      # Opcionais: vazio equivale a ausente, G10. Inatividade 5–240 (padrão 30);
+      # teto absoluto 30–720 (padrão 600). A chave obsoleta Sessao__PrazoAbsolutoMinutos
+      # não é repassada; se definida com valor no ambiente da API, impede a inicialização.
+      Sessao__InatividadeMinutos: ${Sessao__InatividadeMinutos:-}
+      Sessao__TetoAbsolutoMinutos: ${Sessao__TetoAbsolutoMinutos:-}
       ProtecaoDados__DiretorioChaves: /var/lib/bps/chaves
     volumes:
       - chaves_protecao_dados:/var/lib/bps/chaves

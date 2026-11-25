@@ -8,6 +8,8 @@ using Platform.Domain.Access;
 
 /// <summary>
 /// Caso de uso para limpeza em lote de sessões encerradas além da retenção configurada (FR-033: <c>sessao limpar</c>).
+/// A retenção conta da expiração efetiva (inatividade ou teto, o que ocorrer primeiro) ou da revogação (L2.1, D31);
+/// o corte é <c>InstanteOperacao − RetencaoSessoesDias</c>, e cada execução gera um único registro de operação.
 /// </summary>
 public sealed class CasoUsoLimparSessoes(
     IVerificadorAutorizacaoOperador verificadorAutorizacao,
@@ -17,7 +19,7 @@ public sealed class CasoUsoLimparSessoes(
     IContextoOperacao contextoOperacao)
 {
     /// <summary>
-    /// Executa a limpeza de sessões expiradas/revogadas.
+    /// Executa a limpeza de sessões expiradas (por inatividade ou teto) ou revogadas antes do corte.
     /// </summary>
     public async Task<ResultadoOperacao> ExecutarAsync(
         Guid idTenant,
