@@ -5,7 +5,8 @@ using Platform.Application.Configuration;
 using Xunit;
 
 /// <summary>
-/// T052: opções de prazo de sessão e retenção de limpeza (D21, G10), parse estrito invariante.
+/// T052/T137: opções de sessão por inatividade + teto absoluto (D31, L2.1), chave obsoleta
+/// <c>Sessao:PrazoAbsolutoMinutos</c> e retenção de limpeza (G10), parse estrito invariante.
 /// </summary>
 public sealed class TestesOpcoesSessaoEOperacao
 {
@@ -14,31 +15,31 @@ public sealed class TestesOpcoesSessaoEOperacao
     [Theory]
     [InlineData("5", 5)]
     [InlineData("30", 30)]
-    [InlineData("480", 480)]
-    public void PrazoSessao_AceitaValoresNaFaixa(string bruto, int esperado)
+    [InlineData("240", 240)]
+    public void InatividadeSessao_AceitaValoresNaFaixa(string bruto, int esperado)
     {
-        OpcoesSessao opcoes = new() { PrazoAbsolutoMinutosBruto = bruto };
+        OpcoesSessao opcoes = new() { InatividadeMinutosBruto = bruto };
 
         ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
 
         Assert.True(resultado.Succeeded);
-        Assert.Equal(esperado, opcoes.PrazoAbsolutoMinutos);
+        Assert.Equal(esperado, opcoes.InatividadeMinutos);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void PrazoSessao_AusenteOuVazioUsaPadrao30(string? bruto)
+    public void InatividadeSessao_AusenteOuVazioUsaPadrao30(string? bruto)
     {
-        OpcoesSessao opcoes = new() { PrazoAbsolutoMinutosBruto = bruto };
+        OpcoesSessao opcoes = new() { InatividadeMinutosBruto = bruto };
 
         Assert.True(new ValidadorOpcoesSessao().Validate(null, opcoes).Succeeded);
-        Assert.Equal(30, opcoes.PrazoAbsolutoMinutos);
+        Assert.Equal(30, opcoes.InatividadeMinutos);
     }
 
     [Theory]
     [InlineData("4")]
-    [InlineData("481")]
+    [InlineData("241")]
     [InlineData("0")]
     [InlineData("-5")]
     [InlineData("30.5")]
@@ -49,18 +50,118 @@ public sealed class TestesOpcoesSessaoEOperacao
     [InlineData("+30")]
     [InlineData("trinta")]
     [InlineData("99999999999")]
-    public void PrazoSessao_RejeitaForaDaFaixaOuNaoInteiroComDiagnosticoSeguro(string bruto)
+    public void InatividadeSessao_RejeitaForaDaFaixaOuNaoInteiroComDiagnosticoSeguro(string bruto)
     {
-        OpcoesSessao opcoes = new() { PrazoAbsolutoMinutosBruto = bruto };
+        OpcoesSessao opcoes = new() { InatividadeMinutosBruto = bruto, TetoAbsolutoMinutosBruto = "719" };
+
+        ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
+
+        Assert.True(resultado.Failed);
+        string mensagem = resultado.FailureMessage;
+        Assert.Contains("Sessao:InatividadeMinutos", mensagem, StringComparison.Ordinal);
+        Assert.Contains("5–240", mensagem, StringComparison.Ordinal);
+        Assert.DoesNotContain("719", mensagem, StringComparison.Ordinal);
+        Assert.Throws<InvalidOperationException>(() => opcoes.InatividadeMinutos);
+    }
+
+    [Theory]
+    [InlineData("30", 30)]
+    [InlineData("600", 600)]
+    [InlineData("720", 720)]
+    public void TetoSessao_AceitaValoresNaFaixa(string bruto, int esperado)
+    {
+        OpcoesSessao opcoes = new() { TetoAbsolutoMinutosBruto = bruto };
+
+        ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
+
+        Assert.True(resultado.Succeeded);
+        Assert.Equal(esperado, opcoes.TetoAbsolutoMinutos);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void TetoSessao_AusenteOuVazioUsaPadrao600(string? bruto)
+    {
+        OpcoesSessao opcoes = new() { TetoAbsolutoMinutosBruto = bruto };
+
+        Assert.True(new ValidadorOpcoesSessao().Validate(null, opcoes).Succeeded);
+        Assert.Equal(600, opcoes.TetoAbsolutoMinutos);
+    }
+
+    [Theory]
+    [InlineData("29")]
+    [InlineData("721")]
+    [InlineData("0")]
+    [InlineData("-5")]
+    [InlineData("30.5")]
+    [InlineData(" 30")]
+    [InlineData("30 ")]
+    [InlineData("   ")]
+    [InlineData("1e2")]
+    [InlineData("+30")]
+    [InlineData("trinta")]
+    [InlineData("99999999999")]
+    public void TetoSessao_RejeitaForaDaFaixaOuNaoInteiroComDiagnosticoSeguro(string bruto)
+    {
+        OpcoesSessao opcoes = new() { TetoAbsolutoMinutosBruto = bruto, InatividadeMinutosBruto = "17" };
+
+        ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
+
+        Assert.True(resultado.Failed);
+        string mensagem = resultado.FailureMessage;
+        Assert.Contains("Sessao:TetoAbsolutoMinutos", mensagem, StringComparison.Ordinal);
+        Assert.Contains("30–720", mensagem, StringComparison.Ordinal);
+        Assert.DoesNotContain("17", mensagem, StringComparison.Ordinal);
+        Assert.Throws<InvalidOperationException>(() => opcoes.TetoAbsolutoMinutos);
+    }
+
+    [Fact]
+    public void InatividadeMaiorQueTeto_Rejeitada()
+    {
+        OpcoesSessao opcoes = new() { InatividadeMinutosBruto = "60", TetoAbsolutoMinutosBruto = "30" };
+
+        ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
+
+        Assert.True(resultado.Failed);
+        Assert.Contains("Sessao:InatividadeMinutos maior que Sessao:TetoAbsolutoMinutos", resultado.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InatividadeIgualAoTeto_Aceita()
+    {
+        OpcoesSessao opcoes = new() { InatividadeMinutosBruto = "30", TetoAbsolutoMinutosBruto = "30" };
+
+        Assert.True(new ValidadorOpcoesSessao().Validate(null, opcoes).Succeeded);
+        Assert.Equal(30, opcoes.InatividadeMinutos);
+        Assert.Equal(30, opcoes.TetoAbsolutoMinutos);
+    }
+
+    [Theory]
+    [InlineData("30")]
+    [InlineData(SegredoOutraChave)]
+    public void PrazoAbsolutoObsoleto_ComValor_RejeitadoIndicandoChavesNovas(string bruto)
+    {
+        OpcoesSessao opcoes = new() { PrazoAbsolutoMinutosObsoletoBruto = bruto };
 
         ValidateOptionsResult resultado = new ValidadorOpcoesSessao().Validate(null, opcoes);
 
         Assert.True(resultado.Failed);
         string mensagem = resultado.FailureMessage;
         Assert.Contains("Sessao:PrazoAbsolutoMinutos", mensagem, StringComparison.Ordinal);
-        Assert.Contains("5–480", mensagem, StringComparison.Ordinal);
+        Assert.Contains("Sessao:InatividadeMinutos", mensagem, StringComparison.Ordinal);
+        Assert.Contains("Sessao:TetoAbsolutoMinutos", mensagem, StringComparison.Ordinal);
         Assert.DoesNotContain(SegredoOutraChave, mensagem, StringComparison.Ordinal);
-        Assert.Throws<InvalidOperationException>(() => opcoes.PrazoAbsolutoMinutos);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void PrazoAbsolutoObsoleto_AusenteOuVazio_Aceito(string? bruto)
+    {
+        OpcoesSessao opcoes = new() { PrazoAbsolutoMinutosObsoletoBruto = bruto };
+
+        Assert.True(new ValidadorOpcoesSessao().Validate(null, opcoes).Succeeded);
     }
 
     [Theory]

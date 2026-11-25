@@ -1,6 +1,7 @@
-# Quickstart: validar a L1 e a L2
+# Quickstart: validar a L1, a L2, a L2.1 e (alvo) a L3
 
-**Date**: 2026-11-05 | **Revisão**: 2026-11-12 (Parada L2-5)
+**Date**: 2026-11-05 | **Revisão**: 2026-11-12 (Parada L2-5); 2026-11-23 (roteiro L3 §8–§12, design);
+2026-11-24 (roteiro **L2.1** §7.1 — sessão por inatividade + teto absoluto; ajustes L3)
 **References**: [plano](plan.md), [modelo](data-model.md),
 [operações](contracts/operations.md), [API L2](contracts/openapi.json),
 [README](../../README.md).
@@ -9,7 +10,9 @@
 host `Platform.Operations` e perfil `operations` existem; os comandos abaixo usam os
 nomes reais (variáveis G4/G16 do `.env.local`, roles derivadas do banco G6, serviço
 `operations`). A matriz §6 é o roteiro de aceite; a evidência da última execução fica
-no checkpoint da Phase 18 em [tasks.md](tasks.md).
+no checkpoint da Phase 18 em [tasks.md](tasks.md). **L2.1 implementada** (sessão por
+inatividade + teto absoluto, §7.1; migration inicial regenerada — recriar bancos locais
+pela §3); evidência no checkpoint da Phase 22 em [tasks.md](tasks.md).
 
 ## 1. Pré-requisitos e regressão L1 disponível
 
@@ -197,24 +200,23 @@ L2, sem `x-planned-only=true` e sem operações ausentes da implementação.
 | CSRF ausente/inválido/de identidade anterior | 400 CSRF_INVALID em login/logout; token novo após mudança de identidade. |
 | Falta/revogação da concessão | `/context` 403 já na próxima operação; `/me` próprio continua sujeito à sessão válida. |
 | Logout e replay / Renew concorrente | Revogação persistida antes de 204; replay 401; sem ressurreição ou extensão de prazo. |
-| Novo login com sessão anterior e falha injetada no commit | 503; nenhuma sessão nova; a anterior continua válida com o mesmo `ExpiraEm`. Revogação/lockout confirmados por outra operação durante a tentativa permanecem. |
+| Novo login com sessão anterior e falha injetada no commit | 503; nenhuma sessão nova; a anterior continua válida com o mesmo `TetoAbsolutoEm`, janela e `UltimoUsoEm`. Revogação/lockout confirmados por outra operação durante a tentativa permanecem. |
 | Dois logins concorrentes com a mesma sessão anterior (barreira) | Exatamente uma troca conclui (200); a outra recebe 409 SESSION_CONFLICT sem `Set-Cookie`; uma única sessão nova no banco; sessões de outros jars intactas. Repetição com novo GET antiforgery funciona. |
 | Concorrência por entidade | Conta usa `ConcurrencyStamp` (sem `Versao`); concessão simultânea/retirada simultânea gera conflito explícito no host; falhas de senha concorrentes não perdem contagem. |
 | Duas sessões da mesma conta em jars distintos | Novo login/logout em uma não invalida a outra. Reset/desativação/lockout/revogação operacional invalidam ambas, sem efeito em B. |
-| Expiração absoluta | Sem configuração, aos 30 minutos da criação, 401 (29:59 ainda autoriza); `TimeProvider` evita espera real no teste. |
-| Prazo configurável (`Sessao__PrazoAbsolutoMinutos`) | `5` e `480` iniciam a API e expiram exatamente nesse prazo; `4`, `481`, `0`, `30.5` e texto impedem a inicialização com diagnóstico que cita a chave/faixa, sem secrets. Sessão emitida com 30, API reiniciada com 5: a sessão mantém o `ExpiraEm` original. |
-| `sessao limpar`, retenção padrão | Fixture com sessões ativa, expirada e revogada em 30d+1µs, exatamente 30d e menos de 30d antes do agora: removidas somente as encerradas há mais de 30 dias; ativa e as demais intactas, inclusive com login/logout/Renew concorrentes. Um registro `Sucesso` com retenção, corte, quantidade, operador e correlação, sem ids de sessões/contas. |
+| Expiração e prazos configuráveis | **Substituídos na L2.1**: inatividade + teto absoluto, faixas, chave obsoleta `Sessao__PrazoAbsolutoMinutos`, fixação na emissão e registro de uso seguem a matriz da [§7.1](#71-l21--sessão-por-inatividade-e-teto-absoluto). |
+| `sessao limpar`, retenção padrão | Corte pela expiração efetiva da L2.1 (`min(UltimoUsoEm + janela, TetoAbsolutoEm)`) ou pela `RevogadaEm`: encerradas há 30d+1µs removidas; exatamente 30d e menos de 30d mantidas; ativa nunca elegível. Um registro `Sucesso` com retenção, corte, quantidade, operador e correlação, sem ids de sessões/contas. Casos detalhados na §7.1. |
 | `sessao limpar`, sem elegíveis / falha | Sem elegíveis: `sucesso`, `QuantidadeRemovida=0` e um registro. Falha injetada: rollback (nenhuma removida), um registro `Falha`, saída não zero. Dois operadores distintos aparecem com seus logins. |
 | `sessao limpar`, retenção inválida | `OperacaoAcesso__RetencaoSessoesDias` `0`, `366` ou não inteiro: não zero antes de conectar, `RETENCAO_INVALIDA`, nada removido; `1` e `365` aceitos. Runtime não consegue DELETE em sessões e a API não tem job de limpeza. |
 | Reset/desativação/revogação em A | Próxima operação A nega; conta/sessões/concessões B permanecem idênticas. |
 | Lockout | Quinta falha bloqueia por 15 minutos e revoga todas as sessões da conta atomicamente, inclusive sob concorrência. Após o bloqueio, cookie anterior continua 401; novo login funciona; conta B independente. |
 | Rate limit | Sexto pedido na janela de um minuto: 429 + Retry-After; IP forjado não contorna. Testar separadamente do lockout. |
 | Instalação inativa após autenticar | `/me` e `/context` retornam 409 com sessão válida; login 401 genérico. Obter CSRF e encerrar sessão própria ainda válida continua permitido, com 204 somente após commit. |
-| Reativação da instalação | Sessão dentro do prazo original e não revogada retoma. Sessão expirada/revogada não retoma; tempo inativo conta no prazo fixado na emissão. |
+| Reativação da instalação | Sessão não revogada retoma só se ainda não expirou por inatividade nem pelo teto fixados na emissão; o tempo com a instalação inativa conta (não pausa). Sessão expirada/revogada não retoma. |
 | Banco/marker/key ring indisponível | 503 seguro; nunca 200, identidade vazia ou 401 silencioso por erro de banco. |
 | Falha no commit do logout | Não confirmar 204 nem apagar cookie como se a revogação estivesse concluída. |
 | Health com cookies válidos/inválidos | Nenhum lookup de sessão; liveness sem banco/chaves e readiness sem dados de conta. |
-| Restart da API | Sessão ainda dentro do prazo funciona com mesmo key ring/banco; sem estender expiração. |
+| Restart da API | Sessão ainda não expirada funciona com mesmo key ring/banco; o reinício não estende teto nem inatividade. |
 | Operação sem autorização/auditoria indisponível | Não zero, sem mutação; sucesso somente com auditoria e commit. |
 | Dois operadores individuais autorizados | Auditoria distingue seus logins autenticados e correlações. Nome/role informado em argumento livre não pode substituir a identidade verificada. |
 | Base auditável de contas/permissões/sessões | Novos registros têm autor/data/correlação de criação. Alterações preservam criação e registram última alteração atomicamente; histórico operacional permanece imutável. |
@@ -259,4 +261,200 @@ permissão do mantenedor e não é presumida por existir YAML.
 Evidências: revisão testada/SDK selecionado, suites/quantidades, migration inicial,
 matriz SC-002, 200/100/100/pico SC-003, consumidor SC-005, gates SC-006 e docs SC-008.
 L3/L4 (frontend, módulos opcionais, publicação e recuperação real) não são
-executadas nem declaradas concluídas neste roteiro.
+executadas nem declaradas concluídas pelas §1–§7. O roteiro L2.1 está na §7.1 e o
+roteiro L3 nas §8–§12.
+
+## 7.1 L2.1 — sessão por inatividade e teto absoluto
+
+Reabertura da L2 (FR-006, SC-002; research [D31–D33](research.md#revisão-l21--2026-11-24-reabertura-da-l2-modelo-de-sessão)).
+**Implementada** (Phases 19–22 de [tasks.md](tasks.md)); DEVE estar aprovada (checkpoint
+R3, Backend CI verde) antes de qualquer passo das §8–§12.
+
+### Configuração das duas chaves
+
+| Variável (`.env.local` / Compose → API) | Padrão | Faixa inclusiva | Efeito |
+|---|---|---|---|
+| `Sessao__InatividadeMinutos` | 30 | 5–240 | Expira após esse tempo sem requisição autenticada aceita. |
+| `Sessao__TetoAbsolutoMinutos` | 600 (10 h) | 30–720 | Prazo máximo desde o login; o uso nunca o estende. |
+
+- Minutos inteiros, sem sinal, espaço ou separador. Ausente ou vazio usa o padrão.
+- A API **não inicia** com valor fora da faixa, não inteiro, ou inatividade maior que o
+  teto (igual é aceito); o diagnóstico cita só chaves e faixas.
+- `Sessao__PrazoAbsolutoMinutos` foi **removida**: se ainda estiver nos arquivos privados
+  com valor, a API não inicia — retire-a e, se quiser manter um prazo curto, use as duas
+  chaves acima.
+- Os valores são fixados em cada sessão no login; mudar a configuração e reiniciar não
+  altera sessões já emitidas. Somente a API lê essas chaves.
+
+### Preparação
+
+A migration inicial é **regenerada** na L2.1 (research D32): recriar os bancos locais
+A/B do zero pela §3 (único caso em que apagar volumes é o passo previsto, por serem
+locais e sintéticos) e repetir a §4. Um volume antigo é recusado pela readiness por
+histórico de migration desconhecido — é o comportamento esperado, não falha a contornar.
+
+### Verificação manual rápida (A, valores padrão)
+
+```powershell
+# após §3/§4 e o login da §5 (cookie jar privado em $sessaoA; resposta do login em $login)
+$login.expiresAt                # teto: ~10 h após o login (UTC)
+$login.idleTimeoutMinutes       # 30
+$me = Invoke-RestMethod "$origemA/api/v1/me" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA
+$me.sessionExpiresAt            # igual a $login.expiresAt
+$me.sessionIdleTimeoutMinutes   # 30
+# nenhuma resposta de /me ou /context traz Set-Cookie (imprime só o booleano)
+foreach ($rota in 'me', 'context') {
+    $r = Invoke-WebRequest "$origemA/api/v1/$rota" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA -UseBasicParsing
+    "$rota Set-Cookie presente: $($r.Headers.ContainsKey('Set-Cookie'))"   # False
+}
+```
+
+Esperado: login 201 com `expiresAt` (teto) e `idleTimeoutMinutes`; `/me` com
+`sessionExpiresAt` igual ao teto e `sessionIdleTimeoutMinutes` = 30; nenhuma resposta de
+`/me` ou `/context` contém `Set-Cookie`.
+
+Fixação na emissão e chave obsoleta (variáveis só no processo do shell, sem editar o
+arquivo privado; o Compose repassa `Sessao__*` do ambiente ao serviço `api`):
+
+```powershell
+$env:Sessao__InatividadeMinutos = '5'
+docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d --force-recreate api
+Invoke-RestMethod "$origemA/health/ready"
+(Invoke-RestMethod "$origemA/api/v1/me" -Headers @{ 'X-Tenant-Id' = $tenantA } -WebSession $sessaoA).sessionIdleTimeoutMinutes   # 30 (fixado na emissão)
+Remove-Item Env:\Sessao__InatividadeMinutos
+
+# a API NÃO inicia com a chave obsoleta: repassada por um override temporário
+$env:Sessao__PrazoAbsolutoMinutos = '30'
+docker compose --project-name boilerplate-a -f $compose --env-file $localA run --rm --no-deps -e Sessao__PrazoAbsolutoMinutos api   # sai com erro; o diagnóstico cita Sessao:InatividadeMinutos e Sessao:TetoAbsolutoMinutos
+Remove-Item Env:\Sessao__PrazoAbsolutoMinutos
+docker compose --project-name boilerplate-a -f $compose --env-file $localA up -d --force-recreate api
+```
+
+Revogar pelo operador continua negando na próxima operação.
+
+### Matriz de aceite L2.1 (testes automatizados com relógio controlado)
+
+| Cenário | Resultado exigido |
+|---|---|
+| Inatividade padrão | Último uso gravado + 29:59 → 200; + 30:00 → 401 `AUTH_REQUIRED`. |
+| Uso contínuo até o teto | Uso a cada 29 min e, em outro teste, a cada 1 min: válido até 599:59 após o login; 600:00 → 401 mesmo em uso. |
+| Negadas não renovam | Requisições 403 (sem `foundation.context.read` em `/context`), 409 (instalação inativa) e 400 CSRF não alteram `UltimoUsoEm`; a sessão expira 30 min após o último uso aceito. |
+| Revalidação renova | `GET /me` sem outra chamada (como a revalidação de foco da interface) a cada 29 min mantém a sessão válida até o teto; sem nenhuma chamada por 30 min → 401. |
+| Motivo só no log | Sessões negadas por inatividade, teto, revogação, cookie inválido e ausência de cookie: as cinco respostas 401 `AUTH_REQUIRED` são idênticas exceto `traceId`; o log capturado tem `EventId 1002 SessaoNegada` com o `Motivo` correto e o mesmo `TraceId`, sem valor de cookie, id de sessão, id/email da conta ou IP. |
+| Instalação inativa | Inativar não pausa: após reativar, sessão com mais de 30 min sem uso aceito (ou além do teto) → 401. |
+| Limitação de gravação | Uso a +30 s do último registro: `UltimoUsoEm` e `Versao` inalterados, expiração conta do registro anterior; uso a +60 s grava. Tolerância documentada: negação no máximo 30 min após o último uso aceito e nunca antes de 29 min. |
+| Faixas aceitas | Inatividade `5` e `240`; teto `30` e `720`; ausentes/vazios → 30/600. Sessão emitida com cada valor expira exatamente nele. |
+| Faixas rejeitadas | Inatividade `4` ou `241`; teto `29` ou `721`; `30.5`, `" 30"`, `-5`, texto; inatividade `60` com teto `30`; chave obsoleta presente → API não inicia, diagnóstico seguro sem secrets. Inatividade igual ao teto inicia. |
+| Fixado na emissão | Sessão emitida com 30/600; API reiniciada com 5/30: a sessão mantém janela 30 e teto original. |
+| CHECKs no banco | Inserção direta com teto 29/721 min, janela 4/241 ou maior que o teto, ou `UltimoUsoEm` fora de `[CriadoEm, TetoAbsolutoEm)` → violação de constraint. |
+| Concorrência | Duas requisições paralelas da mesma sessão após 60 s: uma grava, a outra descarta o conflito e responde normalmente. Logout, revogação operacional e bloqueio concorrentes com registro de uso concluem (repetição); dois logins com a mesma sessão anterior: um 201, outro 409 `SESSION_CONFLICT`. |
+| Controles L2 mantidos | Troca atômica no login, falha injetada sem sessão nova, bloqueio revoga todas, sessões independentes por jar, logout só da corrente, revogação de A sem efeito em B (linhas da §6). |
+| `sessao limpar` | Corte pela expiração efetiva: sessão expirada por inatividade há 30 d + 1 µs removida; exatamente 30 d mantida; ativa nunca elegível; revogada pela `RevogadaEm`. Um registro por execução. |
+| Contrato | `openapi.json` 2.1.0 igual ao servido; consumidor independente (§5) continua aprovado. |
+
+Evidência: suites verdes no CI, registro da execução da §7.1 em [tasks.md](tasks.md)
+(seção L2.1) e ADR 0002 revisada. Só então a L3 pode começar.
+
+
+## 8. L3 — pré-requisitos adicionais (alvo, ainda não implementado)
+
+As §8–§12 descrevem a validação da L3 conforme [plan.md](plan.md); os comandos só
+funcionam após a implementação. Para o caminho SC-001 (clone limpo → tela autenticada)
+bastam Git, PowerShell e Docker/Compose v2: a interface é compilada dentro da imagem da
+API. Node.js 24.22.3 (`frontend/.nvmrc`) só é necessário para desenvolver o frontend e
+rodar seus testes localmente.
+
+Navegadores suportados: duas últimas versões estáveis de Chrome, Edge ou Firefox desktop.
+Cookies não são isolados por porta: use uma instalação por perfil de navegador
+(ex.: A em `http://localhost:<PORTA_API>` e B em outro perfil ou em `http://127.0.0.1:<porta>`).
+
+## 9. L3 — interface servida pela API (caminho SC-001)
+
+Seguir §2–§4 para a instalação A (arquivos privados, bancos do zero, migration inicial
+única — regenerada na L3 —, conta com `foundation.context.read`, API iniciada) com a
+L2.1 aceita (§7.1). Depois:
+
+```powershell
+Invoke-RestMethod "$origemA/api/v1/tenant"                 # id, displayName, buildId
+(Invoke-WebRequest "$origemA/contexto" -UseBasicParsing).Headers['Content-Security-Policy']
+Start-Process "$origemA/"
+```
+
+Esperado: `GET /api/v1/tenant` devolve id/nome de A e um `buildId` de 32 hex, sem
+`X-Tenant-Id`; `/contexto` devolve a página com CSP e `Cache-Control: no-store`. No
+navegador: `/` leva à entrada com o nome da empresa A; entrar com a conta da §4 leva à
+tela de contexto com conta, empresa, validade da sessão (“Sessão válida até HH:MM, ou
+após 30 min sem uso”) e a permissão com descrição e código (“Consultar o próprio contexto
+de acesso — `foundation.context.read`”);
+Sair volta à entrada. Este é o caminho cronometrado do SC-001.
+
+Verificações rápidas (devem falhar do jeito descrito, nunca devolver a interface):
+
+```powershell
+Invoke-WebRequest "$origemA/api/v1/inexistente" -UseBasicParsing   # 404 Problem Details, no-store
+Invoke-WebRequest "$origemA/assets/inexistente.js" -UseBasicParsing # 404, não index.html
+```
+
+## 10. L3 — frontend local, qualidade e E2E
+
+```powershell
+Set-Location .\frontend
+npm ci
+npm run formatar:verificar      # prettier --check
+npm run lint                    # ESLint com tipos
+npm run tipos                   # tsc --noEmit (estrito)
+npm run testar                  # Vitest + Testing Library
+npm run build                   # vite build + id de build
+npm run orcamento               # JS inicial ≤ limite de orcamento.json (gzip)
+npm audit --audit-level=high
+npm run dev                     # vite dev com proxy de /api, /openapi, /health para a API local
+```
+
+E2E (Chromium + axe) contra a stack local com a API servindo a interface, preparada pelo
+roteiro automatizado (mesmos passos das §2–§4 e §9, com valores sintéticos gerados):
+
+```powershell
+pwsh .\infra\scripts\<roteiro-acesso-local>.ps1   # nome definido nas tasks L3
+npx playwright test
+```
+
+Esperado: todos os cenários de [ui.md](contracts/ui.md) aprovados — inclusive os da
+[§9 de ui.md](contracts/ui.md#9-cenários-e2e-bloqueantes-acrescentados-l3) (expiração com
+conteúdo escondido e restauração, troca de conta, gravação não reenviada, várias abas,
+novas entradas simultâneas com 409 resolvido por uma revalidação, axe do diálogo) —, zero violação séria/crítica do axe (também com o diálogo aberto), zero
+mensagem de CSP no console e armazenamento do navegador vazio.
+
+## 11. L3 — extensão modular (SC-004)
+
+```powershell
+dotnet test --solution .\backend\Boilerplate.slnx --no-restore --minimum-expected-tests 1
+```
+
+Esperado nos testes: validador rejeita cada caso de
+[operations §9](contracts/operations.md#9-composição-de-módulos); `App.Api` e
+`Platform.Operations` não iniciam com composição inválida; variante sem módulos:
+`/api/v1/modules/teste-sintetico/eco` → 404 e `modules: []`; variante com o módulo
+sintético: 200 com `teste-sintetico.eco.ler`, 403 sem ela, `modules` lista o módulo;
+concessão do módulo fica inerte na variante sem ele; `/openapi/v1.json` idêntico nas
+duas. O CI confirma zero referência ao módulo sintético em `backend/src/**`, no publish e
+nas imagens `api`/`operations`.
+
+Migration: a L3 regenera a migration inicial única (research D32) com o CHECK de
+`CodigoPermissao` aceitando hífen no primeiro segmento. Recriar os bancos locais do zero
+(§3); um banco anterior é recusado por histórico desconhecido (esperado). Validação:
+`permissao conceder ... --codigo teste-sintetico.eco.ler` é aceito na variante com o
+módulo sintético e recusado como `PERMISSAO_DESCONHECIDA` na variante sem ele. Inicialização
+com permissão sem descrição falha com `PERMISSAO_DESCRICAO_INVALIDA` (teste).
+
+## 12. L3 — aceite e evidências
+
+- **SC-001 manual**: uma pessoa que não escreveu este guia executa §2–§4 e §9 para A a
+  partir de clone limpo, sem assistência; registra em [tasks.md](tasks.md) tempo total
+  (≤45 min), revisão Git testada, dúvidas e trechos do guia corrigidos.
+- **SC-001 automatizado**: job E2E do `frontend-ci.yml` executa o roteiro e os testes em
+  ambiente limpo, com duração registrada ≤45 min.
+- **SC-004**: §11 verde no CI.
+- **Regressão**: §1, §5, §6 (com as linhas de sessão substituídas pela §7.1), §7 e §7.1
+  continuam aprovadas (SC-002/003/005/009).
+- **Gates**: §7 mais os do frontend (§10), Gitleaks sobre `frontend/` e o build.
+L4 (Dokploy/VPS, HSTS, backups, restauração) continua fora deste roteiro.

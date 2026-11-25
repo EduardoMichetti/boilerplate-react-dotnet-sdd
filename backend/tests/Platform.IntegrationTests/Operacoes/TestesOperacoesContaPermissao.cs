@@ -449,7 +449,9 @@ public sealed class TestesOperacoesContaPermissao(FixtureInstalacaoPostgres fixt
                 IdSessao = IdentificadorV7.Gerar(_relogio.GetUtcNow()),
                 FkIdUsuario = idUsuario,
                 EpocaAcesso = Guid.NewGuid(),
-                ExpiraEm = _relogio.GetUtcNow().AddHours(1),
+                TetoAbsolutoEm = contextoRuntime.InstanteOperacao.AddHours(1),
+                JanelaInatividadeMinutos = 30,
+                UltimoUsoEm = contextoRuntime.InstanteOperacao,
                 TicketProtegido = [1, 2, 3],
             };
             contextoSessao.Sessoes.Add(sessao);

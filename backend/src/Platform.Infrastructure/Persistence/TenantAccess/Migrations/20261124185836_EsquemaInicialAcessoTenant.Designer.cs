@@ -12,7 +12,7 @@ using Platform.Infrastructure.Persistence.TenantAccess;
 namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
 {
     [DbContext(typeof(AcessoTenantDbContext))]
-    [Migration("20261108234429_EsquemaInicialAcessoTenant")]
+    [Migration("20261124185836_EsquemaInicialAcessoTenant")]
     partial class EsquemaInicialAcessoTenant
     {
         /// <inheritdoc />
@@ -340,10 +340,6 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .HasColumnType("uuid")
                         .HasComment("Cópia da EpocaAcesso vigente na emissão.");
 
-                    b.Property<DateTimeOffset>("ExpiraEm")
-                        .HasColumnType("timestamp with time zone")
-                        .HasComment("CriadoEm + prazo configurado na emissão; imutável.");
-
                     b.Property<Guid>("FkIdUsuario")
                         .HasColumnType("uuid")
                         .HasComment("FK para a conta dona da sessão (exclusão restrita).");
@@ -356,9 +352,17 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .HasColumnType("uuid")
                         .HasComment("UUID de correlação da operação que criou o registro.");
 
+                    b.Property<int>("JanelaInatividadeMinutos")
+                        .HasColumnType("integer")
+                        .HasComment("Sessao:InatividadeMinutos vigente na emissão (5–240, não maior que o teto); imutável.");
+
                     b.Property<DateTimeOffset?>("RevogadaEm")
                         .HasColumnType("timestamp with time zone")
                         .HasComment("Instante UTC da revogação (igual a AlteradoEm); nulo enquanto não revogada.");
+
+                    b.Property<DateTimeOffset>("TetoAbsolutoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("CriadoEm + Sessao:TetoAbsolutoMinutos vigente na emissão; imutável e nunca estendido pelo uso.");
 
                     b.Property<byte[]>("TicketProtegido")
                         .HasColumnType("bytea")
@@ -375,6 +379,10 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                         .HasColumnType("character varying(32)")
                         .HasComment("Tipo do autor da criação (Operador, Usuario, Sistema, Anonimo).");
 
+                    b.Property<DateTimeOffset>("UltimoUsoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Instante UTC do último uso registrado (igual a CriadoEm na emissão; no máximo 1 escrita/minuto); só cresce.");
+
                     b.Property<long>("Versao")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")
@@ -383,30 +391,37 @@ namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations
                     b.HasKey("IdSessao")
                         .HasName("pk_sessoes_autenticacao");
 
-                    b.HasIndex("ExpiraEm")
-                        .HasDatabaseName("ix_sessoes_autenticacao_expira_em");
-
                     b.HasIndex("FkIdUsuario")
                         .HasDatabaseName("ix_sessoes_autenticacao_fk_id_usuario");
 
                     b.HasIndex("RevogadaEm")
                         .HasDatabaseName("ix_sessoes_autenticacao_revogada_em");
 
+                    b.HasIndex("TetoAbsolutoEm")
+                        .HasDatabaseName("ix_sessoes_autenticacao_teto_absoluto_em");
+
+                    b.HasIndex("UltimoUsoEm")
+                        .HasDatabaseName("ix_sessoes_autenticacao_ultimo_uso_em");
+
                     b.ToTable("sessoes_autenticacao", "access", t =>
                         {
-                            t.HasComment("Sessões autenticadas persistidas e revogáveis, com expiração absoluta fixada na emissão.");
+                            t.HasComment("Sessões autenticadas persistidas e revogáveis; expiram por inatividade ou teto absoluto, o que ocorrer primeiro.");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_auditoria_alteracao", "(\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL) OR (\"AlteradoEm\" IS NOT NULL AND \"TipoAutorAlteracao\" IS NOT NULL AND \"IdOperacaoAlteracao\" IS NOT NULL AND (\"TipoAutorAlteracao\" = 'Anonimo') = (\"AutorAlteracao\" IS NULL))");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_auditoria_criacao", "(\"TipoAutorCriacao\" = 'Anonimo') = (\"AutorCriacao\" IS NULL)");
 
-                            t.HasCheckConstraint("ck_sessoes_autenticacao_prazo", "\"ExpiraEm\" - \"CriadoEm\" BETWEEN interval '5 minutes' AND interval '480 minutes'");
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_janela_inatividade", "\"JanelaInatividadeMinutos\" BETWEEN 5 AND 240 AND \"JanelaInatividadeMinutos\" * interval '1 minute' <= \"TetoAbsolutoEm\" - \"CriadoEm\"");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_revogada_sem_ticket", "\"RevogadaEm\" IS NULL OR \"TicketProtegido\" IS NULL");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_teto", "\"TetoAbsolutoEm\" - \"CriadoEm\" BETWEEN interval '30 minutes' AND interval '720 minutes'");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_tipo_autor_alteracao", "\"TipoAutorAlteracao\" IS NULL OR \"TipoAutorAlteracao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_tipo_autor_criacao", "\"TipoAutorCriacao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+
+                            t.HasCheckConstraint("ck_sessoes_autenticacao_ultimo_uso", "\"CriadoEm\" <= \"UltimoUsoEm\" AND \"UltimoUsoEm\" < \"TetoAbsolutoEm\"");
 
                             t.HasCheckConstraint("ck_sessoes_autenticacao_uuids", "\"IdSessao\" <> '00000000-0000-0000-0000-000000000000' AND \"EpocaAcesso\" <> '00000000-0000-0000-0000-000000000000'");
 

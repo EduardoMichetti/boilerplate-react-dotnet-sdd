@@ -1,8 +1,12 @@
 # Contracts: EF/health e operação restrita L2
 
-**Date**: 2026-11-05 | **Revisão**: 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G21 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST, emissão do cookie de sessão).
+**Date**: 2026-11-05 | **Revisão**: 2026-11-24 — **L2.1**: sessão por inatividade + teto absoluto (research D31–D33, [§4](#expiração-e-uso-da-sessão-l21)) e descrições de permissão em `/context` (L3, D34); 2026-11-08 — prazo de sessão configurável e `sessao limpar` (research D21); decisões G1–G21 de [tasks.md](../tasks.md) (roles derivadas do banco, ordem de validação, cookie CSRF, rotas REST, emissão do cookie de sessão).
 **Status**: EF/health L1 e contrato HTTP L2 (§4) entregues na Parada L2-2; host
 operacional (§5) entregue na Parada L2-3. Recuperação/produção (§6) segue para a L4.
+A subseção “Expiração e uso da sessão (L2.1)” da §4 é o **alvo L2.1** (2026-11-24), a
+implementar e validar antes da L3. §7–§9 são o **alvo L3** (design 2026-11-23, research
+D22–D30 e D34–D36), ainda não implementado. `openapi.json` só é atualizado junto com cada
+rota/campo (o teste de contrato exige versão igual à servida); o delta 2.1.0 está na §4. Interface: [ui.md](ui.md).
 **References**: [plano](../plan.md), [modelo](../data-model.md),
 [API L2 entregue](openapi.json),
 [quickstart](../quickstart.md).
@@ -101,9 +105,9 @@ Os itens 1–4 são middleware (antes da autenticação e do binding). Cookie an
 (G7): `__Host-bps-csrf` em produção e `bps-csrf` somente em Development localhost; header
 `X-CSRF-TOKEN`. Forwarded headers ficam desligados na L2: `CabecalhosEncaminhados:ProxiesConfiaveis`
 vazio significa não processar `X-Forwarded-*`. Opções numéricas opcionais com valor vazio
-(`""`) equivalem a ausentes (G10): `Sessao:PrazoAbsolutoMinutos` e
-`OperacaoAcesso:RetencaoSessoesDias` usam o padrão 30; qualquer outro valor segue a
-validação estrita (inclusive `" 30"` rejeitado).
+(`""`) equivalem a ausentes (G10): `Sessao:InatividadeMinutos` (padrão 30),
+`Sessao:TetoAbsolutoMinutos` (padrão 600, L2.1) e `OperacaoAcesso:RetencaoSessoesDias`
+(padrão 30); qualquer outro valor segue a validação estrita (inclusive `" 30"` rejeitado).
 
 - Health/OpenAPI não fazem lookup de conta/sessão, mesmo com cookies enviados.
 - Nas cinco operações L2 exigir um único `X-Tenant-Id`, UUID não vazio.
@@ -180,11 +184,10 @@ tipos incompatíveis; responder 400 Problem Details sem ecoar valores sensíveis
   nativo; ticket persistido também é protegido. Sem DbContext global/scoped capturado.
 - SetApplicationName inclui produto/ambiente/tenant; volume/key ring por instalação,
   certificado externo obrigatório em produção e permissões mínimas dos arquivos.
-- Sessão com prazo absoluto `Sessao:PrazoAbsolutoMinutos` (inteiro 5–480, padrão 30;
-  fora da faixa ou não inteiro impede a inicialização), fixado na emissão:
-  `ExpiraEm = CriadoEm + prazo`. Sem sliding expiration ou renovação de prazo;
-  mudar a configuração não altera sessões já emitidas.
-  Retrieve verifica registro, conta/lockout/stamp/epoch e prazos em cada operação.
+- Sessão por **inatividade + teto absoluto** (L2.1, ver subseção abaixo), ambos fixados
+  na emissão. Handler de cookie sem sliding expiration; cookie e ticket expiram no teto e
+  não são reemitidos por uso. Mudar a configuração não altera sessões já emitidas.
+  Retrieve verifica registro, conta/lockout/stamp/epoch e expiração efetiva em cada operação.
 - Permitir sessões simultâneas da mesma conta em clientes/cookie jars distintos,
   sem identificação física do dispositivo. Login rotaciona somente a sessão do
   cookie recebido; logout revoga só a atual. Reset/desativação/lockout/revogação
@@ -195,6 +198,50 @@ tipos incompatíveis; responder 400 Problem Details sem ecoar valores sensíveis
   autorização. Configuração sem sliding e testes dos callbacks nativos são obrigatórios.
 - Concessões lidas atualmente no banco; `/me` e logout têm autorização de recurso
   próprio explícita, não uma política que libera qualquer usuário autenticado.
+
+### Expiração e uso da sessão (L2.1)
+
+Alvo L2.1 (research [D31](../research.md#d31--sessão-por-inatividade-com-teto-absoluto-revisa-d21-2026-11-24)–[D33](../research.md#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência)). Substitui o prazo absoluto único de D21.
+
+| Item | Regra |
+|---|---|
+| Configuração (API) | `Sessao:InatividadeMinutos` 5–240 (padrão 30) e `Sessao:TetoAbsolutoMinutos` 30–720 (padrão 600), inteiros, limites inclusivos; ausente/vazio = padrão. Fora da faixa, não inteiro ou inatividade maior que o teto: a API não inicia (diagnóstico cita só chaves/faixas). `Sessao:PrazoAbsolutoMinutos` presente com valor: a API não inicia (chave obsoleta). |
+| Emissão (login 201) | Grava `TetoAbsolutoEm = CriadoEm + teto`, `JanelaInatividadeMinutos` e `UltimoUsoEm = CriadoEm`. Cookie `Expires` e ticket `ExpiresUtc` = `TetoAbsolutoEm`. |
+| Validade | `agora < min(UltimoUsoEm + janela, TetoAbsolutoEm)` + regras L2 (revogação, conta, lockout, stamp, epoch). Expirada → 401 `AUTH_REQUIRED`, sem revogar a linha. Verificada no servidor a cada requisição. |
+| Renovação | Somente por **requisição autenticada aceita**: operação protegida (`/me`, `/context`; na L3, rotas de módulos) que passou por tenant, marcador, sessão, instalação ativa, CSRF e autorização e chegou ao handler. Ordem dos filtros (G31): autorização de recurso próprio → `FiltroInstalacaoAtiva` → `FiltroExigirPermissao` (em `/context`: `foundation.context.read`) → `FiltroRegistroUsoSessao` → handler; 400 `INPUT_INVALID`/`CSRF_INVALID` emitidos antes do handler não renovam, 400/422 do próprio handler renovam. Inclui as revalidações da interface por carga, foco/visibilidade ou navegação (`GET /me`), que o servidor não distingue. No máximo 1 escrita de `UltimoUsoEm` por minuto por sessão; nunca ultrapassa o teto; nunca emite `Set-Cookie`. |
+| Não renovam | Negações antes do handler (400/401/403/409/429/503), login, logout, GET antiforgery, `GET /api/v1/tenant`, health, OpenAPI, arquivos da interface. |
+| Instalação inativa | Não pausa teto nem inatividade; 409 não renova. |
+| Concorrência | Conflito no registro de uso: descartado (a requisição segue). Falha de banco no registro: 503, handler não executa. Logout, troca no login e revogações em conflito só com registro de uso: recarregam e repetem até 3 vezes; disputa real mantém a regra L2 (login → 409 `SESSION_CONFLICT`); esgotado → 503. |
+| Tolerância | A sessão é negada no máximo `janela` após a última requisição aceita e nunca antes de `janela − 60 s` (efeito da limitação de escrita; direção segura). |
+| Motivo da negação ([D37](../research.md#d37--motivo-da-negação-de-sessão-só-no-log-2026-11-24)) | Resposta sempre 401 `AUTH_REQUIRED` genérico, idêntica em todos os motivos (exceto `traceId`). O backend registra `EventId 1002 SessaoNegada` (`Information`) com `Motivo` ∈ {`Inatividade`, `TetoAbsoluto`, `Revogada`, `Invalida`, `Ausente`}, `TraceId` igual ao da resposta e `IdOperacao`; nunca id de sessão, ticket, cookie, id/email da conta ou IP. |
+| Sem | remember-me, refresh, sliding do handler, renovação silenciosa, job de expiração. |
+
+**Delta de `openapi.json` 2.0.0 → 2.1.0** (aplicado no mesmo conjunto de mudanças que
+implementa os campos, nunca antes: o teste de contrato compara a versão servida):
+
+```json
+"LoginResponse": {
+  "required": ["tenantId", "expiresAt", "idleTimeoutMinutes"],
+  "properties": {
+    "expiresAt": { "type": "string", "format": "date-time", "description": "Teto absoluto da sessão emitida (UTC); nunca estendido pelo uso." },
+    "idleTimeoutMinutes": { "type": "integer", "minimum": 5, "maximum": 240, "description": "Janela de inatividade fixada na emissão: a sessão expira após esse tempo sem requisição autenticada aceita, ou no teto, o que ocorrer primeiro." }
+  }
+},
+"CurrentUser": {
+  "required": ["id", "tenantId", "email", "displayName", "sessionExpiresAt", "sessionIdleTimeoutMinutes"],
+  "properties": {
+    "sessionExpiresAt": { "type": "string", "format": "date-time", "description": "Teto absoluto da sessão corrente (UTC)." },
+    "sessionIdleTimeoutMinutes": { "type": "integer", "minimum": 5, "maximum": 240, "description": "Janela de inatividade da sessão corrente, em minutos." }
+  }
+}
+```
+
+`info.version` passa a `2.1.0` e `info.description` troca “Expiração absoluta fixada na
+emissão (padrão 30 minutos, configurável de 5 a 480)” por “Expiração por inatividade
+(padrão 30 min, 5–240) ou teto absoluto (padrão 600 min, 30–720), o que ocorrer primeiro,
+ambos fixados na emissão; o uso renova só a inatividade”. Mudança aditiva (FR-021): o
+consumidor independente L2 continua válido; o instante de expiração por inatividade não é
+exposto (muda a cada uso).
 
 ### Política de senha e proteção de tentativas
 
@@ -303,8 +350,9 @@ Remove registros de sessões encerradas há mais que a retenção; não há job,
   encerra antes de conectar: não zero, `codigo=RETENCAO_INVALIDA` em stderr/journal,
   sem registro no banco (o alvo ainda não foi validado).
 - Após preflight e papel autorizados: `corte = InstanteOperacao - RetencaoDias`.
-  Elegível somente: revogada com `RevogadaEm < corte`, ou não revogada com
-  `ExpiraEm < corte`. Encerrada exatamente no corte ou depois é mantida; sessão
+  Elegível somente: revogada com `RevogadaEm < corte`, ou não revogada com expiração
+  efetiva `min(UltimoUsoEm + JanelaInatividadeMinutos, TetoAbsolutoEm) < corte` (L2.1:
+  retenção contada da expiração efetiva ou da revogação). Encerrada exatamente no corte ou depois é mantida; sessão
   válida nunca é elegível, inclusive em concorrência com login/logout/Renew.
 - Uma transação: delete rastreado das elegíveis com `Versao` esperada (sem
   `ExecuteDelete`) + INSERT do registro `Sucesso` com a quantidade removida.
@@ -352,3 +400,124 @@ invalidar sessões e revisar permissões antes de reabrir após restauração.
 Não usar rollback destrutivo automático ou presumir que reverter imagem desfaz DDL.
 RPO/RTO/retenção/responsáveis e teste de restauração são gates antes de produção.
 L2 prepara as verificações de epoch e persistência de chaves, mas não executa deploy.
+
+## 7. Contrato HTTP L3
+
+Alvo L3. As cinco rotas L2 e a ordem G2 (§4) permanecem; mudanças abaixo são aditivas.
+
+### `GET /api/v1/tenant` — identidade pública da instalação
+
+| Item | Regra |
+|---|---|
+| Autenticação | Anônima. Sem `X-Tenant-Id` (header presente é ignorado, não validado). Cookies ignorados, sem lookup de sessão. |
+| Ordem | Configuração da instalação → marcador/versão do banco → resposta. |
+| 200 | `{ "id": uuid, "displayName": string(1–120), "buildId": string }` com instalação **ativa ou inativa**. |
+| 503 | `DEPENDENCY_UNAVAILABLE` genérico para configuração inválida, marcador divergente, cadeia de migrations incompleta ou banco indisponível. |
+| Cache | `Cache-Control: no-store`. |
+| Não faz | Não enumera tenants, não revela estado ativo/inativo, versão, commit, data ou ambiente; não concede acesso; não emite cookies. |
+
+`buildId`: 32 caracteres hexadecimais minúsculos (hash de conteúdo do build da
+interface servida) ou `sem-interface` quando não há build (somente Development/Testes).
+operationId `getPublicTenant`, tag `TenantContext`.
+
+### `GET /api/v1/context` — campo aditivo `modules`
+
+```json
+"modules": [ { "id": "teste-sintetico", "contracts": [ { "id": "teste-sintetico.eco", "majorVersion": 1 } ] } ]
+```
+
+Sempre presente (lista vazia sem módulos), ordenado por `id`. Exige o mesmo que hoje:
+sessão válida + `foundation.context.read`. `permissions` passa a listar somente códigos
+do catálogo efetivo (concessões inertes omitidas).
+
+**Campo aditivo `permissionDetails`** (D34): mesma lista de `permissions`, ordenada por
+`code`, com a descrição pt-BR declarada em código:
+
+```json
+"permissionDetails": [ { "code": "foundation.context.read", "description": "Consultar o próprio contexto de acesso" } ]
+```
+
+`code` 1–128 (formato de `CodigoPermissao`), `description` 1–200. Sempre presente (vazio
+sem concessões). A interface usa somente este campo para exibir permissões e não mantém
+tabela própria. `permissions` (lista de códigos) é mantido para compatibilidade.
+`user` continua sendo `CurrentUser` e, portanto, traz `sessionExpiresAt` (teto) e
+`sessionIdleTimeoutMinutes` (L2.1), usados na exibição estática da validade. Mudança compatível (FR-021):
+consumidores que ignoram campos desconhecidos não são afetados; o consumidor
+independente L2 continua válido.
+
+### Rotas de módulos
+
+`/api/v1/modules/{idModulo}/…`, mapeadas por cada módulo composto, fora do documento
+OpenAPI servido. Ordem: tenant (400/403) → marcador (503) → sessão (401
+`AUTH_REQUIRED`) → corpo/validação → CSRF nos métodos não seguros (400 `CSRF_INVALID`) →
+instalação ativa (409 `TENANT_UNAVAILABLE`) → permissão declarada vigente no catálogo
+efetivo (403 `TENANT_ACCESS_DENIED`) → registro de uso da sessão (L2.1) → handler. Módulo omitido: rota inexistente → 404
+JSON. Respostas `no-store`. Códigos de erro de módulo seguem ADR 0003
+(`<MODULO>_<REGRA>`, 422).
+
+### Cache e 404 em toda a API
+
+Toda resposta de `/api/*`, `/openapi/*` e `/health*` (sucesso, erro do framework,
+Problem Details e 404) contém `Cache-Control: no-store`. Caminho inexistente sob esses
+prefixos → 404 Problem Details com `code` `NOT_FOUND` e `traceId`, nunca HTML.
+
+## 8. Superfície da interface servida pela API
+
+| Requisição | Resposta |
+|---|---|
+| `GET`/`HEAD` caminho sem extensão fora de `/api`, `/openapi`, `/health` | `index.html`, 200, `no-store` |
+| `GET /assets/<nome-com-hash>` existente | arquivo, `public, max-age=31536000, immutable` |
+| arquivo com extensão inexistente (ex.: `/assets/velho.js`) ou com ponto inicial (`/.vite/…`) | 404 Problem Details |
+| outro arquivo estático existente na raiz | arquivo, `no-store` |
+| Development/Testes sem build | navegações → 404 Problem Details; API inicia normalmente |
+| Production sem `index.html` ou sem `.vite/id-build.txt` | inicialização falha com diagnóstico seguro (sem caminho absoluto) |
+
+Cabeçalhos em **todas** as respostas (interface e API):
+
+```text
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+```
+
+Sem HSTS (L4). Static files e fallback não autenticam cookies nem consultam banco.
+Desenvolvimento: `vite dev` (porta local) encaminha `/api`, `/openapi`, `/health` à API;
+os cabeçalhos acima só são verificados na interface servida pela API.
+
+## 9. Composição de módulos
+
+Seleção em compilação: o produto inclui um módulo referenciando seus projetos e
+adicionando-o à lista de `App.Composicao`; omitir é remover a referência. Sem ativação
+por configuração. `App.Api` e `Platform.Operations` validam a composição na
+inicialização; falha encerra o processo com exit code não zero e diagnóstico seguro
+contendo somente o código abaixo e ids declarados (nunca stack ou configuração).
+
+| Código | Condição |
+|---|---|
+| `MODULO_ID_INVALIDO` | id fora de `^[a-z][a-z0-9-]{1,31}$` |
+| `MODULO_ID_RESERVADO` | id `foundation` |
+| `MODULO_DUPLICADO` | id repetido |
+| `MODULO_DADOS_NAO_SUPORTADOS` | declaração de dados não vazia (L3) |
+| `PERMISSAO_PREFIXO_INVALIDO` | permissão sem prefixo `<id>.` ou fora do formato |
+| `PERMISSAO_DUPLICADA` | código repetido no catálogo efetivo |
+| `PERMISSAO_DESCRICAO_INVALIDA` | descrição pt-BR ausente, vazia, >200 caracteres, com espaços nas pontas ou caracteres de controle (fundação ou módulo, D34) |
+| `PERMISSAO_DESCRICAO_INVALIDA` | descrição pt-BR ausente, vazia, >200 caracteres, com espaços nas pontas ou caracteres de controle (fundação ou módulo, D34) |
+| `CONTRATO_INVALIDO` | id de contrato fora de `<id>.<nome>` ou versão maior < 1 |
+| `CONTRATO_DUPLICADO` | id de contrato publicado por mais de um módulo |
+| `DEPENDENCIA_NAO_ATENDIDA` | contrato exigido ausente ou com versão maior diferente |
+| `DEPENDENCIA_CICLICA` | ciclo entre módulos, inclusive auto-dependência |
+
+Testes de arquitetura (bloqueantes) cobrem cada código com declarações sintéticas e
+verificam referências: implementação de módulo só referencia `Platform.Modulos`,
+`Platform.Application`, `Platform.Domain` e `*.Contratos` de outros módulos; projetos de
+`backend/src/**` não referenciam nenhum módulo de `backend/tests/**`;
+`Platform.Operations` não inicia servidor HTTP.
+
+Contrato da fundação para módulos — `foundation.autorizacao` v1: identidade do usuário
+corrente (id, tenant) e `ExigirPermissao(codigo)` em endpoints do grupo do módulo,
+avaliada contra a concessão atual e o catálogo efetivo. Mudança incompatível incrementa a
+versão maior (FR-021).
+
+Host operacional: `permissao conceder` aceita somente código do catálogo efetivo
+(fora → resultado `PERMISSAO_DESCONHECIDA`, existente); `permissao revogar` aceita código
+de formato válido existente na conta, inclusive inerte. Demais regras da §5 inalteradas.

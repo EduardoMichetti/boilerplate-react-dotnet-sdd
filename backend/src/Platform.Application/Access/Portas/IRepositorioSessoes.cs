@@ -46,17 +46,39 @@ public interface IRepositorioSessoes
     Task<bool> RenovarAsync(Guid idSessao, long versaoEsperada, byte[] ticketProtegido, CancellationToken tokenCancelamento);
 
     /// <summary>
-    /// Revoga uma sessão ativa com a versão esperada (remove o ticket). Commit antes do retorno.
+    /// Registra o uso de uma sessão ativa (L2.1, D33): grava <c>UltimoUsoEm = instante</c> por entidade
+    /// rastreada com a versão esperada (sem atualização em lote). Nunca altera teto, janela, ticket ou
+    /// revogação. Sessão inexistente, revogada, expirada ou com outra versão (conflito) não grava.
+    /// </summary>
+    /// <param name="idSessao">Sessão.</param>
+    /// <param name="versaoEsperada">Versão lida na autenticação.</param>
+    /// <param name="instante">Instante da operação.</param>
+    /// <param name="tokenCancelamento">Token de cancelamento.</param>
+    /// <returns><c>true</c> quando gravou; <c>false</c> quando não gravou (conflito descartado).</returns>
+    /// <exception cref="ExcecaoDependenciaIndisponivel">Falha de banco.</exception>
+    Task<bool> RegistrarUsoAsync(Guid idSessao, long versaoEsperada, DateTimeOffset instante, CancellationToken tokenCancelamento);
+
+    /// <summary>
+    /// Revoga uma sessão ativa (remove o ticket). Commit antes do retorno. Versão diferente da
+    /// esperada, ou conflito na gravação, com a sessão ainda ativa (só registro de uso concorrente)
+    /// recarrega e repete até <see cref="MaximoTentativasRevogacao"/> vezes; esgotado → 503.
     /// </summary>
     /// <param name="idSessao">Sessão.</param>
     /// <param name="versaoEsperada">Versão lida na autenticação.</param>
     /// <param name="tokenCancelamento">Token de cancelamento.</param>
-    /// <returns>Sucesso, ou <c>AUTH_REQUIRED</c> quando a sessão já não está ativa ou mudou.</returns>
+    /// <returns>Sucesso, ou <c>AUTH_REQUIRED</c> quando a sessão já não está ativa.</returns>
+    /// <exception cref="ExcecaoDependenciaIndisponivel">Falha de banco ou tentativas esgotadas.</exception>
     Task<Resultado> RevogarAsync(Guid idSessao, long versaoEsperada, CancellationToken tokenCancelamento);
 
     /// <summary>
+    /// Tentativas de uma revogação ou troca que conflita só com registro de uso (L2.1).
+    /// </summary>
+    public const int MaximoTentativasRevogacao = 3;
+
+    /// <summary>
     /// Marca como revogadas todas as sessões ativas da conta e salva na transação ambiente do
-    /// chamador (lockout, reset, desativação), sem confirmá-la.
+    /// chamador (lockout, reset, desativação), sem confirmá-la. Conflito só com registro de uso
+    /// recarrega e repete até <see cref="MaximoTentativasRevogacao"/> vezes; esgotado → 503.
     /// </summary>
     /// <param name="idUsuario">Conta.</param>
     /// <param name="tokenCancelamento">Token de cancelamento.</param>

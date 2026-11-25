@@ -16,6 +16,9 @@ using Platform.Infrastructure.Persistence.TenantAccess.Entities;
 /// <summary>
 /// Sessões persistidas com alterações rastreadas e <c>Versao</c> esperada (sem upsert nem
 /// atualização em lote). Conflito de versão vira erro esperado; falha de banco vira 503.
+/// L2.1 (D33): o registro de uso descarta conflito; revogações e troca no login que conflitam só
+/// com registro de uso (sessão ainda ativa ao recarregar) repetem até
+/// <see cref="IRepositorioSessoes.MaximoTentativasRevogacao"/> vezes; esgotado → 503.
 /// </summary>
 /// <param name="contexto">DbContext da requisição/comando.</param>
 /// <param name="operacao">Instante único da operação.</param>
@@ -43,50 +46,73 @@ public sealed class RepositorioSessoes(
         ArgumentNullException.ThrowIfNull(nova);
         DateTimeOffset agora = operacao.InstanteOperacao;
 
-        await using IDbContextTransaction transacao = await contexto.Database.BeginTransactionAsync(tokenCancelamento);
-        try
+        for (int tentativa = 1; ; tentativa++)
         {
-            if (anterior is not null)
+            SessaoAutenticacao? sessaoAnterior = null;
+            SessaoAutenticacao? sessao = null;
+            await using IDbContextTransaction transacao = await contexto.Database.BeginTransactionAsync(tokenCancelamento);
+            try
             {
-                SessaoAutenticacao? sessaoAnterior = await contexto.Sessoes
-                    .FirstOrDefaultAsync(s => s.IdSessao == anterior.IdSessao, tokenCancelamento);
-                if (sessaoAnterior is null || sessaoAnterior.Versao != anterior.Versao || !sessaoAnterior.EstaAtivaEm(agora))
+                if (anterior is not null)
                 {
-                    await DesfazerAsync(transacao);
+                    sessaoAnterior = await contexto.Sessoes
+                        .FirstOrDefaultAsync(s => s.IdSessao == anterior.IdSessao, tokenCancelamento);
+
+                    // Revogada/expirada (disputa real): regra L2. Versão diferente com a sessão ainda
+                    // ativa só pode vir de registro de uso concorrente (D33): segue com a versão atual.
+                    if (sessaoAnterior is null || sessaoAnterior.FkIdUsuario != anterior.IdUsuario || !sessaoAnterior.EstaAtivaEm(agora))
+                    {
+                        await DesfazerAsync(transacao);
+                        Desanexar(sessaoAnterior);
+                        return ErrosAcesso.ConflitoSessao;
+                    }
+
+                    sessaoAnterior.RevogadaEm = agora;
+                    sessaoAnterior.TicketProtegido = null;
+                }
+
+                sessao = new SessaoAutenticacao
+                {
+                    IdSessao = nova.IdSessao,
+                    FkIdUsuario = nova.IdUsuario,
+                    EpocaAcesso = nova.EpocaAcesso,
+                    TetoAbsolutoEm = nova.TetoAbsolutoEm,
+                    JanelaInatividadeMinutos = nova.JanelaInatividadeMinutos,
+                    TicketProtegido = nova.TicketProtegido,
+
+                    // Mesmo InstanteOperacao que o interceptador grava em CriadoEm (UltimoUsoEm = CriadoEm na emissão).
+                    CriadoEm = agora,
+                    UltimoUsoEm = agora,
+                };
+                sessao.Validar();
+                contexto.Sessoes.Add(sessao);
+
+                await contexto.SaveChangesAsync(tokenCancelamento);
+                await transacao.CommitAsync(tokenCancelamento);
+                return new SessaoEmitida(nova.IdSessao, nova.IdUsuario, instalacao.Value.IdTenant, nova.EpocaAcesso, nova.TetoAbsolutoEm, nova.JanelaInatividadeMinutos);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Rollback total (a nova sessão nunca fica); a próxima tentativa recarrega a anterior.
+                await DesfazerAsync(transacao);
+                Desanexar(sessaoAnterior, sessao);
+                if (anterior is null)
+                {
                     return ErrosAcesso.ConflitoSessao;
                 }
 
-                contexto.Entry(sessaoAnterior).Property(s => s.Versao).OriginalValue = anterior.Versao;
-                sessaoAnterior.RevogadaEm = agora;
-                sessaoAnterior.TicketProtegido = null;
+                if (tentativa >= IRepositorioSessoes.MaximoTentativasRevogacao)
+                {
+                    throw new ExcecaoDependenciaIndisponivel("Troca de sessão esgotou as tentativas por conflito com registro de uso.");
+                }
             }
-
-            SessaoAutenticacao sessao = new()
+            catch (DbUpdateException ex)
             {
-                IdSessao = nova.IdSessao,
-                FkIdUsuario = nova.IdUsuario,
-                EpocaAcesso = nova.EpocaAcesso,
-                ExpiraEm = nova.ExpiraEm,
-                TicketProtegido = nova.TicketProtegido,
-            };
-            sessao.Validar();
-            contexto.Sessoes.Add(sessao);
-
-            await contexto.SaveChangesAsync(tokenCancelamento);
-            await transacao.CommitAsync(tokenCancelamento);
+                await DesfazerAsync(transacao);
+                Desanexar(sessaoAnterior, sessao);
+                throw new ExcecaoDependenciaIndisponivel("Falha ao persistir a troca de sessão.", ex);
+            }
         }
-        catch (DbUpdateConcurrencyException)
-        {
-            await DesfazerAsync(transacao);
-            return ErrosAcesso.ConflitoSessao;
-        }
-        catch (DbUpdateException ex)
-        {
-            await DesfazerAsync(transacao);
-            throw new ExcecaoDependenciaIndisponivel("Falha ao persistir a troca de sessão.", ex);
-        }
-
-        return new SessaoEmitida(nova.IdSessao, nova.IdUsuario, instalacao.Value.IdTenant, nova.EpocaAcesso, nova.ExpiraEm);
     }
 
     /// <inheritdoc />
@@ -98,7 +124,9 @@ public sealed class RepositorioSessoes(
                 s.IdSessao,
                 s.FkIdUsuario,
                 s.EpocaAcesso,
-                s.ExpiraEm,
+                s.TetoAbsolutoEm,
+                s.JanelaInatividadeMinutos,
+                s.UltimoUsoEm,
                 s.RevogadaEm,
                 s.Versao,
                 s.TicketProtegido,
@@ -107,6 +135,38 @@ public sealed class RepositorioSessoes(
                 s.Usuario.LockoutEnabled,
                 s.Usuario.SecurityStamp))
             .FirstOrDefaultAsync(tokenCancelamento);
+
+    /// <inheritdoc />
+    public async Task<bool> RegistrarUsoAsync(Guid idSessao, long versaoEsperada, DateTimeOffset instante, CancellationToken tokenCancelamento)
+    {
+        SessaoAutenticacao? sessao = await contexto.Sessoes.FirstOrDefaultAsync(s => s.IdSessao == idSessao, tokenCancelamento);
+        if (sessao is null
+            || sessao.Versao != versaoEsperada
+            || !sessao.EstaAtivaEm(instante)
+            || !ExpiracaoSessao.DeveRegistrarUso(instante, sessao.UltimoUsoEm))
+        {
+            Desanexar(sessao);
+            return false;
+        }
+
+        sessao.RegistrarUso(instante);
+        try
+        {
+            await contexto.SaveChangesAsync(tokenCancelamento);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Outra requisição da mesma sessão já gravou (ou revogou): descartado, sem repetir.
+            Desanexar(sessao);
+            return false;
+        }
+        catch (DbUpdateException ex)
+        {
+            Desanexar(sessao);
+            throw new ExcecaoDependenciaIndisponivel("Falha ao registrar o uso da sessão.", ex);
+        }
+    }
 
     /// <inheritdoc />
     public async Task<bool> RenovarAsync(Guid idSessao, long versaoEsperada, byte[] ticketProtegido, CancellationToken tokenCancelamento)
@@ -144,29 +204,39 @@ public sealed class RepositorioSessoes(
     /// <inheritdoc />
     public async Task<Resultado> RevogarAsync(Guid idSessao, long versaoEsperada, CancellationToken tokenCancelamento)
     {
-        SessaoAutenticacao? sessao = await contexto.Sessoes.FirstOrDefaultAsync(s => s.IdSessao == idSessao, tokenCancelamento);
-        if (sessao is null || sessao.Versao != versaoEsperada || !sessao.EstaAtivaEm(operacao.InstanteOperacao))
+        DateTimeOffset agora = operacao.InstanteOperacao;
+        for (int tentativa = 1; ; tentativa++)
         {
-            return ErrosAcesso.AutenticacaoNecessaria;
-        }
+            SessaoAutenticacao? sessao = await contexto.Sessoes.FirstOrDefaultAsync(s => s.IdSessao == idSessao, tokenCancelamento);
 
-        contexto.Entry(sessao).Property(s => s.Versao).OriginalValue = versaoEsperada;
-        sessao.RevogadaEm = operacao.InstanteOperacao;
-        sessao.TicketProtegido = null;
-        try
-        {
-            await contexto.SaveChangesAsync(tokenCancelamento);
-            return Resultado.Ok();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            contexto.Entry(sessao).State = EntityState.Detached;
-            return ErrosAcesso.AutenticacaoNecessaria;
-        }
-        catch (DbUpdateException ex)
-        {
-            contexto.Entry(sessao).State = EntityState.Detached;
-            throw new ExcecaoDependenciaIndisponivel("Falha ao revogar a sessão.", ex);
+            // Revogada/expirada: regra L2. Versão diferente da esperada com a sessão ainda ativa só
+            // pode vir de registro de uso concorrente (D33): segue com a versão recarregada.
+            if (sessao is null || !sessao.EstaAtivaEm(agora))
+            {
+                Desanexar(sessao);
+                return ErrosAcesso.AutenticacaoNecessaria;
+            }
+
+            sessao.RevogadaEm = agora;
+            sessao.TicketProtegido = null;
+            try
+            {
+                await contexto.SaveChangesAsync(tokenCancelamento);
+                return Resultado.Ok();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                Desanexar(sessao);
+                if (tentativa >= IRepositorioSessoes.MaximoTentativasRevogacao)
+                {
+                    throw new ExcecaoDependenciaIndisponivel("Revogação esgotou as tentativas por conflito com registro de uso.");
+                }
+            }
+            catch (DbUpdateException ex)
+            {
+                Desanexar(sessao);
+                throw new ExcecaoDependenciaIndisponivel("Falha ao revogar a sessão.", ex);
+            }
         }
     }
 
@@ -174,27 +244,60 @@ public sealed class RepositorioSessoes(
     public async Task<int> RevogarTodasDaContaAsync(Guid idUsuario, CancellationToken tokenCancelamento)
     {
         DateTimeOffset agora = operacao.InstanteOperacao;
-        List<SessaoAutenticacao> ativas = await contexto.Sessoes
-            .Where(s => s.FkIdUsuario == idUsuario && s.RevogadaEm == null && s.ExpiraEm > agora)
-            .ToListAsync(tokenCancelamento);
-
-        foreach (SessaoAutenticacao sessao in ativas)
+        for (int tentativa = 1; ; tentativa++)
         {
-            sessao.RevogadaEm = agora;
-            sessao.TicketProtegido = null;
-        }
+            List<SessaoAutenticacao> candidatas = await contexto.Sessoes
+                .Where(s => s.FkIdUsuario == idUsuario && s.RevogadaEm == null && s.TetoAbsolutoEm > agora)
+                .ToListAsync(tokenCancelamento);
+            List<SessaoAutenticacao> ativas = candidatas.Where(s => s.EstaAtivaEm(agora)).ToList();
 
-        if (ativas.Count > 0)
-        {
-            await contexto.SaveChangesAsync(tokenCancelamento);
-        }
+            foreach (SessaoAutenticacao sessao in ativas)
+            {
+                sessao.RevogadaEm = agora;
+                sessao.TicketProtegido = null;
+            }
 
-        return ativas.Count;
+            if (ativas.Count == 0)
+            {
+                return 0;
+            }
+
+            try
+            {
+                await contexto.SaveChangesAsync(tokenCancelamento);
+                return ativas.Count;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Recarrega na próxima tentativa (dentro da transação do chamador): as já revogadas
+                // ficam de fora; as que só tiveram registro de uso concorrente são revogadas de novo.
+                foreach (SessaoAutenticacao sessao in candidatas)
+                {
+                    Desanexar(sessao);
+                }
+
+                if (tentativa >= IRepositorioSessoes.MaximoTentativasRevogacao)
+                {
+                    throw new ExcecaoDependenciaIndisponivel("Revogação das sessões da conta esgotou as tentativas por conflito com registro de uso.");
+                }
+            }
+        }
     }
 
     private static async Task DesfazerAsync(IDbContextTransaction transacao)
     {
         // Rollback sem token: a desistência do cliente não pode impedir desfazer a transação.
         await transacao.RollbackAsync(CancellationToken.None);
+    }
+
+    private void Desanexar(params SessaoAutenticacao?[] sessoes)
+    {
+        foreach (SessaoAutenticacao? sessao in sessoes)
+        {
+            if (sessao is not null)
+            {
+                contexto.Entry(sessao).State = EntityState.Detached;
+            }
+        }
     }
 }

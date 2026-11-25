@@ -33,7 +33,7 @@ public sealed class TestesCookiesEProtecaoChaves(FixtureInstalacaoPostgres fixtu
         Assert.Contains("samesite=lax", sessao, StringComparison.OrdinalIgnoreCase);
 
         SessaoAutenticacao gravada = Assert.Single(await ContasSinteticas.SessoesAsync(A, id));
-        Assert.Equal(gravada.ExpiraEm, ExtrairExpires(sessao));
+        Assert.Equal(gravada.TetoAbsolutoEm, ExtrairExpires(sessao));
     }
 
     [Fact]

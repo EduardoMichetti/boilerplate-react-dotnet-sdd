@@ -14,7 +14,7 @@ using Platform.Domain.Tenancy;
 /// sessão do cookie recebido. Executado depois de tenant, marcador, corpo e CSRF (G2).
 /// </summary>
 /// <param name="instalacao">Configuração da instalação.</param>
-/// <param name="opcoesSessao">Prazo absoluto aplicado na emissão.</param>
+/// <param name="opcoesSessao">Teto absoluto e janela de inatividade aplicados na emissão.</param>
 /// <param name="contexto">Contexto da operação (instante único).</param>
 /// <param name="credenciais">Verificação de senha e lockout.</param>
 /// <param name="sessoes">Persistência das sessões.</param>
@@ -55,7 +55,8 @@ public sealed class CasoUsoLogin(
         }
 
         DateTimeOffset emitidaEm = contexto.InstanteOperacao;
-        DateTimeOffset expiraEm = emitidaEm.AddMinutes(opcoesSessao.Value.PrazoAbsolutoMinutos);
+        OpcoesSessao configSessao = opcoesSessao.Value;
+        DateTimeOffset tetoAbsolutoEm = emitidaEm.AddMinutes(configSessao.TetoAbsolutoMinutos);
         Guid idSessao = IdentificadorV7.Gerar(emitidaEm);
         Guid epoca = await sessoes.ObterEpocaAcessoAsync(tokenCancelamento);
 
@@ -66,10 +67,10 @@ public sealed class CasoUsoLogin(
             epoca,
             verificacao.CarimboSeguranca,
             emitidaEm,
-            expiraEm));
+            tetoAbsolutoEm));
 
         return await sessoes.EmitirAsync(
-            new NovaSessao(idSessao, verificacao.IdUsuario, epoca, expiraEm, ticket),
+            new NovaSessao(idSessao, verificacao.IdUsuario, epoca, tetoAbsolutoEm, configSessao.InatividadeMinutos, ticket),
             anterior,
             tokenCancelamento);
     }

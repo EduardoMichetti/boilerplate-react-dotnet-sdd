@@ -34,6 +34,6 @@ public sealed class CasoUsoConsultarIdentidade(IOptions<OpcoesInstalacaoTenant> 
             return ErrosAcesso.AutenticacaoNecessaria;
         }
 
-        return new IdentidadeAtual(conta.IdUsuario, config.IdTenant, conta.Email, conta.NomeExibicao, atual.ExpiraEm);
+        return new IdentidadeAtual(conta.IdUsuario, config.IdTenant, conta.Email, conta.NomeExibicao, atual.TetoAbsolutoEm, atual.JanelaInatividadeMinutos);
     }
 }

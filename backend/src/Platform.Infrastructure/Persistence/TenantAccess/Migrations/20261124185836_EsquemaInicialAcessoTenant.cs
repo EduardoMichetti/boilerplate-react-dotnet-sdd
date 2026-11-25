@@ -5,7 +5,6 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 #nullable disable
 
 namespace Platform.Infrastructure.Persistence.TenantAccess.Migrations;
-
 /// <inheritdoc />
 public partial class EsquemaInicialAcessoTenant : Migration
 {
@@ -208,7 +207,9 @@ public partial class EsquemaInicialAcessoTenant : Migration
                 FkIdUsuario = table.Column<Guid>(type: "uuid", nullable: false, comment: "FK para a conta dona da sessão (exclusão restrita)."),
                 EpocaAcesso = table.Column<Guid>(type: "uuid", nullable: false, comment: "Cópia da EpocaAcesso vigente na emissão."),
                 TicketProtegido = table.Column<byte[]>(type: "bytea", nullable: true, comment: "Ticket nativo protegido por Data Protection; removido na revogação."),
-                ExpiraEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, comment: "CriadoEm + prazo configurado na emissão; imutável."),
+                TetoAbsolutoEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, comment: "CriadoEm + Sessao:TetoAbsolutoMinutos vigente na emissão; imutável e nunca estendido pelo uso."),
+                JanelaInatividadeMinutos = table.Column<int>(type: "integer", nullable: false, comment: "Sessao:InatividadeMinutos vigente na emissão (5–240, não maior que o teto); imutável."),
+                UltimoUsoEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, comment: "Instante UTC do último uso registrado (igual a CriadoEm na emissão; no máximo 1 escrita/minuto); só cresce."),
                 RevogadaEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true, comment: "Instante UTC da revogação (igual a AlteradoEm); nulo enquanto não revogada."),
                 Versao = table.Column<long>(type: "bigint", nullable: false, comment: "Token de concorrência positivo, incrementado a cada alteração efetiva."),
                 CriadoEm = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, comment: "Instante UTC da criação (microssegundos), do TimeProvider da operação."),
@@ -225,10 +226,12 @@ public partial class EsquemaInicialAcessoTenant : Migration
                 table.PrimaryKey("pk_sessoes_autenticacao", x => x.IdSessao);
                 table.CheckConstraint("ck_sessoes_autenticacao_auditoria_alteracao", "(\"AlteradoEm\" IS NULL AND \"TipoAutorAlteracao\" IS NULL AND \"AutorAlteracao\" IS NULL AND \"IdOperacaoAlteracao\" IS NULL) OR (\"AlteradoEm\" IS NOT NULL AND \"TipoAutorAlteracao\" IS NOT NULL AND \"IdOperacaoAlteracao\" IS NOT NULL AND (\"TipoAutorAlteracao\" = 'Anonimo') = (\"AutorAlteracao\" IS NULL))");
                 table.CheckConstraint("ck_sessoes_autenticacao_auditoria_criacao", "(\"TipoAutorCriacao\" = 'Anonimo') = (\"AutorCriacao\" IS NULL)");
-                table.CheckConstraint("ck_sessoes_autenticacao_prazo", "\"ExpiraEm\" - \"CriadoEm\" BETWEEN interval '5 minutes' AND interval '480 minutes'");
+                table.CheckConstraint("ck_sessoes_autenticacao_janela_inatividade", "\"JanelaInatividadeMinutos\" BETWEEN 5 AND 240 AND \"JanelaInatividadeMinutos\" * interval '1 minute' <= \"TetoAbsolutoEm\" - \"CriadoEm\"");
                 table.CheckConstraint("ck_sessoes_autenticacao_revogada_sem_ticket", "\"RevogadaEm\" IS NULL OR \"TicketProtegido\" IS NULL");
+                table.CheckConstraint("ck_sessoes_autenticacao_teto", "\"TetoAbsolutoEm\" - \"CriadoEm\" BETWEEN interval '30 minutes' AND interval '720 minutes'");
                 table.CheckConstraint("ck_sessoes_autenticacao_tipo_autor_alteracao", "\"TipoAutorAlteracao\" IS NULL OR \"TipoAutorAlteracao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
                 table.CheckConstraint("ck_sessoes_autenticacao_tipo_autor_criacao", "\"TipoAutorCriacao\" IN ('Operador', 'Usuario', 'Sistema', 'Anonimo')");
+                table.CheckConstraint("ck_sessoes_autenticacao_ultimo_uso", "\"CriadoEm\" <= \"UltimoUsoEm\" AND \"UltimoUsoEm\" < \"TetoAbsolutoEm\"");
                 table.CheckConstraint("ck_sessoes_autenticacao_uuids", "\"IdSessao\" <> '00000000-0000-0000-0000-000000000000' AND \"EpocaAcesso\" <> '00000000-0000-0000-0000-000000000000'");
                 table.CheckConstraint("ck_sessoes_autenticacao_versao", "\"Versao\" > 0");
                 table.ForeignKey(
@@ -239,7 +242,7 @@ public partial class EsquemaInicialAcessoTenant : Migration
                     principalColumn: "IdUsuario",
                     onDelete: ReferentialAction.Restrict);
             },
-            comment: "Sessões autenticadas persistidas e revogáveis, com expiração absoluta fixada na emissão.");
+            comment: "Sessões autenticadas persistidas e revogáveis; expiram por inatividade ou teto absoluto, o que ocorrer primeiro.");
 
         migrationBuilder.CreateTable(
             name: "tokens_usuario",
@@ -289,12 +292,6 @@ public partial class EsquemaInicialAcessoTenant : Migration
             column: "FkIdUsuario");
 
         migrationBuilder.CreateIndex(
-            name: "ix_sessoes_autenticacao_expira_em",
-            schema: "access",
-            table: "sessoes_autenticacao",
-            column: "ExpiraEm");
-
-        migrationBuilder.CreateIndex(
             name: "ix_sessoes_autenticacao_fk_id_usuario",
             schema: "access",
             table: "sessoes_autenticacao",
@@ -305,6 +302,18 @@ public partial class EsquemaInicialAcessoTenant : Migration
             schema: "access",
             table: "sessoes_autenticacao",
             column: "RevogadaEm");
+
+        migrationBuilder.CreateIndex(
+            name: "ix_sessoes_autenticacao_teto_absoluto_em",
+            schema: "access",
+            table: "sessoes_autenticacao",
+            column: "TetoAbsolutoEm");
+
+        migrationBuilder.CreateIndex(
+            name: "ix_sessoes_autenticacao_ultimo_uso_em",
+            schema: "access",
+            table: "sessoes_autenticacao",
+            column: "UltimoUsoEm");
 
         migrationBuilder.CreateIndex(
             name: "ix_usuarios_fk_id_tenant",

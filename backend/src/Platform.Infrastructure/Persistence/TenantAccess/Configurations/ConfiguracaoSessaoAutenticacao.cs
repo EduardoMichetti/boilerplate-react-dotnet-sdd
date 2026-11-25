@@ -15,10 +15,17 @@ public sealed class ConfiguracaoSessaoAutenticacao : IEntityTypeConfiguration<Se
     {
         construtor.ToTable("sessoes_autenticacao", "access", tabela =>
         {
-            tabela.HasComment("Sessões autenticadas persistidas e revogáveis, com expiração absoluta fixada na emissão.");
+            tabela.HasComment("Sessões autenticadas persistidas e revogáveis; expiram por inatividade ou teto absoluto, o que ocorrer primeiro.");
             tabela.HasCheckConstraint(
-                "ck_sessoes_autenticacao_prazo",
-                $"\"ExpiraEm\" - \"CriadoEm\" BETWEEN interval '{OpcoesSessao.PrazoMinimoMinutos} minutes' AND interval '{OpcoesSessao.PrazoMaximoMinutos} minutes'");
+                "ck_sessoes_autenticacao_teto",
+                $"\"TetoAbsolutoEm\" - \"CriadoEm\" BETWEEN interval '{OpcoesSessao.TetoMinimoMinutos} minutes' AND interval '{OpcoesSessao.TetoMaximoMinutos} minutes'");
+            tabela.HasCheckConstraint(
+                "ck_sessoes_autenticacao_janela_inatividade",
+                $"\"JanelaInatividadeMinutos\" BETWEEN {OpcoesSessao.InatividadeMinimaMinutos} AND {OpcoesSessao.InatividadeMaximaMinutos} " +
+                "AND \"JanelaInatividadeMinutos\" * interval '1 minute' <= \"TetoAbsolutoEm\" - \"CriadoEm\"");
+            tabela.HasCheckConstraint(
+                "ck_sessoes_autenticacao_ultimo_uso",
+                "\"CriadoEm\" <= \"UltimoUsoEm\" AND \"UltimoUsoEm\" < \"TetoAbsolutoEm\"");
             tabela.HasCheckConstraint(
                 "ck_sessoes_autenticacao_revogada_sem_ticket",
                 "\"RevogadaEm\" IS NULL OR \"TicketProtegido\" IS NULL");
@@ -44,10 +51,19 @@ public sealed class ConfiguracaoSessaoAutenticacao : IEntityTypeConfiguration<Se
         construtor.Property(s => s.TicketProtegido)
             .HasComment("Ticket nativo protegido por Data Protection; removido na revogação.");
 
-        construtor.Property(s => s.ExpiraEm)
+        construtor.Property(s => s.TetoAbsolutoEm)
             .IsRequired()
             .HasColumnType(MapeamentoAuditoria.TipoInstante)
-            .HasComment("CriadoEm + prazo configurado na emissão; imutável.");
+            .HasComment("CriadoEm + Sessao:TetoAbsolutoMinutos vigente na emissão; imutável e nunca estendido pelo uso.");
+
+        construtor.Property(s => s.JanelaInatividadeMinutos)
+            .IsRequired()
+            .HasComment("Sessao:InatividadeMinutos vigente na emissão (5–240, não maior que o teto); imutável.");
+
+        construtor.Property(s => s.UltimoUsoEm)
+            .IsRequired()
+            .HasColumnType(MapeamentoAuditoria.TipoInstante)
+            .HasComment("Instante UTC do último uso registrado (igual a CriadoEm na emissão; no máximo 1 escrita/minuto); só cresce.");
 
         construtor.Property(s => s.RevogadaEm)
             .HasColumnType(MapeamentoAuditoria.TipoInstante)
@@ -61,7 +77,8 @@ public sealed class ConfiguracaoSessaoAutenticacao : IEntityTypeConfiguration<Se
         MapeamentoAuditoria.Mapear(construtor, "sessoes_autenticacao");
 
         construtor.HasIndex(s => s.FkIdUsuario);
-        construtor.HasIndex(s => s.ExpiraEm);
+        construtor.HasIndex(s => s.UltimoUsoEm);
+        construtor.HasIndex(s => s.TetoAbsolutoEm);
         construtor.HasIndex(s => s.RevogadaEm);
 
         construtor.HasOne(s => s.Usuario)

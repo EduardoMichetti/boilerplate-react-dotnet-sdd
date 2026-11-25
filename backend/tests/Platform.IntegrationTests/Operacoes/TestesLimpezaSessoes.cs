@@ -15,7 +15,8 @@ using Platform.Testes.Comum;
 using Xunit;
 
 /// <summary>
-/// T111: Testes de integração do comando de limpeza em lote de sessões encerradas (FR-033: <c>sessao limpar</c>).
+/// T111/T164: Testes de integração do comando de limpeza em lote de sessões encerradas (FR-033: <c>sessao limpar</c>),
+/// com elegibilidade pela expiração efetiva <c>min(UltimoUsoEm + janela, TetoAbsolutoEm)</c> ou pela <c>RevogadaEm</c> (L2.1, D31).
 /// </summary>
 public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
     : IClassFixture<FixtureInstalacaoPostgres>, IAsyncLifetime
@@ -34,7 +35,7 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     [Fact]
-    public async Task SessoesAnterioresAoCorte_SaoRemovidas_EMantemAtivasOuNoCorte()
+    public async Task SessoesAlemDaRetencao_PelaExpiracaoEfetivaOuRevogacao_SaoRemovidas_EAsDemaisMantidas()
     {
         CancellationToken cancelamento = TestContext.Current.CancellationToken;
         InstalacaoTestePostgres tenant = fixture.TenantA;
@@ -46,78 +47,98 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
 
         Guid idUsuario = await CriarUsuarioAsync(tenant, cancelamento);
 
-        Guid idSessaoAtiva = IdentificadorV7.Gerar(agora);
-        Guid idSessaoExpiradaAnterior = IdentificadorV7.Gerar(agora);
-        Guid idSessaoRevogadaAnterior = IdentificadorV7.Gerar(agora);
-        Guid idSessaoExpiradaNoCorte = IdentificadorV7.Gerar(agora);
-        Guid idSessaoRevogadaNoCorte = IdentificadorV7.Gerar(agora);
-        Guid idSessaoExpiradaDepoisCorte = IdentificadorV7.Gerar(agora);
-        Guid idSessaoRevogadaDepoisCorte = IdentificadorV7.Gerar(agora);
+        // Inatividade (janela gravada na sessão, não a configuração): expiração efetiva = UltimoUsoEm + janela.
+        // Teto bem depois do corte e CriadoEm anterior ao último uso: só a inatividade decide.
+        Guid inatividadeAntesCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddHours(-5), ultimoUsoEm: corte.AddMinutes(-30) - umMicrossegundo,
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
+        Guid inatividadeNoCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddHours(-5), ultimoUsoEm: corte.AddMinutes(-30),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
+        Guid inatividadeJanela5AntesCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddHours(-1), ultimoUsoEm: corte.AddMinutes(-5) - umMicrossegundo,
+            tetoMinutos: 600, janelaMinutos: 5, revogadaEm: null, cancelamento);
+        Guid inatividadeJanela240DepoisCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddHours(-1), ultimoUsoEm: corte.AddMinutes(-30) - umMicrossegundo,
+            tetoMinutos: 600, janelaMinutos: 240, revogadaEm: null, cancelamento);
+        Guid inatividadeDepoisCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddHours(-1), ultimoUsoEm: corte.AddMinutes(-29),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
 
-        // Insere as sessões via conexão de runtime com seus respectivos instantes de emissão
-        // 1. Ativa: ExpiraEm no futuro, não revogada
-        await InserirSessaoAsync(tenant, idSessaoAtiva, idUsuario, agora.AddHours(1), null, cancelamento);
-        // 2. Expirada anterior ao corte: elegível
-        await InserirSessaoAsync(tenant, idSessaoExpiradaAnterior, idUsuario, corte - umMicrossegundo, null, cancelamento);
-        // 3. Revogada anterior ao corte: elegível
-        await InserirSessaoAsync(tenant, idSessaoRevogadaAnterior, idUsuario, agora.AddHours(1), corte - umMicrossegundo, cancelamento);
-        // 4. Expirada exatamente no corte: mantida
-        await InserirSessaoAsync(tenant, idSessaoExpiradaNoCorte, idUsuario, corte, null, cancelamento);
-        // 5. Revogada exatamente no corte: mantida
-        await InserirSessaoAsync(tenant, idSessaoRevogadaNoCorte, idUsuario, agora.AddHours(1), corte, cancelamento);
-        // 6. Expirada depois do corte: mantida
-        await InserirSessaoAsync(tenant, idSessaoExpiradaDepoisCorte, idUsuario, corte.AddHours(1), null, cancelamento);
-        // 7. Revogada depois do corte: mantida
-        await InserirSessaoAsync(tenant, idSessaoRevogadaDepoisCorte, idUsuario, agora.AddHours(1), corte.AddHours(1), cancelamento);
+        // Teto: uso recente (UltimoUsoEm + janela ultrapassa o teto), expiração efetiva = TetoAbsolutoEm.
+        Guid tetoAntesCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddMinutes(-600) - umMicrossegundo, ultimoUsoEm: corte.AddMinutes(-10) - umMicrossegundo,
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
+        Guid tetoNoCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddMinutes(-600), ultimoUsoEm: corte.AddMinutes(-10),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
 
-        // Executa a limpeza com o operador
-        await using (EscopoOperacoesTeste escopo = EscopoOperacoesTeste.Criar(
-            tenant, tenant.StringConexaoOperadorUm, tenant.LoginOperadorUm, _relogio, retencaoDiasBruto: RetencaoDias.ToString()))
-        {
-            CasoUsoLimparSessoes casoUso = escopo.Servicos.GetRequiredService<CasoUsoLimparSessoes>();
-            ResultadoOperacao resultado = await casoUso.ExecutarAsync(tenant.IdTenant, tenant.IdAmbiente, cancelamento);
+        // Revogada: decide a RevogadaEm (expiração efetiva depois do corte nos dois primeiros casos;
+        // no terceiro, expirada muito antes do corte mas revogada depois dele).
+        Guid revogadaAntesCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddMinutes(-10), ultimoUsoEm: corte.AddMinutes(-10),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: corte - umMicrossegundo, cancelamento);
+        Guid revogadaNoCorte = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddMinutes(-10), ultimoUsoEm: corte.AddMinutes(-10),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: corte, cancelamento);
+        Guid revogadaDepoisCorteExpiradaAntes = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: corte.AddDays(-2), ultimoUsoEm: corte.AddDays(-2),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: corte.AddHours(1), cancelamento);
 
-            Assert.True(resultado.Sucesso, $"Limpeza falhou: {resultado.Codigo} - {resultado.MensagemDiagnostico}");
-            Assert.Equal("SUCESSO", resultado.Codigo);
-            Assert.Equal(2, resultado.QuantidadeRemovida);
-            Assert.Equal(RetencaoDias, resultado.RetencaoDias);
-            Assert.Equal(corte, resultado.InstanteCorte);
-            Assert.Null(resultado.IdUsuario);
+        // Ativas (uso recente), nunca elegíveis, mesmo com CriadoEm antigo (teto máximo de 720 min).
+        Guid ativaCriadaHaQuaseDozeHoras = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: agora.AddMinutes(-719), ultimoUsoEm: agora.AddMinutes(-1),
+            tetoMinutos: 720, janelaMinutos: 30, revogadaEm: null, cancelamento);
+        Guid ativaRecente = await InserirSessaoAsync(
+            tenant, idUsuario, criadoEm: agora.AddMinutes(-5), ultimoUsoEm: agora.AddMinutes(-5),
+            tetoMinutos: 600, janelaMinutos: 30, revogadaEm: null, cancelamento);
 
-            // Confere estado das sessões no banco
-            HashSet<Guid> sessoesRestantes = (await escopo.Contexto.Sessoes
-                .AsNoTracking()
-                .Where(s => s.FkIdUsuario == idUsuario)
-                .Select(s => s.IdSessao)
-                .ToListAsync(cancelamento))
-                .ToHashSet();
+        Guid[] esperadasRemovidas = [inatividadeAntesCorte, inatividadeJanela5AntesCorte, tetoAntesCorte, revogadaAntesCorte];
+        Guid[] esperadasMantidas =
+        [
+            inatividadeNoCorte, inatividadeJanela240DepoisCorte, inatividadeDepoisCorte, tetoNoCorte,
+            revogadaNoCorte, revogadaDepoisCorteExpiradaAntes, ativaCriadaHaQuaseDozeHoras, ativaRecente,
+        ];
 
-            // Apenas as duas anteriores foram removidas
-            Assert.DoesNotContain(idSessaoExpiradaAnterior, sessoesRestantes);
-            Assert.DoesNotContain(idSessaoRevogadaAnterior, sessoesRestantes);
+        await using EscopoOperacoesTeste escopo = EscopoOperacoesTeste.Criar(
+            tenant, tenant.StringConexaoOperadorUm, tenant.LoginOperadorUm, _relogio, retencaoDiasBruto: RetencaoDias.ToString());
 
-            // As demais foram mantidas
-            Assert.Contains(idSessaoAtiva, sessoesRestantes);
-            Assert.Contains(idSessaoExpiradaNoCorte, sessoesRestantes);
-            Assert.Contains(idSessaoRevogadaNoCorte, sessoesRestantes);
-            Assert.Contains(idSessaoExpiradaDepoisCorte, sessoesRestantes);
-            Assert.Contains(idSessaoRevogadaDepoisCorte, sessoesRestantes);
+        CasoUsoLimparSessoes casoUso = escopo.Servicos.GetRequiredService<CasoUsoLimparSessoes>();
+        ResultadoOperacao resultado = await casoUso.ExecutarAsync(tenant.IdTenant, tenant.IdAmbiente, cancelamento);
 
-            // Confere o registro de auditoria via owner
-            await using AcessoTenantDbContext contextoOwner = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
-            RegistroOperacaoAcesso? registro = await contextoOwner.OperacoesAcesso
-                .FirstOrDefaultAsync(r => r.IdOperacao == resultado.IdOperacao, cancelamento);
+        Assert.True(resultado.Sucesso, $"Limpeza falhou: {resultado.Codigo} - {resultado.MensagemDiagnostico}");
+        Assert.Equal("SUCESSO", resultado.Codigo);
+        Assert.Equal(esperadasRemovidas.Length, resultado.QuantidadeRemovida);
+        Assert.Equal(RetencaoDias, resultado.RetencaoDias);
+        Assert.Equal(corte, resultado.InstanteCorte);
+        Assert.Null(resultado.IdUsuario);
 
-            Assert.NotNull(registro);
-            Assert.Equal(TipoOperacaoAcesso.LimparSessoes, registro.TipoOperacao);
-            Assert.Equal(ResultadoOperacaoAcesso.Sucesso, registro.Resultado);
-            Assert.Equal(tenant.LoginOperadorUm, registro.LoginOperador);
-            Assert.Equal(RetencaoDias, registro.RetencaoDias);
-            Assert.Equal(corte, registro.InstanteCorte);
-            Assert.Equal(2, registro.QuantidadeRemovida);
-            Assert.Null(registro.IdUsuarioAlvo);
-            Assert.Null(registro.CodigoPermissao);
-        }
+        HashSet<Guid> sessoesRestantes = (await escopo.Contexto.Sessoes
+            .AsNoTracking()
+            .Where(s => s.FkIdUsuario == idUsuario)
+            .Select(s => s.IdSessao)
+            .ToListAsync(cancelamento))
+            .ToHashSet();
+
+        Assert.All(esperadasRemovidas, id => Assert.DoesNotContain(id, sessoesRestantes));
+        Assert.All(esperadasMantidas, id => Assert.Contains(id, sessoesRestantes));
+
+        // Um único registro por execução, com retenção, corte e quantidade.
+        await using AcessoTenantDbContext contextoOwner = BancoTeste.CriarContexto(tenant.StringConexaoProprietario);
+        List<RegistroOperacaoAcesso> registros = await contextoOwner.OperacoesAcesso
+            .AsNoTracking()
+            .Where(r => r.IdOperacao == resultado.IdOperacao)
+            .ToListAsync(cancelamento);
+
+        RegistroOperacaoAcesso registro = Assert.Single(registros);
+        Assert.Equal(TipoOperacaoAcesso.LimparSessoes, registro.TipoOperacao);
+        Assert.Equal(ResultadoOperacaoAcesso.Sucesso, registro.Resultado);
+        Assert.Equal(tenant.LoginOperadorUm, registro.LoginOperador);
+        Assert.Equal(RetencaoDias, registro.RetencaoDias);
+        Assert.Equal(corte, registro.InstanteCorte);
+        Assert.Equal(esperadasRemovidas.Length, registro.QuantidadeRemovida);
+        Assert.Null(registro.IdUsuarioAlvo);
+        Assert.Null(registro.CodigoPermissao);
     }
 
     [Fact]
@@ -204,15 +225,17 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
         Assert.Equal("42501", ex.SqlState);
     }
 
-    private static async Task InserirSessaoAsync(
+    private static async Task<Guid> InserirSessaoAsync(
         InstalacaoTestePostgres tenant,
-        Guid idSessao,
         Guid idUsuario,
-        DateTimeOffset expiraEm,
+        DateTimeOffset criadoEm,
+        DateTimeOffset ultimoUsoEm,
+        int tetoMinutos,
+        int janelaMinutos,
         DateTimeOffset? revogadaEm,
         CancellationToken cancelamento)
     {
-        DateTimeOffset criadoEm = expiraEm.AddMinutes(-30);
+        Guid idSessao = IdentificadorV7.Gerar(criadoEm);
         ContextoOperacaoTeste contexto = ContextoOperacaoTeste.Criar(
             new RelogioControlavel(criadoEm), TipoAutor.Sistema, "api_runtime");
 
@@ -222,12 +245,15 @@ public sealed class TestesLimpezaSessoes(FixtureInstalacaoPostgres fixture)
             IdSessao = idSessao,
             FkIdUsuario = idUsuario,
             EpocaAcesso = Guid.NewGuid(),
-            ExpiraEm = expiraEm,
+            TetoAbsolutoEm = criadoEm.AddMinutes(tetoMinutos),
+            JanelaInatividadeMinutos = janelaMinutos,
+            UltimoUsoEm = ultimoUsoEm,
             RevogadaEm = revogadaEm,
             TicketProtegido = revogadaEm is null ? [1, 2, 3] : null,
         };
         banco.Sessoes.Add(sessao);
         await banco.SaveChangesAsync(cancelamento);
+        return idSessao;
     }
 
     private async Task<Guid> CriarUsuarioAsync(InstalacaoTestePostgres tenant, CancellationToken cancelamento)

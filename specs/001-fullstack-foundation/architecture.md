@@ -124,13 +124,75 @@ individual, e o histórico operacional permanece imutável. Usuário mantém a h
 Identity e implementa o contrato comum; entidades próprias herdam `EntidadeAuditavel`.
 Ver [ADR 0002](../../docs/adr/0002-sessoes-e-operacao-acesso-local.md).
 
+## L2.1 — reabertura da L2: sessão por inatividade e teto absoluto
+
+Priorizada antes da L3 ([plano](plan.md), research D31–D33). A sessão expira no que
+ocorrer primeiro: inatividade (padrão 30 min, 5–240) ou teto absoluto contado do login
+(padrão 600 min, 30–720), ambos fixados na emissão. A decisão continua no servidor e no
+banco da instalação; o cookie e o ticket expiram no teto e não são reemitidos por uso.
+
+```mermaid
+sequenceDiagram
+    participant C as Navegador / consumidor
+    participant A as App.Api (pipeline G2)
+    participant S as Store de sessão (Retrieve)
+    participant F as FiltroRegistroUsoSessao
+    participant D as PostgreSQL da instalação
+    C->>A: requisição protegida + cookie
+    A->>S: validar referência
+    S->>D: ler sessão (UltimoUsoEm, janela, teto, revogação)
+    alt agora ≥ min(UltimoUsoEm + janela, teto) ou revogada
+        S-->>A: sem sessão → 401 (não renova)
+    else válida
+        A->>A: instalação ativa, CSRF, autorização (negação → não renova)
+        A->>F: aceita
+        opt agora − UltimoUsoEm ≥ 60 s
+            F->>D: UltimoUsoEm = agora (Versao esperada; conflito descartado)
+        end
+        F->>A: handler
+    end
+```
+
+Login cria a sessão com `UltimoUsoEm = CriadoEm`; logout e revogações seguem a L2 e
+repetem quando o conflito vem só de um registro de uso. A migration inicial única é
+regenerada (sem dados publicados). Ver ADR 0002 (revisão na L2.1).
+
+## L3/I3 — design sobre a L2.1
+
+O [plano vigente](plan.md) acrescenta a interface web servida pela própria API e a
+composição de módulos em compilação, sobre o modelo de sessão da L2.1. A interface faz
+nova entrada no próprio local quando a sessão expira (conteúdo escondido, estado da aba
+preservado em memória, diálogo de credenciais) e mostra permissões com a descrição
+declarada em código. Nada abaixo é implementado pelo planejamento.
+
+```mermaid
+flowchart LR
+    Browser[Navegador<br/>SPA React, estado só em memória<br/>nova entrada no próprio local] -->|mesma origem| Api[App.Api]
+    Api --> Static[Interface<br/>wwwroot, CSP, cache, fallback restrito]
+    Api --> Public[GET /api/v1/tenant<br/>id, nome, buildId]
+    Api --> Access[Access L2/L2.1<br/>login, logout, me, context + modules, permissionDetails]
+    Api --> ModGroup["/api/v1/modules/idModulo<br/>fora do OpenAPI servido"]
+    Comp[App.Composicao<br/>lista única de módulos] --> Api
+    Comp --> Ops[Platform.Operations]
+    Comp --> Mods[Módulos: Contratos + implementação]
+    Mods --> Base[Platform.Modulos<br/>declaração, validação, catálogo efetivo]
+    ModGroup --> Mods
+    Access --> Db[(PostgreSQL da instalação)]
+    Public --> Db
+```
+
+A fundação nunca referencia módulos; módulos consomem outros módulos só por
+`*.Contratos`. O catálogo de permissões (fundação + módulos) é o mesmo na API e no
+operador. Módulos não têm dados na L3. Ver ADRs 0004/0005 (a redigir no gate Q0).
+
 ## Evolução prevista
 
 | Incremento | Acréscimo principal |
 |---|---|
 | L1 / I1 — entregue | Backend, marcador da instalação, persistência e migrations de usuários/acesso, Compose e validação de backend. |
-| L2 / I2 — design atual | Login/logout e contexto na instalação do cliente, sessão revogável e procedimento restrito de contas/permissões. |
-| I3 — posterior | Frontend web e validação da extensão modular. |
+| L2 / I2 — entregue | Login/logout e contexto na instalação do cliente, sessão revogável e procedimento restrito de contas/permissões. |
+| L2.1 — design atual, prioridade | Sessão por inatividade + teto absoluto, registro de uso limitado, migration inicial regenerada (SC-002 revisado). |
+| L3 / I3 — design atual, após a L2.1 | Interface web de acesso servida pela API e extensão modular validada (SC-001, SC-004). |
 | I4 — antes de produção | Publicação de instâncias por cliente no Dokploy/VPS, backup externo e recuperação. |
 
 **Referência:** [plano de implementação](./plan.md) e [especificação](./spec.md).

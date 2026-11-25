@@ -157,6 +157,79 @@ public sealed class TestesInterceptadorAuditoria(FixtureInstalacaoPostgres fixtu
     }
 
     [Fact]
+    public async Task SessaoCriada_GravaUltimoUsoIgualACriacaoETetoEJanela()
+    {
+        ContextoOperacaoTeste criacao = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm);
+        UsuarioAplicacao conta = await CriarContaAsync(criacao);
+        SessaoAutenticacao sessao = await EmitirSessaoAsync(criacao, conta.Id);
+
+        await using AcessoTenantDbContext leitura = BancoTeste.CriarContexto(Tenant.StringConexaoProprietario);
+        SessaoAutenticacao lida = await leitura.Sessoes.AsNoTracking().SingleAsync(s => s.IdSessao == sessao.IdSessao, TestContext.Current.CancellationToken);
+
+        Assert.Equal(lida.CriadoEm, lida.UltimoUsoEm);
+        Assert.Equal(criacao.InstanteOperacao.AddMinutes(600), lida.TetoAbsolutoEm);
+        Assert.Equal(30, lida.JanelaInatividadeMinutos);
+        Assert.Null(lida.AlteradoEm);
+        Assert.Equal(1, lida.Versao);
+    }
+
+    [Fact]
+    public async Task RegistroDeUso_SoUltimoUsoEm_EhAlteracaoEfetiva()
+    {
+        ContextoOperacaoTeste criacao = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Usuario, Guid.NewGuid().ToString());
+        ContextoOperacaoTeste operador = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm);
+        UsuarioAplicacao conta = await CriarContaAsync(operador);
+        SessaoAutenticacao sessao = await EmitirSessaoAsync(criacao, conta.Id);
+
+        _relogio.Avancar(TimeSpan.FromMinutes(2));
+        ContextoOperacaoTeste uso = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Usuario, conta.Id.ToString());
+        await using (AcessoTenantDbContext contexto = BancoTeste.CriarContexto(Tenant.StringConexaoExecucao, uso))
+        {
+            SessaoAutenticacao carregada = await contexto.Sessoes.SingleAsync(s => s.IdSessao == sessao.IdSessao, TestContext.Current.CancellationToken);
+            carregada.RegistrarUso(uso.InstanteOperacao);
+            await contexto.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using AcessoTenantDbContext leitura = BancoTeste.CriarContexto(Tenant.StringConexaoProprietario);
+        SessaoAutenticacao lida = await leitura.Sessoes.AsNoTracking().SingleAsync(s => s.IdSessao == sessao.IdSessao, TestContext.Current.CancellationToken);
+        Assert.Equal(uso.InstanteOperacao, lida.UltimoUsoEm);
+        Assert.Equal(2, lida.Versao);
+        AssertCriacao(lida, criacao);
+        AssertAlteracao(lida, uso);
+        Assert.Equal(sessao.TetoAbsolutoEm, lida.TetoAbsolutoEm);
+        Assert.Equal(sessao.JanelaInatividadeMinutos, lida.JanelaInatividadeMinutos);
+        Assert.Null(lida.RevogadaEm);
+        Assert.Equal(sessao.TicketProtegido, lida.TicketProtegido);
+    }
+
+    [Fact]
+    public async Task MudancaDeTetoOuJanelaAposCriacao_Rejeitada()
+    {
+        ContextoOperacaoTeste criacao = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm);
+        UsuarioAplicacao conta = await CriarContaAsync(criacao);
+        SessaoAutenticacao sessao = await EmitirSessaoAsync(criacao, conta.Id);
+
+        _relogio.Avancar(TimeSpan.FromMinutes(1));
+        foreach (Action<SessaoAutenticacao> mudanca in new Action<SessaoAutenticacao>[]
+        {
+            s => s.TetoAbsolutoEm = s.TetoAbsolutoEm.AddMinutes(10),
+            s => s.JanelaInatividadeMinutos += 5,
+        })
+        {
+            await using AcessoTenantDbContext contexto = BancoTeste.CriarContexto(Tenant.StringConexaoOperadorUm, ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm));
+            SessaoAutenticacao carregada = await contexto.Sessoes.SingleAsync(s => s.IdSessao == sessao.IdSessao, TestContext.Current.CancellationToken);
+            mudanca(carregada);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => contexto.SaveChangesAsync(TestContext.Current.CancellationToken));
+        }
+
+        await using AcessoTenantDbContext leitura = BancoTeste.CriarContexto(Tenant.StringConexaoProprietario);
+        SessaoAutenticacao lida = await leitura.Sessoes.AsNoTracking().SingleAsync(s => s.IdSessao == sessao.IdSessao, TestContext.Current.CancellationToken);
+        Assert.Equal(sessao.TetoAbsolutoEm, lida.TetoAbsolutoEm);
+        Assert.Equal(sessao.JanelaInatividadeMinutos, lida.JanelaInatividadeMinutos);
+        Assert.Equal(1, lida.Versao);
+    }
+
+    [Fact]
     public async Task ConcessaoModificada_EHistoricoAlteradoOuRemovido_SaoRejeitados()
     {
         ContextoOperacaoTeste operador = ContextoOperacaoTeste.Criar(_relogio, TipoAutor.Operador, Tenant.LoginOperadorUm);
@@ -268,7 +341,9 @@ public sealed class TestesInterceptadorAuditoria(FixtureInstalacaoPostgres fixtu
         FkIdUsuario = idUsuario,
         EpocaAcesso = IdentificadorV7.Gerar(contexto.InstanteOperacao),
         TicketProtegido = [9, 8, 7],
-        ExpiraEm = contexto.InstanteOperacao.AddMinutes(30),
+        TetoAbsolutoEm = contexto.InstanteOperacao.AddMinutes(600),
+        JanelaInatividadeMinutos = 30,
+        UltimoUsoEm = contexto.InstanteOperacao,
     };
 
     private async Task<UsuarioAplicacao> CriarContaAsync(ContextoOperacaoTeste contexto)

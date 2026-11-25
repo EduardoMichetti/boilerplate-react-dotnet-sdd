@@ -21,6 +21,8 @@ public sealed class TestesMigracaoEIsolamentoTenant(FixtureInstalacaoPostgres fi
 {
     private const string IdMigracaoFutura = "29991231000000_MigracaoDeVersaoFutura";
 
+    private const string IdMigracaoInicialL2 = "20261108234429_EsquemaInicialAcessoTenant";
+
     [Fact]
     public async Task BancoVazio_RejeitaPreflightSemAprovacao()
     {
@@ -107,6 +109,38 @@ public sealed class TestesMigracaoEIsolamentoTenant(FixtureInstalacaoPostgres fi
             await ExecutarOwnerAsync(
                 fixture.TenantA,
                 $"DELETE FROM foundation.\"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{IdMigracaoFutura}'");
+        }
+    }
+
+    [Fact]
+    public async Task HistoricoL2_MigrationInicialAntiga_RecusadoPeloToolingEPelaReadiness()
+    {
+        // D32: a L2.1 regenera a migration inicial; um banco criado na L2 guarda o ID antigo e
+        // deve ser recriado do zero, nunca migrado.
+        await BancoTeste.MigrarAsync(fixture.TenantA, tokenCancelamento: TestContext.Current.CancellationToken);
+        string idAtual = Assert.Single(AcessoTenantDbContextFactory.CadeiaConhecida());
+        Assert.NotEqual(IdMigracaoInicialL2, idAtual);
+        Assert.EndsWith("_EsquemaInicialAcessoTenant", idAtual, StringComparison.Ordinal);
+
+        await ExecutarOwnerAsync(
+            fixture.TenantA,
+            $"UPDATE foundation.\"__EFMigrationsHistory\" SET \"MigrationId\" = '{IdMigracaoInicialL2}' WHERE \"MigrationId\" = '{idAtual}'");
+        try
+        {
+            OpcoesPreflightMigracao opcoes = Opcoes(fixture.TenantA.StringConexaoProprietario, fixture.TenantA.IdTenant, fixture.TenantA.IdAmbiente, "false");
+            InvalidOperationException excecao = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => PreflightMigracaoTenant.ExecutarPreflightAsync(opcoes, AcessoTenantDbContextFactory.CadeiaConhecida(), TestContext.Current.CancellationToken));
+            Assert.Contains("bloqueada antes de DDL", excecao.Message, StringComparison.Ordinal);
+
+            await using AcessoTenantDbContext contextoRuntime = BancoTeste.CriarContexto(fixture.TenantA.StringConexaoExecucao);
+            IdentidadeBancoTenantSnapshot snapshot = await new VerificadorIdentidadeBancoTenant(contextoRuntime).LerAsync(TestContext.Current.CancellationToken);
+            Assert.False(snapshot.PossuiVersaoMigracaoEsperada);
+        }
+        finally
+        {
+            await ExecutarOwnerAsync(
+                fixture.TenantA,
+                $"UPDATE foundation.\"__EFMigrationsHistory\" SET \"MigrationId\" = '{idAtual}' WHERE \"MigrationId\" = '{IdMigracaoInicialL2}'");
         }
     }
 

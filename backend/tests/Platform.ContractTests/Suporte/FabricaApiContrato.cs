@@ -84,7 +84,8 @@ public sealed class FabricaApiContrato : WebApplicationFactory<Program>
         builder.UseSetting("ProtecaoDados:DiretorioChaves", _diretorioChaves);
         builder.UseSetting("ProtecaoDados:ArquivoCertificado", _certificado.ArquivoCertificado);
         builder.UseSetting("ProtecaoDados:ArquivoSenhaCertificado", _certificado.ArquivoSenha);
-        builder.UseSetting("Sessao:PrazoAbsolutoMinutos", "30");
+        builder.UseSetting("Sessao:InatividadeMinutos", "30");
+        builder.UseSetting("Sessao:TetoAbsolutoMinutos", "600");
         builder.ConfigureTestServices(servicos =>
         {
             servicos.RemoveAll<IOptions<OpcoesInstalacaoTenant>>();

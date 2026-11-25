@@ -7,8 +7,16 @@ namespace Platform.Application.Access.Portas;
 /// <param name="IdSessao">Sessão do cookie recebido.</param>
 /// <param name="IdUsuario">Conta dona da sessão.</param>
 /// <param name="Versao">Versão lida na autenticação.</param>
-/// <param name="ExpiraEm">Prazo absoluto gravado na emissão.</param>
-public sealed record SessaoCorrente(Guid IdSessao, Guid IdUsuario, long Versao, DateTimeOffset ExpiraEm);
+/// <param name="TetoAbsolutoEm">Teto absoluto gravado na emissão.</param>
+/// <param name="JanelaInatividadeMinutos">Janela de inatividade gravada na emissão.</param>
+/// <param name="UltimoUsoEm">Último uso registrado, lido na autenticação.</param>
+public sealed record SessaoCorrente(
+    Guid IdSessao,
+    Guid IdUsuario,
+    long Versao,
+    DateTimeOffset TetoAbsolutoEm,
+    int JanelaInatividadeMinutos,
+    DateTimeOffset UltimoUsoEm);
 
 /// <summary>
 /// Dados da nova sessão montados pelo caso de uso de login antes da troca atômica.
@@ -16,9 +24,10 @@ public sealed record SessaoCorrente(Guid IdSessao, Guid IdUsuario, long Versao, 
 /// <param name="IdSessao">UUID v7 do <c>InstanteOperacao</c>.</param>
 /// <param name="IdUsuario">Conta com credencial verificada.</param>
 /// <param name="EpocaAcesso">Geração vigente no marcador.</param>
-/// <param name="ExpiraEm"><c>InstanteOperacao + Sessao:PrazoAbsolutoMinutos</c>.</param>
+/// <param name="TetoAbsolutoEm"><c>InstanteOperacao + Sessao:TetoAbsolutoMinutos</c>.</param>
+/// <param name="JanelaInatividadeMinutos"><c>Sessao:InatividadeMinutos</c> vigente na emissão.</param>
 /// <param name="TicketProtegido">Ticket nativo protegido por Data Protection.</param>
-public sealed record NovaSessao(Guid IdSessao, Guid IdUsuario, Guid EpocaAcesso, DateTimeOffset ExpiraEm, byte[] TicketProtegido);
+public sealed record NovaSessao(Guid IdSessao, Guid IdUsuario, Guid EpocaAcesso, DateTimeOffset TetoAbsolutoEm, int JanelaInatividadeMinutos, byte[] TicketProtegido);
 
 /// <summary>
 /// Sessão emitida e confirmada no banco (commit antes do retorno).
@@ -27,8 +36,9 @@ public sealed record NovaSessao(Guid IdSessao, Guid IdUsuario, Guid EpocaAcesso,
 /// <param name="IdUsuario">Conta dona da sessão.</param>
 /// <param name="IdTenant">Tenant da instalação.</param>
 /// <param name="EpocaAcesso">Geração gravada na sessão.</param>
-/// <param name="ExpiraEm">Prazo absoluto gravado.</param>
-public sealed record SessaoEmitida(Guid IdSessao, Guid IdUsuario, Guid IdTenant, Guid EpocaAcesso, DateTimeOffset ExpiraEm);
+/// <param name="TetoAbsolutoEm">Teto absoluto gravado.</param>
+/// <param name="JanelaInatividadeMinutos">Janela de inatividade gravada.</param>
+public sealed record SessaoEmitida(Guid IdSessao, Guid IdUsuario, Guid IdTenant, Guid EpocaAcesso, DateTimeOffset TetoAbsolutoEm, int JanelaInatividadeMinutos);
 
 /// <summary>
 /// Dados que compõem o ticket persistido: só referências e o carimbo de segurança, sem concessões.
@@ -39,7 +49,7 @@ public sealed record SessaoEmitida(Guid IdSessao, Guid IdUsuario, Guid IdTenant,
 /// <param name="EpocaAcesso">Geração do marcador na emissão.</param>
 /// <param name="CarimboSeguranca">SecurityStamp vigente na emissão.</param>
 /// <param name="EmitidaEm">Instante da emissão.</param>
-/// <param name="ExpiraEm">Prazo absoluto.</param>
+/// <param name="TetoAbsolutoEm">Teto absoluto.</param>
 public sealed record DadosTicketSessao(
     Guid IdSessao,
     Guid IdUsuario,
@@ -47,7 +57,7 @@ public sealed record DadosTicketSessao(
     Guid EpocaAcesso,
     string CarimboSeguranca,
     DateTimeOffset EmitidaEm,
-    DateTimeOffset ExpiraEm);
+    DateTimeOffset TetoAbsolutoEm);
 
 /// <summary>
 /// Estado persistido de uma sessão e da conta dona, lido do banco a cada operação.
@@ -55,7 +65,9 @@ public sealed record DadosTicketSessao(
 /// <param name="IdSessao">Sessão.</param>
 /// <param name="IdUsuario">Conta.</param>
 /// <param name="EpocaAcesso">Geração gravada na sessão.</param>
-/// <param name="ExpiraEm">Prazo absoluto gravado.</param>
+/// <param name="TetoAbsolutoEm">Teto absoluto gravado.</param>
+/// <param name="JanelaInatividadeMinutos">Janela de inatividade gravada.</param>
+/// <param name="UltimoUsoEm">Último uso registrado.</param>
 /// <param name="RevogadaEm">Instante da revogação, quando revogada.</param>
 /// <param name="Versao">Token de concorrência.</param>
 /// <param name="TicketProtegido">Ticket protegido (nulo após revogação).</param>
@@ -67,7 +79,9 @@ public sealed record EstadoSessaoPersistida(
     Guid IdSessao,
     Guid IdUsuario,
     Guid EpocaAcesso,
-    DateTimeOffset ExpiraEm,
+    DateTimeOffset TetoAbsolutoEm,
+    int JanelaInatividadeMinutos,
+    DateTimeOffset UltimoUsoEm,
     DateTimeOffset? RevogadaEm,
     long Versao,
     byte[]? TicketProtegido,
@@ -83,8 +97,15 @@ public sealed record EstadoSessaoPersistida(
 /// <param name="IdTenant">Tenant da instalação.</param>
 /// <param name="Email">Email da conta (dado pessoal).</param>
 /// <param name="NomeExibicao">Nome de exibição (dado pessoal).</param>
-/// <param name="SessaoExpiraEm">Prazo absoluto da sessão corrente.</param>
-public sealed record IdentidadeAtual(Guid IdUsuario, Guid IdTenant, string Email, string NomeExibicao, DateTimeOffset SessaoExpiraEm);
+/// <param name="SessaoExpiraEm">Teto absoluto da sessão corrente (a expiração por inatividade não é exposta).</param>
+/// <param name="SessaoJanelaInatividadeMinutos">Janela de inatividade da sessão corrente.</param>
+public sealed record IdentidadeAtual(
+    Guid IdUsuario,
+    Guid IdTenant,
+    string Email,
+    string NomeExibicao,
+    DateTimeOffset SessaoExpiraEm,
+    int SessaoJanelaInatividadeMinutos);
 
 /// <summary>
 /// Contexto de acesso devolvido por <c>GET /api/v1/context</c>.

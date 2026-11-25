@@ -200,6 +200,7 @@ public sealed class TestesConsumidorIndependente(FixtureInstalacaoPostgres fixtu
             JsonElement raiz = doc.RootElement;
             Assert.Equal(idTenant, raiz.GetProperty("tenantId").GetGuid());
             Assert.True(raiz.TryGetProperty("expiresAt", out _));
+            AssegurarConformeSchema(raiz, "LoginResponse");
         }
 
         // Passo 3: Novo GET antiforgery após login
@@ -231,6 +232,7 @@ public sealed class TestesConsumidorIndependente(FixtureInstalacaoPostgres fixtu
             Assert.Equal(email, raiz.GetProperty("email").GetString());
             Assert.Equal(nomeEsperado, raiz.GetProperty("displayName").GetString());
             Assert.True(raiz.TryGetProperty("sessionExpiresAt", out _));
+            AssegurarConformeSchema(raiz, "CurrentUser");
         }
 
         // Passo 5: GET /api/v1/context
@@ -337,6 +339,28 @@ public sealed class TestesConsumidorIndependente(FixtureInstalacaoPostgres fixtu
         Assert.Matches("^[0-9a-f]{32}$", traceId);
 
         return raiz;
+    }
+
+    /// <summary>
+    /// Confere a resposta só pelo schema do arquivo publicado: todo campo <c>required</c> presente e
+    /// inteiros dentro de <c>minimum</c>/<c>maximum</c> (inclui os campos aditivos do contrato 2.1.0).
+    /// </summary>
+    private static void AssegurarConformeSchema(JsonElement resposta, string nomeSchema)
+    {
+        using JsonDocument contrato = JsonDocument.Parse(File.ReadAllText(CaminhoContratoOpenApi));
+        JsonElement schema = contrato.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(nomeSchema);
+        foreach (JsonElement obrigatorio in schema.GetProperty("required").EnumerateArray())
+        {
+            string campo = obrigatorio.GetString()!;
+            Assert.True(resposta.TryGetProperty(campo, out JsonElement valor), $"{nomeSchema}.{campo} ausente na resposta.");
+            JsonElement propriedade = schema.GetProperty("properties").GetProperty(campo);
+            if (propriedade.TryGetProperty("type", out JsonElement tipo) && tipo.GetString() == "integer")
+            {
+                int numero = valor.GetInt32();
+                Assert.True(!propriedade.TryGetProperty("minimum", out JsonElement minimo) || numero >= minimo.GetInt32(), $"{nomeSchema}.{campo} abaixo do mínimo.");
+                Assert.True(!propriedade.TryGetProperty("maximum", out JsonElement maximo) || numero <= maximo.GetInt32(), $"{nomeSchema}.{campo} acima do máximo.");
+            }
+        }
     }
 
     private static void AssegurarSemSegredos(string json, string senha, FabricaApiInstalacao api)

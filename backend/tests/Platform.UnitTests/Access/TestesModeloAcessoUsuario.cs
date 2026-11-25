@@ -144,17 +144,8 @@ public sealed class TestesModeloAcessoUsuario
     [Fact]
     public void SessaoAutenticacao_ValidaERejeitaRevogadaComTicket()
     {
-        SessaoAutenticacao sessao = new()
-        {
-            IdSessao = IdentificadorV7.Gerar(Instante),
-            FkIdUsuario = IdentificadorV7.Gerar(Instante),
-            EpocaAcesso = IdentificadorV7.Gerar(Instante),
-            TicketProtegido = [1, 2, 3],
-            ExpiraEm = Instante.AddMinutes(30),
-        };
+        SessaoAutenticacao sessao = CriarSessao(600, 30);
         sessao.Validar();
-        Assert.True(sessao.EstaAtivaEm(Instante.AddMinutes(29).AddSeconds(59)));
-        Assert.False(sessao.EstaAtivaEm(Instante.AddMinutes(30)));
 
         sessao.RevogadaEm = Instante;
         ArgumentException excecao = Assert.Throws<ArgumentException>(() => sessao.Validar());
@@ -162,18 +153,88 @@ public sealed class TestesModeloAcessoUsuario
     }
 
     [Fact]
-    public void SessaoAutenticacao_RejeitaExpiraEmComOffset()
+    public void SessaoAutenticacao_RejeitaTetoComOffset()
     {
-        SessaoAutenticacao sessao = new()
-        {
-            IdSessao = IdentificadorV7.Gerar(Instante),
-            FkIdUsuario = IdentificadorV7.Gerar(Instante),
-            EpocaAcesso = IdentificadorV7.Gerar(Instante),
-            ExpiraEm = new DateTimeOffset(2026, 11, 8, 9, 30, 0, TimeSpan.FromHours(-3)),
-        };
+        SessaoAutenticacao sessao = CriarSessao(600, 30);
+        sessao.TetoAbsolutoEm = new DateTimeOffset(2026, 11, 8, 19, 0, 0, TimeSpan.FromHours(-3));
 
         ArgumentException excecao = Assert.Throws<ArgumentException>(() => sessao.Validar());
-        Assert.Equal("ExpiraEm", excecao.ParamName);
+        Assert.Equal("TetoAbsolutoEm", excecao.ParamName);
+    }
+
+    [Theory]
+    [InlineData(30, 5)]
+    [InlineData(30, 30)]
+    [InlineData(720, 240)]
+    [InlineData(600, 30)]
+    public void SessaoAutenticacao_AceitaTetoEJanelaNosLimites(int tetoMinutos, int janelaMinutos)
+    {
+        CriarSessao(tetoMinutos, janelaMinutos).Validar();
+    }
+
+    [Theory]
+    [InlineData(29)]
+    [InlineData(721)]
+    public void SessaoAutenticacao_RejeitaTetoForaDe30A720(int tetoMinutos)
+    {
+        SessaoAutenticacao sessao = CriarSessao(tetoMinutos, 5);
+
+        ArgumentException excecao = Assert.Throws<ArgumentException>(() => sessao.Validar());
+        Assert.Equal("TetoAbsolutoEm", excecao.ParamName);
+    }
+
+    [Theory]
+    [InlineData(600, 4)]
+    [InlineData(600, 241)]
+    [InlineData(60, 61)]
+    public void SessaoAutenticacao_RejeitaJanelaForaDaFaixaOuMaiorQueTeto(int tetoMinutos, int janelaMinutos)
+    {
+        SessaoAutenticacao sessao = CriarSessao(tetoMinutos, janelaMinutos);
+
+        ArgumentException excecao = Assert.Throws<ArgumentException>(() => sessao.Validar());
+        Assert.Equal("JanelaInatividadeMinutos", excecao.ParamName);
+    }
+
+    [Fact]
+    public void SessaoAutenticacao_RejeitaUltimoUsoForaDeCriacaoAteTeto()
+    {
+        SessaoAutenticacao antes = CriarSessao(600, 30);
+        antes.UltimoUsoEm = Instante.AddTicks(-10);
+        Assert.Equal("UltimoUsoEm", Assert.Throws<ArgumentException>(() => antes.Validar()).ParamName);
+
+        SessaoAutenticacao noTeto = CriarSessao(600, 30);
+        noTeto.UltimoUsoEm = noTeto.TetoAbsolutoEm;
+        Assert.Equal("UltimoUsoEm", Assert.Throws<ArgumentException>(() => noTeto.Validar()).ParamName);
+
+        SessaoAutenticacao depois = CriarSessao(600, 30);
+        depois.UltimoUsoEm = depois.TetoAbsolutoEm.AddMinutes(1);
+        Assert.Equal("UltimoUsoEm", Assert.Throws<ArgumentException>(() => depois.Validar()).ParamName);
+    }
+
+    [Fact]
+    public void SessaoAutenticacao_RegistrarUso_SoAvancaENaoAlteraOutrosCampos()
+    {
+        SessaoAutenticacao sessao = CriarSessao(600, 30);
+        DateTimeOffset teto = sessao.TetoAbsolutoEm;
+        byte[] ticket = sessao.TicketProtegido!;
+
+        sessao.RegistrarUso(Instante.AddMinutes(10));
+        Assert.Equal(Instante.AddMinutes(10), sessao.UltimoUsoEm);
+
+        sessao.RegistrarUso(Instante.AddMinutes(10));
+        Assert.Equal(Instante.AddMinutes(10), sessao.UltimoUsoEm);
+
+        Assert.ThrowsAny<ArgumentException>(() => sessao.RegistrarUso(Instante.AddMinutes(9)));
+        Assert.ThrowsAny<ArgumentException>(() => sessao.RegistrarUso(teto));
+        Assert.ThrowsAny<ArgumentException>(() => sessao.RegistrarUso(teto.AddMinutes(1)));
+        Assert.ThrowsAny<ArgumentException>(() => sessao.RegistrarUso(new DateTimeOffset(2026, 11, 8, 9, 20, 0, TimeSpan.FromHours(-3))));
+
+        Assert.Equal(Instante.AddMinutes(10), sessao.UltimoUsoEm);
+        Assert.Equal(teto, sessao.TetoAbsolutoEm);
+        Assert.Equal(30, sessao.JanelaInatividadeMinutos);
+        Assert.Same(ticket, sessao.TicketProtegido);
+        Assert.Null(sessao.RevogadaEm);
+        sessao.Validar();
     }
 
     [Fact]
@@ -207,6 +268,18 @@ public sealed class TestesModeloAcessoUsuario
         UserName = "usuario@tenant.local",
         NomeExibicao = "Usuário Válido",
         EstaAtivo = true,
+    };
+
+    private static SessaoAutenticacao CriarSessao(int tetoMinutos, int janelaMinutos) => new()
+    {
+        IdSessao = IdentificadorV7.Gerar(Instante),
+        FkIdUsuario = IdentificadorV7.Gerar(Instante),
+        EpocaAcesso = IdentificadorV7.Gerar(Instante),
+        TicketProtegido = [1, 2, 3],
+        CriadoEm = Instante,
+        TetoAbsolutoEm = Instante.AddMinutes(tetoMinutos),
+        JanelaInatividadeMinutos = janelaMinutos,
+        UltimoUsoEm = Instante,
     };
 
     private static PermissaoUsuario CriarPermissao() => new()

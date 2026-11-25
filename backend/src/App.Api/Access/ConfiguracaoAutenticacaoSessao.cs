@@ -174,7 +174,7 @@ public sealed class ManipuladorRecursoProprio(EstadoRequisicaoAcesso estado, IOp
 /// <summary>
 /// Escreve e remove o cookie de sessão com o <c>TicketDataFormat</c> e o <c>CookieManager</c> do
 /// esquema (G21): o cookie contém só a referência <c>IdTenant/EpocaAcesso/IdSessao</c> na claim de
-/// sessão do handler nativo e expira em <c>ExpiraEm</c>. Chamado somente após o commit.
+/// sessão do handler nativo e expira em <c>TetoAbsolutoEm</c>. Chamado somente após o commit.
 /// </summary>
 /// <param name="monitor">Opções do esquema de cookie.</param>
 public sealed class EmissorCookieSessao(IOptionsMonitor<CookieAuthenticationOptions> monitor)
@@ -190,8 +190,8 @@ public sealed class EmissorCookieSessao(IOptionsMonitor<CookieAuthenticationOpti
     /// </summary>
     /// <param name="contexto">Contexto HTTP.</param>
     /// <param name="referencia">Referência da nova sessão.</param>
-    /// <param name="expiraEm">Prazo absoluto gravado.</param>
-    public void Emitir(HttpContext contexto, ReferenciaSessao referencia, DateTimeOffset expiraEm)
+    /// <param name="tetoAbsolutoEm">Teto absoluto gravado.</param>
+    public void Emitir(HttpContext contexto, ReferenciaSessao referencia, DateTimeOffset tetoAbsolutoEm)
     {
         ArgumentNullException.ThrowIfNull(contexto);
         ArgumentNullException.ThrowIfNull(referencia);
@@ -204,7 +204,7 @@ public sealed class EmissorCookieSessao(IOptionsMonitor<CookieAuthenticationOpti
         string valor = opcoes.TicketDataFormat.Protect(ticket);
 
         CookieOptions cookie = opcoes.Cookie.Build(contexto);
-        cookie.Expires = expiraEm;
+        cookie.Expires = tetoAbsolutoEm;
         opcoes.CookieManager.AppendResponseCookie(contexto, opcoes.Cookie.Name!, valor, cookie);
     }
 
@@ -306,6 +306,8 @@ public static class ConfiguracaoAutenticacaoSessao
 
         servicos.AddHttpContextAccessor();
         servicos.AddScoped<EstadoRequisicaoAcesso>();
+        servicos.AddScoped<ContextoNegacaoSessao>();
+        servicos.AddScoped<Platform.Application.Access.Portas.IContextoNegacaoSessao>(p => p.GetRequiredService<ContextoNegacaoSessao>());
         servicos.AddSingleton<ProtetorTicketSessao>();
         servicos.AddSingleton<Platform.Application.Access.Portas.IProtetorTicketSessao>(p => p.GetRequiredService<ProtetorTicketSessao>());
         servicos.AddSingleton<ArmazenamentoTicketsSessao>();
@@ -330,8 +332,8 @@ public static class ConfiguracaoAutenticacaoSessao
                 opcoes.SlidingExpiration = false;
                 opcoes.Events = new CookieAuthenticationEvents
                 {
-                    OnRedirectToLogin = contexto => ConfiguracaoProblemDetails.EscreverAsync(
-                        contexto.HttpContext, ConfiguracaoProblemDetails.DeErro(ErrosAcesso.AutenticacaoNecessaria)),
+                    // Ponto único do 401 de sessão: resposta genérica + EventId 1002 com o motivo (D37).
+                    OnRedirectToLogin = contexto => RegistroNegacaoSessao.EscreverAsync(contexto.HttpContext),
                     OnRedirectToAccessDenied = contexto => ConfiguracaoProblemDetails.EscreverAsync(
                         contexto.HttpContext, ConfiguracaoProblemDetails.DeErro(ErrosAcesso.AcessoTenantNegado)),
                     OnRedirectToLogout = _ => Task.CompletedTask,
@@ -396,7 +398,12 @@ public static class ConfiguracaoAutenticacaoSessao
     {
         servicos.AddSingleton<IValidateOptions<OpcoesSessao>, ValidadorOpcoesSessao>();
         servicos.AddOptions<OpcoesSessao>()
-            .Configure<IConfiguration>((opcoes, config) => opcoes.PrazoAbsolutoMinutosBruto = config[OpcoesSessao.ChavePrazoAbsolutoMinutos])
+            .Configure<IConfiguration>((opcoes, config) =>
+            {
+                opcoes.InatividadeMinutosBruto = config[OpcoesSessao.ChaveInatividadeMinutos];
+                opcoes.TetoAbsolutoMinutosBruto = config[OpcoesSessao.ChaveTetoAbsolutoMinutos];
+                opcoes.PrazoAbsolutoMinutosObsoletoBruto = config[OpcoesSessao.ChavePrazoAbsolutoMinutosObsoleta];
+            })
             .ValidateOnStart();
     }
 

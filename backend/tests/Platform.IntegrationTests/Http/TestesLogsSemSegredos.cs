@@ -65,10 +65,25 @@ public sealed class TestesLogsSemSegredos(FixtureInstalacaoPostgres fixture)
             Assert.Equal(HttpStatusCode.ServiceUnavailable, indisponivel.StatusCode);
         }
 
+        Dictionary<string, string> cookiesAntesDoLogout = new(cliente.Cookies);
         using (HttpResponseMessage logout = await cliente.LogoutAsync(novoToken: false))
         {
             Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
         }
+
+        // Sessão negada (L2.1, D37): o evento 1002 entra na mesma varredura.
+        foreach ((string nome, string valor) in cookiesAntesDoLogout)
+        {
+            cliente.Cookies[nome] = valor;
+        }
+
+        using (HttpResponseMessage negada = await cliente.MeAsync())
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, negada.StatusCode);
+        }
+
+        EntradaLog sessaoNegada = Assert.Single(api.Logs.Entradas, e => e.Evento.Id == 1002);
+        Assert.Contains("Motivo=Revogada", sessaoNegada.Estado, StringComparison.Ordinal);
 
         Assert.NotEmpty(api.Logs.Entradas);
         List<string> vazamentos = api.Logs.Entradas

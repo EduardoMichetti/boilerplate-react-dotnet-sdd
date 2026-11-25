@@ -1,6 +1,8 @@
 # Research: Fundação full-stack reutilizável
 
 **Date**: 2026-11-05 (esclarecimentos L2; decisões iniciais de 2026-10-13 preservadas)
+**Revisões**: 2026-11-08 (D21); 2026-11-23 (L3, D22–D30); 2026-11-24 (L2.1, D31–D33;
+delta L3, D34–D36); 2026-11-24, clarificações finais (D37 na L2.1, D38 na L3)
 **Project**: `boilerplate-react-dotnet-sdd`
 **Context**: [spec.md](spec.md), [plan.md](plan.md) e
 [Constituição](../../.specify/memory/constitution.md).
@@ -442,9 +444,11 @@ local. Data Protection protege tanto o cookie-referência quanto os bytes do tic
 Não adicionar cache de sessão ou capturar DbContext scoped nas options.
 
 Retrieve confere sessão, conta ativa/lockout/stamp, epoch e expiração em cada
-operação. Concessões são verificadas no banco na autorização. Desabilitar sliding
-expiration; prazo absoluto (padrão 30 minutos, configurável 5–480 por D21), sem refresh. Renew não faz upsert, não estende
-prazo e só atualiza linha ainda ativa/versão esperada. Logout persiste revogação
+operação. Concessões são verificadas no banco na autorização. Desabilitar o sliding
+expiration **do handler de cookie**; sem refresh. *(Revisado por [D31](#d31--sessão-por-inatividade-com-teto-absoluto-revisa-d21-2026-11-24),
+2026-11-24: a expiração passa a ser inatividade + teto absoluto, controlada no servidor
+pelo registro de uso; o cookie e o ticket continuam sem renovação.)* Renew não faz upsert, não estende
+o teto e só atualiza linha ainda ativa/versão esperada. Logout persiste revogação
 antes de confirmar; erro de banco não é retornado como `null` ou logout concluído.
 
 No login válido com sessão anterior, revogá-la antes de SignIn para gerar chave
@@ -747,6 +751,13 @@ a disputa perdida de credencial inválida (401) e de dependência indisponível 
 
 ### D21 — Prazo de sessão configurável e limpeza auditada de sessões (2026-11-08)
 
+> **Revisada por [D31](#d31--sessão-por-inatividade-com-teto-absoluto-revisa-d21-2026-11-24)
+> (2026-11-24)**: a chave `Sessao:PrazoAbsolutoMinutos`, a faixa 5–480, o `ExpiraEm` fixo
+> como única expiração e o CHECK de prazo foram substituídos. Continuam vigentes desta
+> decisão: regra estrita de parse, valores fixados na emissão, comando `sessao limpar`,
+> registro único por execução, privilégios e invocação rejeitada antes do alvo. O critério
+> de remoção passa a usar a expiração efetiva (D31). O texto abaixo é histórico.
+
 **Decision**:
 - **Prazo absoluto configurável**: chave `Sessao:PrazoAbsolutoMinutos` (env
   `Sessao__PrazoAbsolutoMinutos`), lida somente pela API. Ausente = 30. Aceita apenas
@@ -817,3 +828,581 @@ Valores privados, caminhos de certificado e proxies reais são configuração do
 ambiente de validação/produção, não escolhas arquiteturais silenciosamente assumidas.
 P0 do plano permanece gate obrigatório de implementação; pesquisa/desenho não
 equivalem a testes, scans, migrations ou liberação executados.
+
+## Revisão L2.1 — 2026-11-24 (reabertura da L2: modelo de sessão)
+
+Base: L2 entregue e validada (`c33acbe`). Incorpora as clarificações de 2026-11-23
+sobre FR-006/SC-002 (inatividade + teto absoluto). A L2.1 DEVE ser implementada e
+validada antes de iniciar qualquer bloco da L3. Numeração D31–D33 continua após a
+revisão L3 (D22–D30), já registrada; D34–D36 são o delta L3 correspondente. D37
+(motivo da negação só no log) pertence à L2.1; D38 (409 no diálogo) é delta L3.
+
+### D31 — Sessão por inatividade com teto absoluto (revisa D21, 2026-11-24)
+
+**Decision**:
+- **Regra**: a sessão é válida enquanto `agora < ExpiracaoEfetiva`, com
+  `ExpiracaoEfetiva = min(UltimoUsoEm + JanelaInatividadeMinutos, TetoAbsolutoEm)`,
+  além das condições L2 já existentes (registro ativo e não revogado, ticket presente,
+  conta ativa e fora do bloqueio, stamp e epoch conferindo). Comparação sempre com
+  valores gravados e o `agora` do `TimeProvider`; nunca com a configuração atual.
+- **Configuração** (lida somente pela API; o host operacional não a usa):
+
+  | Chave (env) | Padrão | Faixa inclusiva |
+  |---|---|---|
+  | `Sessao:InatividadeMinutos` (`Sessao__InatividadeMinutos`) | 30 | 5–240 |
+  | `Sessao:TetoAbsolutoMinutos` (`Sessao__TetoAbsolutoMinutos`) | 600 | 30–720 |
+
+  Parse estrito herdado de D21/G10: inteiro decimal sem sinal, separador ou espaço
+  (`NumberStyles.None`, cultura invariante); ausente ou vazio (`""`) = padrão.
+  Fora da faixa, não inteiro, ou `InatividadeMinutos > TetoAbsolutoMinutos` impede a
+  inicialização (`ValidateOnStart`) com diagnóstico que cita somente as chaves e as
+  faixas, nunca valores de outras configurações. Inatividade igual ao teto é aceita.
+  A chave antiga `Sessao:PrazoAbsolutoMinutos`, se presente com valor não vazio, também
+  impede a inicialização, com diagnóstico indicando as duas chaves novas: evita que um
+  produto derivado que configurou um prazo curto passe silenciosamente a 30/600.
+- **Persistência** (`access.sessoes_autenticacao`): `ExpiraEm` é renomeado para
+  `TetoAbsolutoEm` (= `CriadoEm` + teto, imutável); novas colunas
+  `JanelaInatividadeMinutos` (inteiro, imutável) e `UltimoUsoEm` (UTC, inicia igual a
+  `CriadoEm`, só cresce). Teto e janela são fixados na emissão a partir da configuração
+  vigente; mudar a configuração e reiniciar não altera sessões emitidas. A expiração
+  efetiva é derivada, não persistida. CHECKs substituem `ck_sessoes_autenticacao_prazo`:
+  `TetoAbsolutoEm − CriadoEm` entre 30 e 720 minutos; `JanelaInatividadeMinutos` entre 5
+  e 240 e não maior que `TetoAbsolutoEm − CriadoEm`; `CriadoEm ≤ UltimoUsoEm <
+  TetoAbsolutoEm`. Detalhes em [data-model §7](data-model.md#sessaoautenticacao--accesssessoes_autenticacao).
+- **Cookie e ticket**: o handler de cookie continua com `SlidingExpiration = false` e
+  nunca reemite o cookie por uso. `ExpiresUtc` do ticket e `Expires` do cookie = 
+  `TetoAbsolutoEm`. A inatividade é aplicada **somente no servidor** (Retrieve compara
+  `ExpiracaoEfetiva`), de modo que o cookie em si não carrega nem estende prazo e
+  requisições normais não emitem `Set-Cookie`. Sessão expirada por inatividade é
+  tratada como ausente (401 `AUTH_REQUIRED`), sem revogar a linha.
+- **Renovação**: somente pelo registro de uso de [D33](#d33--registro-de-uso-da-sessão-limitação-de-gravação-e-concorrência);
+  nunca ultrapassa o teto (a fórmula usa `min`). Sem remember-me, refresh ou
+  renovação por login silencioso.
+- **Instalação inativa**: não pausa teto nem inatividade. Requisições negadas com 409
+  não renovam; ao reativar, a sessão só retoma se `agora < ExpiracaoEfetiva`.
+- **Limpeza (`sessao limpar`)**: retenção contada da expiração efetiva ou da
+  revogação: elegível se `RevogadaEm < corte`, ou se `RevogadaEm` nulo e
+  `min(UltimoUsoEm + janela, TetoAbsolutoEm) < corte`. Como `corte < agora`, sessão
+  ativa continua inelegível. A consulta usa `UltimoUsoEm < corte` como pré-filtro
+  indexado (condição necessária, pois a janela é positiva) e calcula o mínimo no SQL com
+  `corte` como parâmetro (sem relógio do banco). Demais regras de D21 inalteradas.
+- **API**: `expiresAt` (login) e `sessionExpiresAt` (`/me`, e portanto `/context.user`)
+  passam a significar explicitamente o **teto absoluto**; campos aditivos
+  `idleTimeoutMinutes` (login) e `sessionIdleTimeoutMinutes` (`/me`) informam a janela de
+  inatividade fixada na sessão. O instante de expiração por inatividade **não** é exposto:
+  muda a cada uso e incentivaria temporizador no cliente (vedado). Contrato em
+  [operations §4](contracts/operations.md#expiração-e-uso-da-sessão-l21) e
+  [openapi.json](contracts/openapi.json) 2.1.0.
+- **Mantidos sem alteração**: troca atômica de sessão no login, 409 `SESSION_CONFLICT`
+  na disputa de logins, bloqueio revogando todas as sessões, sessões independentes por
+  dispositivo, logout revogando só a corrente, revogação operacional de todas.
+
+**Rationale**: atende FR-006/SC-002 com a menor mudança sobre o store nativo de D15:
+o protocolo do cookie não muda, a decisão de validade permanece no banco local e
+continua revogável na próxima operação. Persistir janela e teto na emissão cumpre
+"fixados na criação" sem depender da configuração atual. Manter o cookie com `Expires`
+no teto evita reemitir `Set-Cookie` a cada requisição.
+
+**Alternatives considered**:
+- Sliding expiration nativo do handler: reemite cookie/ticket e chama `RenewAsync` com
+  regras próprias (metade da janela), não respeita teto nem "negada não renova" e
+  reabriria os riscos de ressurreição tratados em D15. Rejeitado.
+- Persistir `ExpiraInatividadeEm` em vez de `UltimoUsoEm` + janela: redundante e perde
+  a janela original (exigida pelo CHECK e pela exibição). Rejeitado.
+- Cookie de sessão sem `Expires`: mudaria o comportamento L2 ao fechar o navegador
+  sem pedido da spec. Rejeitado.
+- Ignorar a chave antiga: mudança silenciosa de política de segurança. Rejeitado.
+
+**Sources**: clarificações 2026-11-23 de [spec.md](spec.md) (FR-006, SC-002),
+[Cookie authentication .NET 10](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/cookie?view=aspnetcore-10.0),
+[Options validation](https://learn.microsoft.com/en-us/dotnet/core/extensions/options#options-validation).
+
+### D32 — Migration inicial única regenerada em vez de migration incremental
+
+**Decision**: a L2.1 **regenera** a migration inicial única `EsquemaInicialAcessoTenant`
+(novo timestamp, Designer e snapshot) a partir do modelo completo, em vez de criar uma
+migration incremental. A L3 faz o mesmo para o CHECK de `CodigoPermissao` com hífen
+(revisa D28). A regra vale enquanto não houver publicação com dados (até a primeira
+publicação, L4); a partir dela, toda mudança de esquema é incremental, com upgrade
+validado. Bancos locais A/B e de CI são recriados do zero pelo roteiro existente
+(quickstart §3); um banco local antigo é rejeitado pela readiness/tooling por histórico
+desconhecido, comportamento L2 que permanece e é a evidência de que não há upgrade
+silencioso. GRANTs por tabela continuam emitidos pela própria migration (G6).
+
+**Rationale**: a clarificação de 2026-11-06 estabelece que nada foi publicado, não há
+dados e o esquema é criado por **uma migration inicial única gerada do modelo
+completo**; SC-009 vale para ela. Uma migration incremental criaria um caminho de upgrade
+permanente para um estado que nunca existiu fora de máquinas de desenvolvimento e
+exigiria regra de preenchimento de `UltimoUsoEm`/`JanelaInatividadeMinutos` para linhas
+inexistentes. FR-015 exige atualização de estado anterior "quando existente"; não existe.
+A lógica de tooling que aceita prefixo da cadeia continua coberta pelos testes atuais
+com cadeias sintéticas.
+
+**Alternatives considered**:
+- Migration incremental `SessaoInatividadeTeto` (e `PermitirHifenCodigoPermissao` na L3):
+  contraria a clarificação de 2026-11-06 e adiciona backfill sem dado real. Rejeitada.
+- Antecipar o CHECK com hífen para a regeneração da L2.1: mistura escopo da L3 (id de
+  módulo) num recorte de regressão; regenerar de novo na L3 é barato. Rejeitada.
+
+**Risco**: perder a "primeira prova de upgrade" prevista em D28. Mitigação: a prova de
+upgrade real passa a ser critério da primeira mudança de esquema após a publicação (L4).
+
+### D33 — Registro de uso da sessão, limitação de gravação e concorrência
+
+**Decision**:
+- **Requisição autenticada aceita**: requisição a operação protegida por sessão
+  (`/me`, `/context` e, na L3, rotas de módulos) que passou por tenant, marcador,
+  sessão válida, instalação ativa, CSRF (métodos não seguros) e autorização e chegou ao
+  handler. Respostas do próprio handler (inclusive 400/422 de regra) contam como uso.
+  As revalidações da interface por carga, foco/visibilidade ou navegação (`GET /me`,
+  D36) são requisições aceitas comuns e renovam a inatividade (clarificação 2026-11-24);
+  o servidor não as distingue, e a interface só as dispara nesses eventos, nunca por
+  temporizador. Não renovam: qualquer negação antes do handler (400/401/403/409/429/503), login (cria a
+  sessão com `UltimoUsoEm = CriadoEm`), logout (revoga), GET antiforgery,
+  `GET /api/v1/tenant`, health, OpenAPI e arquivos da interface.
+- **Onde**: filtro de endpoint `FiltroRegistroUsoSessao` (App.Api) aplicado ao grupo de
+  rotas protegidas, executado depois da autorização e antes do handler, chamando
+  `CasoUsoRegistrarUsoSessao` (Application) sobre a porta de sessões. A validação de
+  sessão no Retrieve (que roda antes da autorização) não grava nada.
+  **Ordem (G31, 2026-11-24)**: o estado da instalação e a permissão, na L2 verificados
+  dentro dos casos de uso, passam a filtros de endpoint executados antes do registro de
+  uso: autorização de recurso próprio → `FiltroInstalacaoAtiva` (409
+  `TENANT_UNAVAILABLE`) → `FiltroExigirPermissao(codigo)` (403, quando exigida, como em
+  `/context`) → `FiltroRegistroUsoSessao` → handler. Os casos de uso mantêm as mesmas
+  verificações (defesa em profundidade, mesma resposta). 400 `INPUT_INVALID` do filtro de
+  validação e 400 `CSRF_INVALID`, emitidos antes do handler, não renovam; 400/422
+  devolvidos pelo próprio handler renovam.
+- **Limitação de frequência**: grava `UltimoUsoEm = InstanteOperacao` somente se
+  `InstanteOperacao − UltimoUsoEm ≥ 60 s` (constante `IntervaloMinimoRegistroUso`, não
+  configurável) — no máximo uma escrita por minuto por sessão. Escrita por entidade
+  rastreada com `Versao` esperada (sem `ExecuteUpdate`); o `InterceptadorAuditoria`
+  incrementa `Versao` e preenche `AlteradoEm`/`AlteradoPor` com a conta da sessão (D20).
+- **Concorrência**: conflito de `Versao` no registro de uso é descartado sem repetição —
+  outra requisição já registrou uso, ou a sessão foi revogada, e a próxima requisição
+  reavalia; o handler da requisição atual prossegue, pois ela já foi aceita com sessão
+  válida. Falha de dependência ao gravar → 503 `DEPENDENCY_UNAVAILABLE` sem executar o
+  handler. Revogações (logout, revogação de todas as sessões da conta por reset,
+  desativação, bloqueio ou procedimento operacional, e a troca no login) que encontrarem
+  conflito de `Versao` recarregam a sessão: se ela continua ativa e só `UltimoUsoEm`
+  mudou, repetem até 3 vezes; se foi revogada, vale a regra L2 de disputa real (login →
+  409 `SESSION_CONFLICT`; demais → comportamento atual). Esgotadas as tentativas → 503
+  sem confirmar. Assim um registro de uso nunca derruba nem confunde uma revogação, e
+  nunca reativa sessão revogada (a escrita exige a `Versao` lida com a sessão ativa).
+- **Tolerância introduzida**: o uso real pode ocorrer até 60 s depois do último uso
+  gravado. Logo, a sessão é negada **no máximo** `janela` após a última requisição
+  aceita (nunca depois — direção segura) e **nunca antes** de `janela − 60 s`.
+  Consequências para os testes (relógio controlado):
+  - testes de fronteira usam intervalos ≥ 60 s entre usos (todo uso grava), o que torna
+    os limites exatos: último uso + 29:59 aceita; + 30:00 nega;
+  - teste dedicado da limitação: uso a +30 s não grava (`UltimoUsoEm` e `Versao`
+    inalterados) e a expiração conta do último uso gravado; uso a +60 s grava;
+  - o cenário SC-002 "uso a intervalos menores que 30 min" é exercitado com intervalos
+    de 29 min e de 1 min até o teto (600 min: 599:59 aceita, 600:00 nega mesmo em uso).
+  O caso residual — usos intermediários não gravados seguidos de intervalo entre 29 e
+  30 min — pode negar até 60 s antes; aceito pela spec (FR-006/SC-002, clarificação 2026-11-24).
+
+**Rationale**: gravar em toda requisição dobraria as escritas, faria requisições
+paralelas da mesma aba (`/me` + `/context`) disputarem `Versao` e aumentaria conflitos
+com revogações e com a troca de sessão no login. Uma escrita por minuto mantém o custo
+desprezível e a imprecisão sempre a favor da segurança.
+
+**Alternatives considered**: gravar sempre (conflitos e ruído de auditoria);
+`ExecuteUpdate` condicional (proibido por D19/D20 em entidade auditável); intervalo
+configurável (sem necessidade e amplia a matriz de testes); conceder 60 s extras na
+verificação (violaria "30 min sem uso nega"); registrar uso no Retrieve (renovaria
+requisições negadas por autorização ou instalação inativa); revalidação da interface por
+verificação que não registra uso (endpoint ou cabeçalho próprio: mais contrato e testes
+para eventos que já são ação humana — rejeitada na clarificação de 2026-11-24).
+
+### D37 — Motivo da negação de sessão só no log (2026-11-24)
+
+**Decision**:
+- **Resposta inalterada**: toda negação por sessão inválida continua 401
+  `AUTH_REQUIRED` genérico, sem campo, cabeçalho ou texto que indique o motivo. Contrato
+  e `openapi.json` não mudam.
+- **Motivo categorizado** (enum `MotivoNegacaoSessao` em Application): `Inatividade`
+  (`agora ≥ UltimoUsoEm + janela`, antes do teto), `TetoAbsoluto` (`agora ≥ TetoAbsolutoEm`;
+  prevalece se ambos), `Revogada` (`RevogadaEm` preenchida), `Invalida` (cookie presente
+  mas ilegível, ticket inexistente, conta bloqueada/desativada, stamp ou epoch divergente,
+  instalação de origem diferente, ou sessão alterada entre a validação e o caso de uso) e
+  `Ausente` (operação protegida sem cookie de sessão).
+- **Onde**: `ValidacaoSessaoAtual` devolve o motivo junto do resultado; o
+  `ArmazenamentoTicketsSessao` (Retrieve) o guarda num serviço scoped da requisição
+  (`IContextoNegacaoSessao`); casos de uso que devolvem `AUTH_REQUIRED` por mudança
+  posterior registram `Invalida`. O ponto único que escreve o 401 de sessão
+  (`OnRedirectToLogin` e o mapeamento de `AUTH_REQUIRED` dos casos de uso) emite o log.
+  Login (`AUTH_INVALID`) e o pedido de sair seguem os registros atuais; logout com 401
+  também registra o motivo.
+- **Registro**: `EventId(1002, "SessaoNegada")`, nível `Information`, mensagem com
+  `Motivo`, `TraceId` (o mesmo da resposta) e `IdOperacao`. **Nunca** inclui id da
+  sessão, ticket, cookie, id ou email da conta, IP ou caminho com dados.
+- **Testes**: integração com `CapturaLogs` (já existente) para os cinco motivos com relógio
+  controlado; cada um verifica o `EventId`, o motivo, que o `TraceId` do log é igual ao da
+  resposta e que a resposta (status, cabeçalhos e corpo, exceto `traceId`) é idêntica nos
+  cinco casos;
+  verificação negativa de que nenhum valor de cookie, id de sessão ou de conta aparece no
+  log capturado.
+
+**Rationale**: o suporte recebe o código de referência mostrado pela interface e precisa
+explicar por que a sessão caiu (NFR-006); expor o motivo ao cliente não muda o
+comportamento da interface (mesmo diálogo) e revelaria estado da conta, como revogação pelo
+operador.
+
+**Alternatives considered**: motivo na resposta (`reason`) com mensagem específica na
+interface (informação de conta a quem tem só o cookie; mais contrato e estados na UI);
+nenhum registro (investigação impossível); nível `Warning` (expiração é evento normal e
+geraria ruído); incluir id da conta (não necessário para correlacionar, já há `TraceId`, e
+amplia dados pessoais em log).
+
+## Revisão L3 — 2026-11-23
+
+Base: L2 entregue e validada. Decisões abaixo incorporam as clarificações de
+2026-11-22 e 2026-11-23 da [spec](spec.md) e prevalecem sobre D04/D09/D12 no que
+divergirem. D01 permanece como registro histórico; os pins do frontend são os de D24.
+
+### D22 — Interface servida pela API
+
+**Decision**: o build do Vite é copiado para `wwwroot/` da imagem da API por um estágio
+Node no `Dockerfile.api`; a API serve arquivos estáticos e um fallback restrito
+`{*path:nonfile}` para `index.html`, depois de todas as rotas. `/api/*`, `/openapi/*` e
+`/health*` nunca caem no fallback (404 Problem Details). Arquivo com extensão inexistente
+→ 404, para que falha de chunk seja detectável. Em Production, ausência de `index.html`
+ou do `buildId` impede a inicialização; em Development/Testes a API inicia e navegações
+recebem 404 JSON. Em desenvolvimento, `vite dev` encaminha `/api`, `/openapi` e
+`/health` ao backend (mesma origem vista pelo navegador, cookies `bps-*` em localhost).
+
+**Rationale**: mesma origem real sem CORS, uma stack por tenant (Constituição IV),
+cookie `__Host-` e CSRF já desenhados na L2. Arquivos com ponto (`.vite/`) são excluídos
+pelo provedor físico padrão.
+
+**Alternatives considered**: Nginx/serviço estático por instalação (serviço extra e
+configuração de proxy por tenant); CDN/origem separada (CORS e cookies cross-site);
+fallback para qualquer caminho (mascararia 404 de API e de chunks).
+
+### D23 — Identidade pública do tenant e `buildId`
+
+**Decision**: `GET /api/v1/tenant`, anônima, sem `X-Tenant-Id`, sem lookup de sessão,
+devolve `{ id, displayName, buildId }` quando configuração e marcador conferem
+(instalação ativa **ou** inativa); senão 503 genérico. `buildId` = 32 hex iniciais do
+SHA-256 sobre o conteúdo das fontes do frontend (`src/**`, `index.html`, lockfile e
+configuração do Vite), calculado por um plugin local antes do bundle, injetado como
+constante e gravado em `.vite/id-build.txt`; a API lê esse arquivo na inicialização.
+Sem build: `sem-interface`, e a interface em `import.meta.env.DEV` não compara.
+A interface consulta somente em eventos (carga, foco/visibilidade, navegação).
+
+**Rationale**: o frontend precisa do tenant antes de chamar rotas que exigem
+`X-Tenant-Id`, sem variável de ambiente nem bundle por tenant. Hash de conteúdo é
+determinístico e opaco (não é versão, commit, data ou ambiente). Não revelar
+ativa/inativa a anônimos evita sondagem de estado comercial.
+
+**Alternatives considered**: tenant em `VITE_*` (bundle por instalação, viola a
+clarificação); `<meta>` gerada por instalação (HTML dinâmico); `applicationVersion`
+de `/context` (exige sessão e não identifica o build da interface); UUID aleatório por
+build (não reprodutível); limitador próprio na rota (risco baixo, NAT corporativo
+poderia bloquear usuários legítimos; borda na L4).
+
+### D24 — Stack do frontend e pins reverificados (2026-11-23)
+
+**Decision**: pins exatos (registro npm consultado em 2026-11-23): React/DOM 19.3.1,
+React Router 8.5.2 (pacote `react-router`, modo declarativo), Vite 8.3.8,
+`@vitejs/plugin-react` 6.3.0, Tailwind/`@tailwindcss/vite` 4.3.5, **TypeScript 6.0.3**,
+ESLint 10.15.0 + `typescript-eslint` 8.74.0 + `eslint-plugin-react-hooks` 7.1.1,
+Prettier 3.10.1, Vitest 5.1.1 + jsdom 31.0.1, Testing Library React 16.3.3/DOM 10.4.2/
+user-event 14.6.13, Playwright 1.65.1, `@axe-core/playwright` 4.14.0. Node 24.22.3 LTS
+(`.nvmrc`, `engines`, imagem Node com digest registrado).
+
+**Rationale**:
+- TypeScript 7.0.2 (D01) não é aceito por `typescript-eslint` 8.74.0 (peer
+  `typescript <6.1.0`); lint com informação de tipos é exigido (FR-027). 6.0.3 é a
+  última estável compatível.
+- `eslint-plugin-jsx-a11y` 6.10.2 não declara suporte a ESLint 10; acessibilidade é
+  garantida por axe nos E2E (bloqueante, NFR-011), consultas por papel/rótulo no
+  Testing Library e revisão. Reavaliar quando houver versão compatível.
+- React Router 8 é a linha corrente (exige React ≥19.2.7 e Node ≥22.22); 7.x recebe
+  só correções. Justificado por URLs, deep links, back/forward e página não encontrada (D09).
+- jsdom 31 exige Node ≥24.15; Vitest 5.1 e Vite 8 aceitam Node 24.
+- Prettier aplica a convenção de formatação por ferramenta (Constituição IX), como
+  `dotnet format` no backend.
+
+**Alternatives considered**: TypeScript 7 sem lint com tipos (perde regras estritas);
+duas versões de TypeScript (complexidade); ESLint 9.39.5 para manter jsx-a11y (linha
+anterior); happy-dom (menor fidelidade); Cypress (sem vantagem sobre Playwright, que
+já fornece Chromium e integração axe).
+
+**Sources**: `registry.npmjs.org/<pacote>` (`peerDependencies`, `engines`, `time`),
+[Node.js releases](https://nodejs.org/dist/index.json).
+
+### D25 — Estado no cliente, multi-aba, revalidação e atualização
+
+> **Revisada por [D35](#d35--nova-entrada-no-próprio-local-e-estado-preservado-revisa-d25)
+> e [D36](#d36--várias-abas-e-recarga-única-sem-armazenamento-revisa-d25) (2026-11-24)**:
+> 401 deixa de descartar o estado (nova entrada no próprio local), o aviso entre abas
+> passa a ser só de logout explícito e o marcador em `sessionStorage` é removido.
+> Permanecem: sem biblioteca de estado, `ClienteApi` sobre `fetch`, sem retentativa
+> automática, revalidação por eventos e comparação de `buildId`.
+
+**Decision**: sem biblioteca de estado/consultas. `ClienteApi` sobre `fetch`
+(`credentials: 'same-origin'`, `X-Tenant-Id`, CSRF, parse de Problem Details para
+categorias) e um provedor React com máquina de estados explícita
+(`carregando`, `indisponivel`, `anonimo`, `autenticado`, `semPermissaoContexto`,
+`empresaIndisponivel`, `sessaoEncerrada`). Cache somente em memória da aba; descartado
+no logout, em 401 e no aviso de outra aba. Sem retentativa automática. Multi-aba por
+`BroadcastChannel('bps-sessao')` com mensagem só de tipo (`sessao-encerrada`); fallback
+pela revalidação de `/me` no foco/visibilidade e pela próxima chamada negada. Nova
+versão por comparação de `buildId`; falha de chunk (`vite:preloadError`) → uma recarga,
+guardada por `sessionStorage['bps-recarga'] = buildId` (removido após carga
+bem-sucedida). Esse marcador não contém dado de conta, contexto ou empresa (NFR-012).
+
+**Rationale**: quatro leituras e duas escritas, sem dados de negócio; requisitos
+exigem justamente desligar recursos típicos das bibliotecas (retry, persistência, cache
+entre telas). Menos dependências e bundle menor (NFR-013).
+
+**Alternatives considered**: TanStack Query (revalidação no foco pronta, mas exige
+desligar retry/cache e adiciona dependência sem necessidade presente; reavaliar no
+primeiro módulo de negócio com telas de dados); evento `storage` via `localStorage`
+(grava no armazenamento, vedado); service worker (vedado); timer de expiração (vedado).
+
+### D26 — CSP, estilos, cabeçalhos, cache, acessibilidade e idioma
+
+**Decision**: CSP `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self';
+font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self';
+frame-ancestors 'none'` em todas as respostas; `nosniff`; `Referrer-Policy: no-referrer`.
+Tailwind v4 via plugin Vite gera CSS em arquivo; nenhuma biblioteca que injete estilos
+em runtime; prop `style` proibida por regra de lint (`no-restricted-syntax`).
+`/assets/*` imutável por um ano; `index.html` e toda resposta da API `no-store`.
+pt-BR fixo (`<html lang="pt-BR">`), WCAG 2.1 AA: rótulos, foco visível, ordem de
+tabulação, erros e carregamento anunciados, contraste verificado por axe. E2E falha com
+violação séria/crítica do axe ou com mensagem de CSP no console.
+
+**Rationale**: atende NFR-012 sem nonce (SPA estática servida igual a todos). HSTS
+depende de HTTPS publicado (L4).
+
+**Alternatives considered**: nonce por requisição (exigiria HTML dinâmico);
+`style-src 'unsafe-inline'` (rejeitado na clarificação); UI kits com CSS-in-JS.
+
+### D27 — Composição de módulos em compilação e catálogo efetivo
+
+**Decision**: projeto `Platform.Modulos` (abstração `IModulo`, `DeclaracaoModulo`,
+`ContratoModulo`, `DependenciaContrato`, `ValidadorComposicaoModulos`,
+`CatalogoPermissoesEfetivo : ICatalogoPermissoes`, `ExcecaoComposicaoModulos`,
+contrato `foundation.autorizacao` v1) e projeto `App.Composicao` com a lista única de
+módulos (vazia na base). `App.Api` e `Platform.Operations` registram os módulos por
+`App.Composicao`; a validação roda após o `Build()` e falha a inicialização. Cada módulo
+= `<Modulo>.Contratos` (declaração estática e contratos) + `<Modulo>` (implementação).
+Endpoints em `/api/v1/modules/{idModulo}/…`, fora da descrição OpenAPI. Imagem
+`operations` passa à base `aspnet:10.0.12` porque `Platform.Modulos` referencia o
+framework ASP.NET Core; o host continua sem Kestrel (teste de arquitetura).
+
+**Rationale**: uma única lista garante o mesmo catálogo de permissões na API e no
+operador (concessão rejeita código fora do catálogo efetivo). Prefixo `/modules/` evita
+colisão de id de módulo (ex.: `me`) com rotas da fundação. Validação após o `Build()`
+permite que o host de testes acrescente o módulo sintético.
+
+**Alternatives considered**: descoberta por reflexão/plugins em diretório (seleção em
+runtime, vedada); feature flags por configuração (vedado na L3); declaração sem
+ASP.NET + segunda lista de implementações na API (dois pontos de edição);
+`/api/v1/{idModulo}` (colisão com rotas da fundação).
+
+### D28 — Código de permissão com hífen e concessões inertes
+
+> **Revisada por [D32](#d32--migration-inicial-única-regenerada-em-vez-de-migration-incremental)
+> (2026-11-24)**: o novo CHECK entra na **migration inicial única regenerada** da L3, não em
+> uma migration aditiva `PermitirHifenCodigoPermissao`. Formato, catálogo efetivo e
+> concessões inertes permanecem como abaixo.
+
+**Decision**: formato `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9]*)+$`, ≤128, em
+`CodigosPermissao.PadraoFormato` e no CHECK, por migration aditiva
+`PermitirHifenCodigoPermissao`. Validada em banco novo e em upgrade de banco L2
+(cadeia de duas migrations, tooling com prefixo válido). Conceder exige código no
+catálogo efetivo; revogar aceita código de formato válido existente na conta, mesmo
+fora do catálogo, com auditoria normal. Concessões inertes não autorizam, não aparecem
+em `/context` e não são apagadas automaticamente.
+
+**Rationale**: id de módulo admite hífen (clarificação 2026-11-23) e o código de
+permissão começa pelo id. O CHECK L2 (G7) rejeitaria `meu-modulo.x.ler`. Sem revogação
+de inertes o operador não conseguiria limpá-las.
+
+**Alternatives considered**: proibir hífen no id (contraria a spec); reescrever a
+migration inicial (quebra bancos L2 validados e perde a primeira prova de upgrade);
+apagar concessões ao omitir módulo (vedado pela spec).
+
+### D29 — OpenAPI só da fundação, contratos de módulos e variantes SC-004
+
+**Decision**: o grupo de módulos usa `ExcludeFromDescription`; teste compara o
+`/openapi/v1.json` servido nas variantes sem/com módulo (igualdade após normalização).
+Contratos de módulo ficam em `contracts/openapi.json` dentro da pasta do módulo.
+Módulo sintético em `backend/tests/Modules/Teste.ModuloSintetico` e
+`Teste.ModuloSintetico.Contratos`: id `teste-sintetico`, permissão
+`teste-sintetico.eco.ler`, dependência de `foundation.autorizacao` v1, operação
+`GET /api/v1/modules/teste-sintetico/eco`. Registrado somente pela fábrica de testes.
+“Solução e imagem distribuídas” = projetos de `backend/src/**`, saída de
+`dotnet publish` e imagens `api`/`operations` (verificados no CI por grafo de
+referências e listagem da imagem); o projeto sintético pode constar da `.slnx` sob a
+pasta de testes (gate Q0 item 4).
+
+**Rationale**: a instância não anuncia superfície de módulos a anônimos; o OpenAPI
+idêntico prova que a fundação não muda com módulos.
+
+**Alternatives considered**: documento por módulo servido pela instância (revela
+módulos anonimamente); filtrar por tag (frágil).
+
+### D30 — Testes/CI do frontend, orçamento e SC-001 automatizado
+
+**Decision**: workflow `frontend-ci.yml` com permissões mínimas e ações por SHA:
+`npm ci`, `prettier --check`, ESLint, `tsc --noEmit`, Vitest, `vite build`, orçamento
+(script local sem dependência: soma gzip da entrada e imports estáticos pelo
+`.vite/manifest.json`; limite em `frontend/orcamento.json`, 200 KiB = 204 800 bytes),
+`npm audit --audit-level=high` e Gitleaks também sobre `frontend/` e o `dist`. Job E2E:
+executa o roteiro de `infra/scripts/` (mesmos comandos do quickstart: `.env.local`
+sintético, bancos do zero, migrations, contas via `operations`, Compose com a API
+servindo a interface) e `npx playwright test` em Chromium; registra duração e falha
+acima de 45 min (SC-001). Estados difíceis de produzir na stack real (500 inesperado,
+falha de rede, chunk ausente) usam `page.route`; os demais usam o backend real
+(revogação via operador, instalação inativa por reinício com `EstadoTenant=Inativo`,
+429 por seis logins). Execução manual SC-001: uma pessoa que não escreveu o guia,
+registro de tempo, revisão e dúvidas em `tasks.md`.
+
+**Rationale**: FR-027 torna todos bloqueantes; SC-001 exige roteiro idêntico ao guia.
+
+**Alternatives considered**: E2E contra `vite dev` (não testa CSP/cache/fallback da
+API); bundlesize/size-limit (dependência para uma soma simples).
+
+### D34 — Descrição pt-BR das permissões declarada em código
+
+**Decision**: toda permissão (fundação e módulos) é uma `DefinicaoPermissao(Codigo,
+Descricao)` declarada em código. Fundação: `CodigosPermissao.Definicoes`
+(`foundation.context.read` → "Consultar o próprio contexto de acesso"); módulos:
+`DeclaracaoModulo.Permissoes` passa de lista de códigos a lista de definições.
+`Descricao`: texto pt-BR de 1 a 200 caracteres, sem espaços nas pontas e sem caracteres
+de controle. `ValidadorComposicaoModulos` rejeita descrição ausente/inválida com o código
+`PERMISSAO_DESCRICAO_INVALIDA`, **inclusive para a fundação**, na inicialização dos dois
+hosts e nos testes de arquitetura. `GET /api/v1/context` ganha o campo aditivo
+`permissionDetails: [{ code, description }]`, ordenado por `code`, com exatamente as
+permissões efetivas de `permissions` (inertes omitidas); `permissions` (lista de códigos)
+é mantido para compatibilidade. A interface mostra descrição e código a partir de
+`permissionDetails` e não tem tabela própria. Descrições não são persistidas; a
+qualidade do texto pt-BR é verificada em revisão (não automatizável).
+
+**Rationale**: a descrição nasce junto do código que a define, fica igual na API e no
+operador e some com o módulo omitido. Campo novo preserva o consumidor L2 (NFR-010).
+
+**Alternatives considered**: transformar `permissions` em objetos (quebra o consumidor
+L2); operação de catálogo completo (revelaria permissões de módulos a quem não as tem);
+tabela de descrições na interface (vedado pela spec); tabela no banco (dado de código,
+ficaria órfão ao omitir módulo).
+
+### D35 — Nova entrada no próprio local e estado preservado (revisa D25)
+
+**Decision**: continua **sem biblioteca de estado/consultas**. A preservação usa o
+próprio React:
+- **Estado novo `reautenticando`** no provedor de sessão. Entra quando uma chamada de
+  aba autenticada (`autenticado`, `semPermissaoContexto`) recebe 401 `AUTH_REQUIRED`
+  (sessão expirada por inatividade ou teto, revogada ou ausente), inclusive na
+  revalidação de foco. **Exceção** (clarificação 2026-11-24): 401 no pedido de sair
+  conclui a saída localmente (descarta, `/entrar` com aviso, avisa as outras abas) e não
+  abre o diálogo. Guarda em memória o `id` da conta e o tenant.
+- **Conteúdo escondido, estado mantido**: a árvore protegida **permanece montada**
+  (estado local dos componentes intacto) dentro de um contêiner com `hidden` e `inert`;
+  nada protegido fica visível nem acessível por leitor de tela. O diálogo é um
+  `<dialog>` nativo aberto com `showModal()` (camada superior, fundo inerte, foco preso,
+  sem estilo inline — compatível com a CSP). O evento `cancel` (Esc) é bloqueado: o
+  diálogo só fecha por nova entrada ou por "Sair". Ao abrir, foco no primeiro campo; ao
+  fechar com restauração, foco volta ao elemento que o tinha (ou ao título da tela). O
+  email não é pré-preenchido (o diálogo não exibe dado da conta encerrada).
+- **Fila no `ClienteApi`**: leituras (`GET`) negadas por 401 ficam pendentes (promessa
+  não resolvida) e são repetidas automaticamente após restauração pela mesma conta;
+  gravações (métodos não seguros, exceto o pedido de sair) negadas por 401
+  são rejeitadas com `ErroGravacaoNaoEnviada` e **nunca** reenviadas — o chamador mostra
+  "A ação não foi concluída. Repita após entrar." Vários 401 simultâneos abrem um único
+  diálogo.
+- **Depois do login no diálogo** (`GET antiforgery` → `POST /sessions` → `GET /me`):
+  mesmo `id` de conta → fecha o diálogo, remove `hidden`/`inert`, repete as leituras
+  pendentes e revalida `/context` (permissões podem ter mudado); outra conta → descarta
+  todo o estado (remonta a árvore com nova chave, rejeita a fila) e vai a `/contexto` da
+  nova conta. "Sair" no diálogo → descarta todo o estado e vai a `/entrar`, sem pedido
+  ao servidor (a sessão já é inválida) e sem aviso a outras abas (D36). Erros do login no
+  diálogo seguem as categorias da tela de entrada; empresa inativa após a nova entrada
+  (`/me` 409) → estado "empresa indisponível", somente sair.
+- **Proibições mantidas**: nada em `localStorage`/`sessionStorage`/IndexedDB/cookies
+  legíveis por script; sem temporizador de expiração, sem requisição periódica, sem
+  login silencioso. O estado se perde ao fechar a aba.
+
+**Rationale**: manter a árvore montada é a forma mais simples de preservar **todo** o
+estado da aba (inclusive formulários de módulos futuros) sem serializar nada; `<dialog>`
+nativo entrega foco preso e fundo inerte exigidos por WCAG sem dependência. A fila separa
+leitura (idempotente, pode repetir) de gravação (nunca reenviada), como exige FR-004.
+
+**Alternatives considered**: TanStack Query (guarda dados de consulta, mas não o estado
+local de componentes, exigiria desligar retry/refetch e acrescenta ~13 KB gzip;
+mutações já não seriam repetidas sem ela; reavaliar no primeiro módulo de negócio);
+desmontar a árvore e guardar só um store global (perde estado local); redirecionar a
+`/entrar` com retorno (vedado: destino vindo da URL e perda de estado); biblioteca de
+modal/foco (`focus-trap`, Radix) — desnecessária com `<dialog>` nos navegadores suportados.
+
+### D36 — Várias abas e recarga única sem armazenamento (revisa D25)
+
+**Decision**:
+- **Aviso entre abas só no logout explícito**: `BroadcastChannel('bps-sessao')` com
+  `{ "tipo": "logout" }` (sem dados), enviado somente no logout explícito:
+  `DELETE /sessions/current` 204 ou 401 (sessão já inválida, saída concluída localmente,
+  clarificação 2026-11-24). Abas que recebem descartam o estado e vão a `/entrar`.
+  Expiração, revogação e "Sair" do diálogo de nova entrada **não** avisam: cada aba trata
+  a própria sessão.
+- **Revalidação no retorno de foco/visibilidade** (e na navegação), uma por vez, sem
+  polling: `GET /api/v1/tenant` (`buildId`) e, em estado autenticado ou
+  `reautenticando`, `GET /api/v1/me`. Resultado: 200 mesma conta → em `reautenticando`
+  restaura sem diálogo (nova entrada feita em outra aba; o cookie é compartilhado) e
+  repete leituras pendentes; 200 outra conta → descarta e vai a `/contexto` da nova
+  conta; 401 → `reautenticando` (diálogo). A revalidação de foco que obtém 200 conta como
+  uso (D33): é disparada por ação do usuário, não por temporizador.
+- **Recarga única sem armazenamento**: em `vite:preloadError`, recarrega somente se a
+  navegação atual **não** for ela própria uma recarga
+  (`performance.getEntriesByType('navigation')[0].type !== 'reload'`); caso contrário,
+  tela de indisponibilidade com "Recarregar" manual. Em `reautenticando`, a recarga
+  automática é suspensa (perderia o estado preservado) e aparece o aviso de nova versão.
+  Remove o marcador `sessionStorage['bps-recarga']`: a interface não grava **nada** no
+  armazenamento do navegador, e o E2E verifica `localStorage`, `sessionStorage` e
+  IndexedDB vazios ao fim das jornadas.
+
+**Rationale**: a spec passou a proteger o trabalho das outras abas na expiração; só a
+saída explícita é decisão do usuário que vale para todas. O tipo de navegação do
+navegador impede laço sem gravar marcador.
+
+**Alternatives considered**: evento `storage` (grava armazenamento); marcador na URL
+(`?recarga=1`, polui histórico e mistura URL com estado); manter `sessionStorage` com o
+`buildId` (permitido pela NFR-012, mas desnecessário e contraria a orientação de não
+gravar nada no navegador).
+
+### D38 — Conflito de sessão no diálogo de nova entrada (2026-11-24)
+
+**Decision**: no estado `reautenticando`, se `POST /sessions` responder 409
+`SESSION_CONFLICT` (duas abas fizeram a nova entrada ao mesmo tempo sobre a mesma sessão
+anterior), o provedor faz **uma única** `GET /api/v1/me`, sem novo token antiforgery e sem
+reenviar o login:
+- 200 mesma conta → restaura sem diálogo, como a revalidação de foco (D36): fecha o
+  diálogo, devolve o foco, repete leituras pendentes e revalida `/context`;
+- 200 outra conta → descarta todo o estado e vai a `/contexto` da nova conta;
+- 401 → o diálogo permanece com a mensagem de conflito ("Não foi possível concluir a
+  entrada. Tente novamente."), campos de senha limpos, nova tentativa só manual;
+- 409 `TENANT_UNAVAILABLE` → "empresa indisponível", só sair;
+- falha de rede/503 → o diálogo permanece com a mensagem de indisponibilidade e
+  referência, sem nova tentativa automática.
+A revalidação é a mesma função usada no retorno de foco (no máximo uma em andamento). Na
+tela de entrada (sem estado preservado), o 409 continua só com a mensagem e nova
+tentativa manual.
+
+**Rationale**: o caso comum é a outra aba já ter criado sessão válida da mesma conta
+(cookie compartilhado); uma leitura resolve sem repetir credenciais nem substituir de novo a
+sessão recém-criada.
+
+**Alternatives considered**: manter só a mensagem e esperar o próximo foco (o usuário
+digitaria a senha de novo e substituiria a sessão da outra aba); repetir o login com as
+credenciais digitadas (credencial mantida em memória além do envio e reenvio automático
+vedado por FR-004).
+
+## Fechamento da pesquisa L3
+
+Não há `NEEDS CLARIFICATION`. Pendências de implementação, não de design: aprovação
+das dependências e do pin TypeScript (gate Q0), ADRs 0004/0005 e confirmação da
+interpretação de “solução distribuída” em SC-004 (D29). A L3 só começa após o aceite da
+L2.1 (D31–D33 e D37); D34–D36 e D38 prevalecem sobre D25/D28 no que divergirem.

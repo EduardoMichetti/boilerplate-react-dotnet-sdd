@@ -23,20 +23,82 @@ Essa separação não adia os controles constitucionais aplicáveis ao backend:
 execução local por Docker Compose, testes de persistência/isolamento e checks mínimos
 de integração continuam obrigatórios.
 
-**Recorte vigente L2/I2**: planejamento sobre a L1/I1 entregue, sem reabrir seu
-histórico. L2 cobre entrada/saída HTTP, sessões revogáveis locais, consulta da
-própria identidade/contexto e manutenção restrita de contas/permissões com
-auditoria. Não inclui frontend, painel, módulo de negócio ou publicação real.
-SC-002/SC-003/SC-005 definem o aceite funcional da L2; SC-006/SC-008 acompanham
-os controles aplicáveis, e SC-009 permanece regressão da base, aplicada à migration
-inicial única do modelo completo (construção do zero, sem dados a preservar).
-Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
+**Recorte vigente L3/I3**: planejamento sobre a L2/I2 entregue e validada
+(quickstart §1–§7, CI verde), sem reabrir o histórico de L1/L2 em tasks.md.
+L3 cobre a interface web de acesso ao tenant (FR-004) e a extensão modular
+(FR-017 a FR-019). SC-001 e SC-004 definem o aceite da L3; SC-002/SC-003/SC-005/SC-009
+e os critérios de aceite da L2 permanecem como regressão obrigatória, e
+SC-006/SC-008 acompanham os controles aplicáveis, agora incluindo o frontend.
+Não inclui painel administrativo, menus ou módulos de negócio, troca de senha pelo
+próprio usuário, recuperação por email/token, nem publicação real;
+publicação/recuperação (Dokploy/VPS, backups, restauração) continuam L4/I4.
+
+**Prioridade antes da L3 (reabertura da L2)**: o modelo de sessão passa a combinar
+expiração por inatividade e teto absoluto (FR-006, sessão de esclarecimentos de
+2026-11-23). Essa alteração da L2 (backend, persistência, SC-002 e testes de regressão)
+DEVE ser planejada, implementada e validada antes de iniciar a L3 ou qualquer outra
+estratégia; a nova entrada no próprio local (FR-004) pertence à L3 e depende dela.
 
 ## Clarifications
 
+### Session 2026-11-24
+
+- Q: Para não gravar no banco a cada requisição, o último uso da sessão pode ser gravado no máximo 1 vez por minuto, o que pode expirar a sessão até 60 s antes dos 30 min de inatividade (nunca depois). O SC-002 aceita essa tolerância? → A: Sim. A negação por inatividade ocorre no máximo no fim da janela contada da última requisição autenticada aceita e nunca antes da janela menos 60 segundos; o registro de uso é gravado no máximo uma vez por minuto por sessão.
+- Q: Quando o usuário pede para sair e a API responde que a sessão já estava expirada ou revogada (401), o que a interface faz? → A: Conclui a saída localmente: descarta todo o estado da aba, vai à entrada com aviso de sessão encerrada e avisa as demais abas como logout explícito. Não abre o diálogo de nova entrada.
+- Q: Quais requisições contam como "requisição autenticada aceita" para renovar a inatividade? → A: As que passaram por sessão válida, instalação ativa, CSRF e permissão e chegaram à operação protegida, mesmo que a operação recuse a entrada (400/422). Negações de acesso (401/403/409/429/503, CSRF inválido), login, logout, token CSRF, identidade pública do tenant, health, documento de contrato e arquivos da interface não renovam.
+- Q: Um produto derivado que ainda tenha configurada a chave antiga de prazo absoluto único deve ter qual comportamento ao iniciar a API? → A: Com valor preenchido, a API não inicia e o diagnóstico indica as duas configurações novas (inatividade e teto); valor vazio é tratado como ausente.
+- Q: Como nada foi publicado, as mudanças de esquema da L2.1 (sessão) e da L3 (permissões) regeneram a migration inicial única ou criam migrations incrementais? → A: Regeneram a migration inicial única enquanto não houver publicação com dados (até a L4), recriando bancos locais e de CI; "versão anterior suportada" significa versão publicada. Após a primeira publicação, só migrations incrementais com upgrade validado.
+- Q: As revalidações automáticas da interface ao ganhar foco, ficar visível ou navegar (`GET /api/v1/me`) devem renovar a janela de inatividade da sessão? → A: Sim. São requisições autenticadas aceitas como qualquer outra (evento sempre disparado por ação humana, sem polling); renovam a inatividade e nunca o teto absoluto.
+- Q: Se duas abas fizerem a nova entrada no próprio local ao mesmo tempo e uma receber "conflito de sessão" (409), o que a aba perdedora deve fazer? → A: Uma única revalidação da identidade (`/me`) logo após o 409: mesma conta válida restaura a aba sem diálogo; outra conta descarta o estado; sessão inválida mantém o diálogo com a mensagem de conflito. O login nunca é repetido automaticamente.
+- Q: Quando a sessão é negada (401), o backend deve registrar o motivo (inatividade, teto, revogação, ausente) e a API deve expô-lo à interface? → A: Somente no log. A resposta continua genérica (`AUTH_REQUIRED`); o log do backend registra o motivo categorizado (inatividade, teto absoluto, revogada, ausente/inválida) com a referência de investigação, sem identificador de sessão, ticket ou cookie.
+
+### Session 2026-11-23
+
+- Q: Como um produto derivado escolhe os módulos incluídos? → A: Na compilação: o host referencia e registra os projetos dos módulos usados; omitir é remover a referência. Sem liga/desliga por configuração em runtime na L3.
+- Q: A operação pública de identidade do tenant revela a anônimos que a empresa está inativa? → A: Não. Ela devolve id e nome sempre que a instalação está configurada e o marcador do banco confere, ativa ou inativa; o estado inativo só aparece após tentativa de login ou para sessão existente. Configuração/marcador inválido ou banco indisponível resultam em indisponibilidade genérica.
+- Q: Quais proteções de navegador o backend exige ao servir a interface? → A: Política de segurança de conteúdo estrita (somente recursos da própria origem, sem scripts inline, sem incorporação em frames), bloqueio de detecção de tipo, política de referência restrita e cache controlado (página inicial sem cache; recursos versionados com cache longo), verificadas por teste. HSTS fica para a publicação (L4).
+- Q: O que a tela autenticada de contexto mostra, e ela lista módulos? → A: Identidade da conta, empresa corrente (sempre visível), permissões efetivas e ação de sair. Não lista módulos; os módulos habilitados ficam disponíveis somente no contrato da API, para integrações e testes.
+- Q: Como a interface garante que o usuário passe a usar a versão nova após uma atualização, sem limpar cache manualmente? → A: Sem service worker. A página inicial é sempre revalidada e os arquivos da interface têm nome versionado. A API informa a versão publicada; se ela diferir da versão carregada, a interface avisa que há nova versão e oferece recarregar. Se um arquivo da interface falhar ao carregar, recarrega automaticamente uma única vez. Limpar cache nunca é passo exigido.
+- Q: Respostas da API com dados da conta, contexto ou empresa podem ser armazenadas em cache por navegador ou proxies? → A: Não. Toda resposta da API, inclusive erros e a identidade pública do tenant, proíbe armazenamento (`no-store`), verificado em teste. Cache em memória da própria interface é permitido, mas não pode ser persistido no armazenamento do navegador e é descartado no logout ou na negação por sessão inválida; a biblioteca de estado/consultas é decidida no plano com justificativa de dependência.
+- Q: Quais testes do frontend existem na L3 e quais bloqueiam a integração? → A: Lint, verificação estrita de tipos e testes de unidade/componentes (Vitest + Testing Library) bloqueiam; testes ponta a ponta (Playwright) da entrada, contexto, saída e estados de erro, executados contra a stack local com o backend servindo a interface, também bloqueiam. O isolamento A×B continua comprovado pelos testes de backend.
+- Q: Qual idioma e nível mínimo de acessibilidade a interface de acesso atende na L3? → A: Somente pt-BR, sem mecanismo de tradução; telas de acesso conforme WCAG 2.1 nível AA, com verificação automática nos testes ponta a ponta exigindo zero violações sérias ou críticas.
+- Q: Quais navegadores a interface suporta e quais os testes ponta a ponta cobrem? → A: As duas últimas versões estáveis de Chrome, Edge e Firefox em desktop; testes ponta a ponta bloqueantes somente em Chromium. Safari e navegadores móveis sem garantia formal na L3.
+- Q: O que a interface faz quando uma chamada é negada por sessão expirada/revogada ou empresa inativa durante o uso? → A: Sessão inválida: descarta todo o estado local de identidade e contexto e volta à tela de entrada com aviso de sessão encerrada. Empresa inativa: mostra o estado de empresa indisponível, oferecendo apenas sair. Sem temporizador de expiração no cliente e sem novo login silencioso. Preservar trabalho em andamento fica a cargo de módulos futuros. *(Parte de sessão inválida substituída nesta mesma sessão pela nova entrada no próprio local; empresa inativa, ausência de temporizador e de login silencioso permanecem.)*
+- Q: Como o SC-001 é evidenciado para aceitar a L3? → A: Uma pessoa que não escreveu o guia o executa sem assistência, do clone limpo até a tela autenticada, e registra tempo, revisão e dúvidas. A segunda execução é o mesmo roteiro automatizado no CI (ambiente limpo → stack local → teste ponta a ponta), concluído em até 45 minutos.
+- Q: O que a tela autenticada mostra quando a conta entra com sucesso mas não tem `foundation.context.read`? → A: Mostra a identidade da conta (`/me`) e a empresa (operação pública), com aviso de que a conta não tem permissão para ver o contexto de acesso, oferecendo apenas sair; não lista permissões. O contrato L2 não muda e nenhuma permissão é concedida automaticamente.
+- Q: A interface exibe ao usuário a referência de suporte (`traceId`) devolvida pela API em erros? → A: Sim, de forma seletiva: mensagem pt-BR por categoria (credenciais inválidas, muitas tentativas, conflito de sessão, indisponibilidade, erro inesperado); indisponibilidade e erro inesperado mostram também o código de referência copiável. Credenciais inválidas mostram somente a mensagem genérica.
+- Q: De onde a interface obtém a versão publicada para detectar atualizações? → A: Da operação pública de identidade do tenant, que devolve também um identificador opaco do build (sem número de versão, commit, data ou ambiente). A interface compara com o identificador embutido nela e consulta somente em eventos (carga, retorno de foco, navegação), sem polling curto.
+- Q: A política de segurança de conteúdo também proíbe estilos inline? → A: Sim. Estilos somente de arquivos da própria origem, sem `'unsafe-inline'`, nonce ou hash; o CSS é extraído em arquivos no build e bibliotecas de UI que injetam estilos em runtime não são compatíveis (escolha justificada no plano).
+- Q: A interface de acesso tem meta de desempenho verificável no CI na L3? → A: Sim, orçamento de tamanho: JavaScript do carregamento inicial ≤ 200 KB gzip, bloqueante no CI; chunks carregados sob demanda não contam; produto derivado pode ajustar o limite com justificativa documentada. Sem meta de tempo de carga na L3.
+- Q: Como as permissões próprias de um módulo entram no catálogo de permissões? → A: Declaradas pelo módulo em código, com prefixo obrigatório igual ao id do módulo; o catálogo efetivo é fundação + módulos registrados. Prefixo divergente ou código duplicado falha a inicialização e o teste de arquitetura. Concessões a códigos de módulo omitido ficam inertes (não autorizam) e não são apagadas.
+- Q: Quem pode ver quais módulos estão habilitados na instalação? → A: Somente quem consulta o contexto de acesso: a lista (id e versão do contrato) vem em `GET /api/v1/context`, exigindo sessão válida e `foundation.context.read`. Nenhuma operação anônima a revela; a identidade pública do tenant não muda.
+- Q: Na L3, a fundação já oferece persistência própria para módulos (schema e migrations separados)? → A: Não. O módulo declara os dados sob sua gestão, que na L3 deve ser "nenhum"; módulo que declarar dados persistidos é rejeitado na inicialização e nos testes de arquitetura. Schema e migrations por módulo ficam para o primeiro módulo de negócio, com novo plano.
+- Q: Com a interface aberta em duas abas, o que a outra aba faz após logout ou sessão negada em uma delas? → A: A aba que sai ou detecta sessão inválida avisa as demais abas da mesma origem por mensagem entre abas (sem gravar no armazenamento do navegador); elas descartam o estado de identidade/contexto e voltam à entrada. Se o aviso não chegar, a próxima chamada negada ou a revalidação no retorno de foco garante o mesmo efeito. Coberto por teste ponta a ponta. *(Substituída nesta mesma sessão: somente o logout explícito é avisado às demais abas; sessão expirada ou revogada leva cada aba à nova entrada no próprio local.)*
+- Q: A interface envia erros do navegador ou telemetria para algum lugar na L3? → A: Não. Nenhum envio a terceiros nem ao próprio backend; a investigação usa o código de referência exibido ao usuário e os logs do backend. Relato de erros do frontend fica para a L4 ou para o produto derivado.
+- Q: Ao servir a interface, como o backend trata caminhos desconhecidos e links diretos para telas protegidas sem sessão? → A: Fallback restrito. `/api/*`, `/openapi/*` e `/health*` nunca devolvem a interface: rota inexistente recebe erro JSON 404 padronizado. Demais navegações GET devolvem a página inicial com os mesmos cabeçalhos de segurança e cache; rota desconhecida da interface mostra "página não encontrada". Tela protegida sem sessão leva à entrada e, após login, sempre à tela de contexto, sem parâmetro de retorno.
+- Q: Como a dependência de um módulo considera a versão do contrato exigido? → A: Versão maior exata. Cada contrato tem versão maior inteira (v1, v2…); a dependência declara id do contrato e versão maior exigida. Versão maior diferente ou contrato ausente é dependência não atendida: falha a inicialização e o teste de arquitetura. Mudança compatível não altera a versão maior.
+- Q: Qual formato o id de módulo deve seguir e quais ids são reservados? → A: 2 a 32 caracteres, letras minúsculas sem acento, dígitos e hífen, começando por letra, sem ponto; `foundation` é reservado. Permissão do módulo é `<id>.` seguido do restante do código. Id inválido, reservado ou duplicado falha a inicialização e o teste de arquitetura.
+- Q: Como a interface se comporta durante carregamentos/envios e após indisponibilidade? → A: Indicador de carregamento anunciado a leitores de tela; botão de entrar desabilitado enquanto o envio está pendente (sem envio duplo). Indisponibilidade oferece "tentar novamente"; nenhuma nova tentativa automática de login ou de leitura de identidade/contexto. Coberto por testes de componente e ponta a ponta.
+- Q: O documento OpenAPI servido (`/openapi/v1.json`, anônimo) deve incluir operações de módulos, e quem pode acessá-lo? → A: Somente fundação. O documento servido anonimamente descreve apenas operações da fundação e é idêntico com ou sem módulos. Contratos de módulos são publicados como arquivos versionados no repositório do produto, não servidos pela instância. Teste compara o documento nas duas variantes do SC-004.
+- Q: O que a interface faz quando o pedido de sair falha (rede, 5xx ou banco indisponível)? → A: Permanece na tela autenticada, mostra indisponibilidade com código de referência copiável e oferece "tentar sair novamente", sem avisar as outras abas. Se a resposta indicar sessão já inválida, trata como sessão encerrada e volta à entrada.
+- Q: O que o backend faz se os arquivos compilados da interface não estiverem presentes ao iniciar? → A: Depende do ambiente. Em Produção, a ausência impede a inicialização com diagnóstico seguro. Em Desenvolvimento/Testes, a API inicia normalmente e navegações da interface recebem 404 padronizado (no desenvolvimento a interface é servida pelo servidor local). Testes cobrem os dois casos.
+- Q: Quando o login recebe "muitas tentativas" (429 com `Retry-After`), o que a tela de entrada faz? → A: Mostra mensagem pt-BR com o tempo aproximado de espera e mantém o botão de entrar desabilitado até o prazo; depois libera sem reenviar automaticamente. Não revela conta nem bloqueio de conta.
+- Q: Na tela de contexto, as permissões efetivas aparecem como código técnico ou com descrição em pt-BR? → A: Descrição pt-BR declarada em código junto de cada permissão (fundação e módulos) e devolvida pela API em `GET /api/v1/context`; a tela mostra descrição e código. Permissão sem descrição falha a inicialização e o teste de arquitetura.
+- Q: A tela de contexto mostra até quando a sessão vale? → A: Sim. Mostra no fuso local, como texto estático, o horário do teto absoluto informado pela API e a regra de inatividade (ex.: "Sessão válida até 18:35, ou após 30 min sem uso"), sem contagem regressiva, aviso prévio ou ação de renovar.
+- Q: Qual estratégia de sessão evita que o usuário perca o que está fazendo quando a sessão expira? → A: Expiração por inatividade com teto absoluto (o uso renova a inatividade, nunca o teto) somada a nova entrada no próprio local: ao expirar, a interface oculta o conteúdo, preserva o estado da aba em memória e pede credenciais num diálogo; mesma conta restaura a tela, outra conta ou sair descarta tudo. Reabre a L2 e é priorizado antes de iniciar a L3.
+- Q: Quais são os padrões e faixas da inatividade e do teto absoluto da sessão? → A: Inatividade padrão de 30 minutos (faixa 5–240); teto absoluto padrão de 600 minutos/10 h (faixa 30–720); inatividade maior que o teto, valor fora da faixa ou não inteiro impede a inicialização.
+
+### Session 2026-11-22
+
+- Q: Na L3, como o frontend deve ser servido junto da API, mantendo cookie de sessão e CSRF na mesma origem? → A: O backend serve o SPA: o build do Vite é incluído na imagem da API e servido por ela (mesma origem real, uma stack por tenant, sem CORS). Em desenvolvimento, o servidor do Vite faz proxy das chamadas de API para o backend.
+- Q: Como o frontend obtém o identificador do tenant enviado nas operações? → A: O próprio backend informa em runtime, por operação pública mínima que devolve somente id e nome de apresentação da instalação configurada. Não há variável de ambiente de tenant no frontend, campo na tela ou subdomínio; um único bundle serve todas as instalações. A informação não concede acesso nem enumera outros tenants.
+- Q: Na L3, como um módulo é declarado e como ciclos/dependências não atendidas são verificados? → A: Módulo somente de backend: projetos .NET próprios (contratos separados da implementação) com declaração em código de responsabilidade, dados, contratos e dependências, registrada na inicialização. Ciclo ou dependência obrigatória ausente falha a inicialização com diagnóstico seguro e é rejeitado por testes de arquitetura bloqueantes no CI. O frontend não tem módulos próprios; apenas reflete o que o backend anuncia como habilitado.
+- Q: O que o componente opcional de teste do SC-004 expõe e como se garante que não é distribuído? → A: Um projeto sob `tests/` com uma única operação de API sintética, protegida por permissão própria e com dependência declarada de um contrato, carregado somente pelos testes de integração/CI. Solução e imagem de produção não o referenciam, o que é verificado por teste/CI. Não há tela.
+- Q: A troca de senha pelo próprio usuário entra na L3? → A: Não. Na L3, senha continua sendo alterada somente pelo reset restrito do operador. Troca pelo próprio usuário e recuperação por email/token ficam fora da L3 e exigem novo plano.
+
 ### Session 2026-11-08
 
-- Q: Qual deve ser o limite máximo configurável para o prazo absoluto da sessão em produtos derivados (o padrão continua 30 minutos)? → A: Opção B. Faixa permitida de 5 a 480 minutos (8 horas), limites inclusivos; padrão de 30 minutos quando ausente; valor fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro.
+- Q: Qual deve ser o limite máximo configurável para o prazo absoluto da sessão em produtos derivados (o padrão continua 30 minutos)? → A: Opção B. Faixa permitida de 5 a 480 minutos (8 horas), limites inclusivos; padrão de 30 minutos quando ausente; valor fora da faixa ou não inteiro impede a inicialização com diagnóstico seguro. *(Substituída em 2026-11-23: inatividade 5–240 min e teto absoluto 30–720 min.)*
 - Q: Por quantos dias, por padrão, sessões vencidas ou revogadas devem ser mantidas antes que o comando de limpeza possa removê-las? → A: Opção B. Retenção padrão de 30 dias, configurável em dias inteiros de 1 a 365; contada a partir da expiração (sessão vencida) ou da revogação (sessão revogada); valor fora da faixa impede a execução do comando com diagnóstico seguro.
 - Q: Retenção inválida ou operador não autorizado em `sessao limpar` contam como execução que gera registro? → A: Não. A execução auditável começa após operador individual autenticado e alvo validado; antes disso o comando encerra com diagnóstico seguro, sem registro e sem efeito (`/speckit-analyze`, mantenedor).
 - Q: Como a execução da limpeza de sessões deve ficar registrada no histórico imutável de operações? → A: Opção A. Um registro por execução (inclusive sem remoções ou com falha), atribuído ao operador individual autenticado, com retenção aplicada, instante de corte, quantidade removida, resultado e correlação; sem identificadores de sessões ou contas removidas e sem autoria "Sistema".
@@ -46,7 +108,7 @@ Interface/extensão modular continuam L3/I3; publicação/recuperação, L4/I4.
 - Q: Se um novo login falhar ao salvar a nova sessão, a sessão anterior desse navegador deve continuar válida? → A: Sim. A troca é atômica: encerramento da sessão anterior e criação da nova são confirmados juntos. Falha preserva o estado e o prazo anteriores, sem desfazer bloqueios ou revogações concorrentes e sem confirmar novo acesso.
 - Q: Quando dois logins simultâneos tentarem substituir a mesma sessão do navegador, apenas um deve conseguir concluir a troca? → A: Sim. Apenas uma substituição conclui; a tentativa concorrente retorna erro explícito sem criar sessão adicional. Nova tentativa exige o contexto atual, sem limitar sessões independentes em outros dispositivos.
 - Q: Na L2, "alteração de senha" significa só a redefinição por operador autorizado ou também troca pelo próprio usuário via API? → A: Somente redefinição por operador (reset restrito que encerra todas as sessões da conta). Troca pelo próprio usuário fica para L3 ou posterior; recuperação por email/token não faz parte da feature sem novo plano.
-- Q: A sessão deve durar no máximo 30 minutos desde o login, sem renovação por atividade? → A: Sim, como padrão da fundação: prazo absoluto de 30 minutos contado da criação, sem sliding, remember-me ou refresh. O valor é configurável por produto derivado dentro de um limite máximo definido no plano; valor ausente usa o padrão e valor fora do limite impede a inicialização.
+- Q: A sessão deve durar no máximo 30 minutos desde o login, sem renovação por atividade? → A: Sim, como padrão da fundação: prazo absoluto de 30 minutos contado da criação, sem sliding, remember-me ou refresh. O valor é configurável por produto derivado dentro de um limite máximo definido no plano; valor ausente usa o padrão e valor fora do limite impede a inicialização. *(Substituída em 2026-11-23: inatividade de 30 min renovada pelo uso, com teto absoluto de 10 h.)*
 - Q: Registros de sessões expiradas ou revogadas devem ser removidos automaticamente na L2? → A: Opção B. A revogação remove o ticket protegido; sessões vencidas ou revogadas há mais de N dias (retenção configurável, definida no plano) são removidas por comando operacional restrito e auditado, sem job em background na API. Agendamento externo fica para L4.
 
 ### Session 2026-11-06
@@ -378,12 +440,19 @@ publicação e restauração usando duas empresas e informações sintéticas.
   identidade: negar a operação dependente, sem escolher empresa padrão.
 - Empresa inativada ou vínculo revogado durante uma sessão: validar o novo estado
   antes de cada nova operação protegida de uso da empresa; estado antigo da interface
-  não concede acesso.
+  não concede acesso. Na primeira negação, a interface oculta o conteúdo e pede nova
+  entrada no próprio local (sessão inválida) ou apresenta empresa indisponível com
+  opção de sair.
+- Sessão expirada por inatividade ou teto durante o uso: o conteúdo é ocultado e a
+  nova entrada da mesma conta restaura o estado da aba, sem reenviar gravações
+  automaticamente; outra conta ou sair descarta tudo. Computador abandonado não
+  exibe dados após a expiração.
 - Empresa inativa com sessão própria ainda válida: permitir obter a proteção da
   requisição e encerrar essa sessão, sem liberar consultas; falha de revogação
-  não pode ser apresentada como saída concluída.
+  não pode ser apresentada como saída concluída: a interface permanece autenticada
+  e oferece tentar sair novamente.
 - Empresa reativada: aceitar somente sessões ainda válidas e não revogadas,
-  mantendo seu prazo original. Inativação não pausa a contagem da validade
+  mantendo seu teto original. Inativação não pausa o teto nem a inatividade
   nem desfaz logout, expiração ou revogação da conta.
 - Tentativas simultâneas de empresas diferentes, com identificadores de registros
   iguais: manter leitura, gravação e estado temporário isolados.
@@ -423,6 +492,25 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - Erros, logs e documentação de integração: não revelar credenciais, informações
   protegidas de outra empresa ou detalhes internos de produção.
 - Falha de validação automatizada: não transformar resultado incompleto em aprovação.
+- Aba aberta durante uma atualização publicada: a interface antiga não pode falhar
+  silenciosamente; deve detectar a nova versão ou arquivo ausente e conduzir à recarga,
+  sem exigir limpeza de cache.
+- Conta autenticada sem permissão de consultar o próprio contexto: mostrar identidade,
+  empresa e aviso de permissão ausente, somente com opção de sair, sem tratar como erro
+  de sessão ou de empresa.
+- Logout explícito com a interface aberta em várias abas: as demais abas descartam
+  identidade e contexto e voltam à entrada, sem continuar exibindo dados da conta
+  encerrada. Expiração em várias abas: cada aba oculta o conteúdo e pede nova entrada
+  no próprio local; nova entrada em uma aba restaura as outras no retorno de foco
+  somente se for a mesma conta. Novas entradas simultâneas em duas abas: a que receber
+  conflito de sessão revalida a identidade uma vez e restaura sem diálogo se a outra aba
+  já autenticou a mesma conta, sem reenviar o login.
+- Caminho inexistente sob a API, documentação ou saúde: responder erro 404 padronizado,
+  nunca a página da interface; link para tela protegida sem sessão leva à entrada,
+  sem redirecionamento posterior a destino indicado na URL.
+- Arquivos compilados da interface ausentes na inicialização: em Produção, falhar
+  a inicialização com diagnóstico seguro; em Desenvolvimento/Testes, iniciar a API
+  e responder 404 padronizado às navegações da interface.
 - Restauração dirigida à empresa ou ambiente errado: bloquear o procedimento antes
   de alteração de dados; manter identificação explícita da origem e do destino.
 
@@ -478,6 +566,93 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **FR-004**: A interface web DEVE apresentar entrada no contexto do tenant,
   estado de autenticação, empresa corrente, contexto do próprio usuário, saída e estados
   de erro, sem menus de negócio; identificar a empresa NÃO DEVE conceder acesso por si só.
+  A interface DEVE ser servida pela própria instância do backend do tenant, na mesma
+  origem da API, sem CORS e sem serviço adicional por instalação; em desenvolvimento,
+  o servidor local da interface DEVE encaminhar as chamadas de API ao backend.
+  Em Produção, ausência dos arquivos compilados da interface DEVE impedir a
+  inicialização com diagnóstico seguro (FR-003); em Desenvolvimento e Testes, a API
+  DEVE iniciar sem eles e navegações da interface DEVEM receber 404 padronizado.
+  Caminhos `/api/*`, `/openapi/*` e `/health*` NUNCA DEVEM devolver a interface: rota
+  inexistente nesses prefixos DEVE receber erro 404 no formato padronizado da API.
+  Demais navegações GET DEVEM devolver a página inicial com as mesmas proteções e regras
+  de cache (NFR-012); rota desconhecida da interface DEVE mostrar "página não encontrada".
+  Acesso a tela protegida sem sessão DEVE levar à entrada; após login pela tela de
+  entrada, a interface DEVE ir sempre à tela de contexto, sem parâmetro ou destino de
+  retorno informado pela URL (a nova entrada no próprio local restaura a tela em memória
+  da aba, nunca um destino vindo da URL).
+  A interface DEVE obter id e nome de apresentação do tenant de uma operação pública
+  mínima da própria instalação, que devolve somente a identidade configurada dessa
+  instalação e o identificador opaco do build (NFR-012), sem enumerar outros tenants
+  e sem conceder acesso. O bundle NÃO DEVE conter identificador de tenant; o mesmo build DEVE servir qualquer instalação.
+  Falha ao obter essa identidade DEVE ser apresentada como indisponibilidade, sem
+  permitir entrada nem escolher empresa padrão. A operação NÃO DEVE revelar a
+  anônimos se a instalação está ativa ou inativa: responde id e nome sempre que a
+  configuração e o marcador do banco conferem; caso contrário, indisponibilidade
+  genérica, sem detalhes internos.
+  Após a entrada, a interface DEVE mostrar a identidade da conta, a empresa corrente
+  (reconhecível durante todo o uso autenticado), as permissões efetivas e a ação de sair.
+  Cada permissão efetiva DEVE ser exibida com sua descrição pt-BR e seu código, ambos
+  devolvidos pela consulta de contexto da API; a interface NÃO DEVE manter tabela própria
+  de descrições. A tela DEVE mostrar, no fuso local e como texto estático, o horário
+  do teto absoluto da sessão informado pela API e a regra de inatividade vigente
+  (ex.: "Sessão válida até 18:35, ou após 30 min sem uso"), sem contagem regressiva,
+  aviso prévio ou ação de renovar.
+  Se a conta autenticada não tiver permissão para consultar o próprio contexto, a
+  interface DEVE mostrar identidade e empresa com aviso de ausência dessa permissão,
+  sem listar permissões e oferecendo somente sair; isso NÃO DEVE ser tratado como
+  sessão inválida, empresa indisponível ou erro genérico, nem conceder permissão implícita.
+  Na L3, a interface NÃO DEVE ter rotas, telas, menus ou listas de módulos; módulos
+  habilitados (id e versão do contrato) são informados somente na consulta do contexto
+  de acesso da API, que exige sessão válida e `foundation.context.read`; nenhuma operação
+  anônima, inclusive a identidade pública do tenant e o documento de contrato servido
+  pela instância, os revela, e nada de módulo ausente é exibido ou anunciado (FR-018).
+  Quando uma chamada de uma aba já autenticada, exceto o pedido de sair, é negada por
+  sessão expirada (inatividade ou teto absoluto), revogada ou ausente, a interface DEVE
+  fazer nova entrada no próprio local: ocultar todo o conteúdo protegido da tela (dados não podem permanecer visíveis
+  atrás do diálogo), preservar em memória o estado da aba e apresentar diálogo de
+  credenciais com aviso de sessão encerrada e opção de sair. Se a nova entrada
+  autenticar a mesma conta, a tela DEVE ser restaurada com o estado preservado; leituras
+  PODEM ser repetidas automaticamente, mas gravações NÃO DEVEM ser reenviadas sem ação do
+  usuário. Se autenticar outra conta, ou se o usuário escolher sair, todo o estado local
+  DEVE ser descartado e a interface segue para a tela de contexto da nova conta ou para
+  a entrada. Esse estado NÃO DEVE ser gravado no armazenamento do navegador e se perde
+  ao fechar a aba. Quando a chamada é negada por empresa inativa, a interface DEVE
+  apresentar empresa indisponível, permitindo somente sair (FR-006). A interface NÃO DEVE
+  controlar a expiração por temporizador próprio, fazer requisições periódicas que
+  mantenham a sessão ativa, nem renovar o acesso sem nova digitação de credenciais.
+  Logout explícito em uma aba DEVE ser comunicado às demais abas abertas da mesma origem
+  por mensagem entre abas, sem gravar dados no armazenamento do navegador; elas DEVEM
+  descartar o estado de identidade e contexto e voltar à entrada. Expiração ou revogação
+  detectada em uma aba NÃO DEVE descartar o estado das outras: cada aba aplica a nova
+  entrada no próprio local na sua próxima chamada negada ou na revalidação no retorno de
+  foco; se essa revalidação encontrar sessão válida da mesma conta (nova entrada feita em
+  outra aba), a aba é restaurada sem novo diálogo, e se encontrar outra conta, descarta
+  o estado. Na ausência do aviso de logout, a revalidação no retorno de foco ou a próxima
+  chamada negada DEVE levar à entrada sem exibir dados da conta encerrada.
+  Se o pedido de sair falhar por indisponibilidade ou erro inesperado, a interface
+  DEVE permanecer na tela autenticada, exibir o erro com a referência copiável e
+  oferecer nova tentativa de sair; NÃO DEVE descartar o estado nem avisar outras abas
+  como se a saída tivesse ocorrido. Resposta de sessão já inválida (expirada, revogada
+  ou ausente) ao pedido de sair DEVE concluir a saída localmente: descartar todo o estado
+  da aba, ir à entrada com aviso de sessão encerrada e avisar as demais abas como logout
+  explícito; esse caso NÃO abre a nova entrada no próprio local.
+  Erros DEVEM ser apresentados em pt-BR por categoria distinta: credenciais inválidas,
+  excesso de tentativas, conflito de sessão (nova tentativa a partir do contexto atual),
+  indisponibilidade e erro inesperado. Indisponibilidade e erro inesperado DEVEM exibir
+  a referência de investigação devolvida pela API, copiável (FR-023); credenciais
+  inválidas DEVEM mostrar somente mensagem genérica, sem revelar conta, bloqueio ou empresa.
+  Excesso de tentativas DEVE informar o tempo aproximado de espera indicado pela API e
+  manter o envio do login desabilitado até esse prazo; depois, o envio é liberado sem
+  nova tentativa automática, e a mensagem NÃO DEVE revelar conta ou bloqueio de conta.
+  Enquanto uma leitura ou envio está pendente, a interface DEVE exibir indicador de
+  carregamento anunciado a tecnologias assistivas e DEVE impedir novo envio do login
+  até a resposta. Indisponibilidade DEVE oferecer ação manual de tentar novamente; a
+  interface NÃO DEVE repetir automaticamente o login nem leituras de identidade ou contexto.
+  Exceção única: conflito de sessão no diálogo da nova entrada no próprio local DEVE
+  disparar uma só revalidação da identidade da sessão; se ela encontrar sessão válida da
+  mesma conta (nova entrada concluída em outra aba), a aba é restaurada sem diálogo; se
+  encontrar outra conta, o estado é descartado; se a sessão for inválida, o diálogo
+  permanece com a mensagem de conflito. O login nunca é reenviado automaticamente.
 - **FR-005**: A fundação DEVE autenticar contas válidas da empresa indicada e negar
   identificação inválida. Cada conta pertence exclusivamente a um tenant; o mesmo
   email em outro tenant NÃO DEVE compartilhar senha, bloqueio, recuperação ou identidade.
@@ -490,12 +665,32 @@ publicação e restauração usando duas empresas e informações sintéticas.
   identidade, contexto ou dados; confirmação exige revogação persistida.
   Bloqueio da conta por tentativas inválidas DEVE invalidar todas as suas sessões
   existentes. O fim do bloqueio NÃO DEVE reativá-las; novo acesso exige novo login.
-  A sessão DEVE expirar em prazo absoluto contado da sua criação, padrão de 30 minutos,
-  sem renovação por atividade, remember-me ou refresh. Produtos derivados PODEM
-  configurar esse prazo em minutos inteiros entre 5 e 480 (8 horas), inclusive;
-  valor ausente ou vazio usa o padrão, e valor fora da faixa ou não inteiro DEVE impedir a
-  inicialização com diagnóstico seguro (FR-003). O prazo é fixado na criação de
-  cada sessão; alterar a configuração não muda o prazo de sessões já emitidas.
+  A sessão DEVE expirar no que ocorrer primeiro: inatividade (tempo sem requisição
+  autenticada aceita) ou teto absoluto contado da sua criação. Cada requisição
+  autenticada aceita DEVE renovar a janela de inatividade; requisições negadas não a
+  renovam. A renovação NUNCA DEVE ultrapassar o teto absoluto, e não há remember-me nem
+  refresh. Requisição autenticada aceita é a requisição a operação protegida por sessão
+  que passou por sessão válida, instalação ativa, proteção contra CSRF e permissão e
+  chegou à operação, mesmo que esta recuse a entrada (400/422); negações de acesso
+  (401, 403, 409, 429, 503), login, logout, obtenção do token CSRF, identidade pública
+  do tenant, health, documento de contrato e arquivos da interface não renovam.
+  Revalidações da interface por carga, retorno de foco/visibilidade ou navegação que
+  consultam a identidade da sessão são requisições autenticadas aceitas e renovam a
+  inatividade (nunca o teto); por isso só podem ser disparadas por esses eventos, nunca
+  por temporizador (FR-004).
+  Padrões: inatividade de 30 minutos e teto absoluto de 600 minutos (10 horas).
+  Produtos derivados PODEM configurar, em minutos inteiros e limites inclusivos, a
+  inatividade entre 5 e 240 e o teto absoluto entre 30 e 720; valor ausente ou vazio usa
+  o padrão, e valor fora da faixa, não inteiro ou inatividade maior que o teto DEVE
+  impedir a inicialização com diagnóstico seguro (FR-003). A configuração anterior de
+  prazo absoluto único, se presente com valor, também DEVE impedir a inicialização, com
+  diagnóstico que indica as novas configurações; vazia é tratada como ausente. Teto e janela de inatividade
+  são fixados na criação de cada sessão; alterar a configuração não muda sessões já
+  emitidas. A verificação de expiração ocorre no servidor a cada requisição; sessão
+  expirada nunca volta a autorizar uso. O registro do último uso PODE ser gravado no
+  máximo uma vez por minuto por sessão; com isso, a negação por inatividade DEVE ocorrer
+  no máximo ao fim da janela contada da última requisição autenticada aceita e NÃO DEVE
+  ocorrer antes da janela menos 60 segundos (tolerância sempre a favor da segurança).
 - **FR-007**: Toda operação protegida DEVE verificar identidade e permissão no servidor;
   operações de uso de uma empresa também DEVEM validar vínculo ativo. Administração
   técnica da própria instalação e procedimentos técnicos DEVEM exigir autorização específica para o alvo,
@@ -545,20 +740,58 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **FR-015**: A evolução da estrutura persistida DEVE suportar criação inicial e
   atualização de estado anterior suportado, quando existente, registrando a versão
   alcançada e preservando os dados em caso de sucesso, sem alterar outras empresas.
+  Estado anterior suportado é somente o de uma versão publicada com dados; até a
+  primeira publicação (L4), mudanças de esquema regeneram a migration inicial única e
+  bancos locais e de CI são recriados do zero. A partir dela, toda mudança de esquema
+  DEVE ser migration incremental validada em banco novo e na atualização da versão publicada.
 - **FR-016**: Leitura, gravação e tratamento de falhas por empresa DEVEM comprovar,
   com dados sintéticos, os resultados e efeitos persistidos esperados, inclusive
   restrições e transações quando aplicáveis, concorrência e reutilização de recursos.
 - **FR-017**: Cada módulo acrescentado a um produto DEVE declarar responsabilidade,
   dados sob sua gestão, contratos públicos e dependências; consumo DEVE ocorrer por contratos.
+  Na L3, módulo é um componente de backend composto por projetos .NET próprios,
+  separando contratos públicos de implementação, com declaração em código registrada
+  na inicialização. A interface não define módulos próprios nesta entrega.
+  O id do módulo DEVE ter de 2 a 32 caracteres, somente letras minúsculas sem acento,
+  dígitos e hífen, começando por letra e sem ponto; `foundation` é reservado à fundação.
+  Id inválido, reservado ou duplicado DEVE falhar a inicialização com diagnóstico seguro
+  e os testes de arquitetura.
+  Permissões de um módulo DEVEM ser declaradas por ele em código, com código iniciado
+  por `<id do módulo>.` e descrição pt-BR não vazia; o catálogo efetivo de permissões é o
+  da fundação somado aos dos módulos registrados, e o procedimento de concessão DEVE
+  rejeitar código fora dele. Permissões da fundação também DEVEM ter descrição pt-BR.
+  Prefixo divergente, código duplicado ou descrição ausente DEVE falhar a inicialização com diagnóstico
+  seguro e ser rejeitado pelos testes de arquitetura (FR-019). Concessões existentes
+  a códigos de módulo omitido NÃO DEVEM autorizar operação alguma e não são apagadas
+  automaticamente.
+  Na L3, a declaração de dados sob gestão do módulo DEVE ser vazia: módulo que declarar
+  dados persistidos DEVE falhar a inicialização e os testes de arquitetura. Persistência
+  própria de módulos (schema e migrations separados) fica para o primeiro módulo de
+  negócio, com novo plano; módulos NÃO DEVEM alterar a migration da fundação.
 - **FR-018**: Um produto DEVE funcionar sem módulos de negócio ou com um subconjunto
   compatível de módulos, sem expor interfaces de módulos ausentes ou quebrar a fundação.
+  A seleção de módulos ocorre na compilação: incluir um módulo é referenciá-lo e
+  registrá-lo no host; omiti-lo é remover essa referência. Não há ativação ou
+  desativação de módulos por configuração em runtime na L3.
 - **FR-019**: Dependências circulares, obrigatórias não atendidas ou acesso às
   implementações internas de outro módulo DEVEM ser identificados antes da liberação.
+  A verificação DEVE ocorrer em dois pontos: na inicialização, que DEVE falhar com
+  diagnóstico seguro diante de ciclo ou dependência obrigatória ausente, e em testes
+  de arquitetura bloqueantes no CI, que DEVEM rejeitar ciclos, dependências não
+  declaradas e referência à implementação de outro módulo em vez de seus contratos.
+  Cada contrato público de módulo DEVE ter versão maior inteira; a dependência DEVE
+  declarar id do contrato e versão maior exigida. Contrato ausente ou com versão maior
+  diferente DEVE ser tratado como dependência não atendida. Mudança compatível de
+  contrato NÃO DEVE alterar a versão maior; mudança incompatível DEVE incrementá-la (FR-021).
 - **FR-020**: A fundação DEVE oferecer integração para consumidores independentes,
   inclusive consulta do próprio contexto autorizado, sem dependência da interface web.
 - **FR-021**: Os contratos de integração DEVEM documentar operações disponíveis, entradas,
   respostas, autenticação, contexto de empresa, permissões e erros; alteração incompatível
   DEVE declarar consumidores afetados e estratégia de transição.
+  O documento de contrato servido anonimamente pela instância DEVE descrever somente
+  operações da fundação e ser idêntico com ou sem módulos registrados. Contratos de
+  módulos DEVEM ser publicados como arquivos versionados no repositório do produto,
+  sem serem servidos pela instância.
 - **FR-022**: Entradas externas DEVEM ser validadas no servidor antes de uso;
   entrada inválida DEVE ser rejeitada sem efeitos de persistência indevidos.
 - **FR-023**: Erros DEVEM ter categoria consistente e referência para investigação,
@@ -574,6 +807,10 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **FR-027**: A validação automatizada DEVE verificar compilação, tipos, convenções,
   testes, exposição de secrets e vulnerabilidades. Falhas DEVEM bloquear integração;
   riscos críticos ou altos não mitigados DEVEM bloquear liberação.
+  Na L3, a interface DEVE ter lint, verificação estrita de tipos, testes de unidade e
+  de componentes e testes ponta a ponta de entrada, contexto, saída e estados de erro
+  contra a stack local com o backend servindo a interface, além do orçamento de
+  tamanho do NFR-013; todos bloqueiam integração.
 - **FR-028**: Alterações DEVEM apresentar risco, evidências, documentação afetada e
   justificativa de dependências e decisões arquiteturais relevantes antes de aprovação.
 - **FR-029**: DEVEM existir preparação e roteiro de publicação na infraestrutura
@@ -603,8 +840,8 @@ publicação e restauração usando duas empresas e informações sintéticas.
   A operação NÃO DEVE modificar contas ou permissões de outro tenant, mesmo
   com email igual. Não é exigida tela administrativa nem autocadastro público.
   Na L2, alteração e recuperação de senha ocorrem somente por esse reset restrito,
-  que encerra todas as sessões da conta; troca de senha pelo próprio usuário fica
-  para L3 ou posterior, e recuperação por email/token exige novo plano.
+  que encerra todas as sessões da conta. Na L3 isso se mantém: troca de senha pelo
+  próprio usuário e recuperação por email/token ficam fora da L3 e exigem novo plano.
   O procedimento restrito DEVE também remover sessões expiradas ou revogadas há
   mais que a retenção configurada, com auditoria e sem afetar sessões válidas.
   A retenção padrão é de 30 dias, configurável em dias inteiros de 1 a 365, contada
@@ -646,6 +883,14 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **NFR-006 — Investigação segura**: falhas de autenticação, autorização, resolução
   de empresa e persistência DEVEM poder ser investigadas com referência à operação,
   sem exposição de secrets ou informações protegidas nos registros e respostas.
+  Negação por sessão inválida DEVE responder com categoria genérica única, sem revelar
+  o motivo ao cliente, e DEVE registrar no log do backend o motivo categorizado
+  (inatividade, teto absoluto, revogada, ausente ou inválida) com a referência de
+  investigação, sem identificador de sessão, ticket ou cookie.
+  Na L3, a interface NÃO DEVE enviar telemetria ou relatos de erro do navegador a
+  terceiros nem ao próprio backend; a investigação de falhas da interface usa a
+  referência exibida ao usuário (FR-023) e os registros do backend. Relato de erros
+  do frontend fica para a L4 ou para o produto derivado, com justificativa.
 - **NFR-007 — Manutenibilidade**: limites e responsabilidades DEVEM ser verificáveis;
   a extensão por módulos NÃO DEVE exigir alterar regras comuns de isolamento ou
   acessar dados internos de outro módulo; decisões relevantes DEVEM ter registro.
@@ -657,6 +902,40 @@ publicação e restauração usando duas empresas e informações sintéticas.
   DEVEM estar definidos para o produto; restauração DEVE ter evidência executada.
 - **NFR-010 — Compatibilidade**: consumidores DEVEM poder usar contratos publicados
   sem conhecer código interno; mudanças incompatíveis DEVEM ter transição documentada.
+- **NFR-011 — Acessibilidade e idioma da interface**: a interface de acesso DEVE estar
+  em pt-BR, sem mecanismo de tradução na L3, e atender WCAG 2.1 nível AA (operação
+  por teclado, foco visível, rótulos, contraste e erros anunciados). A verificação
+  automática nos testes ponta a ponta DEVE registrar zero violações sérias ou críticas.
+  São suportadas as duas últimas versões estáveis de Chrome, Edge e Firefox em desktop;
+  os testes ponta a ponta bloqueantes executam em Chromium. Safari e navegadores
+  móveis não têm garantia formal na L3.
+- **NFR-012 — Proteção, cache e atualização da interface no navegador**: as respostas que entregam a
+  interface DEVEM aplicar política de segurança de conteúdo estrita (somente recursos
+  da própria origem, sem scripts ou estilos inline, nonce ou hash, e sem incorporação
+  em frames de outra origem; o CSS DEVE ser entregue em arquivos gerados no build),
+  bloqueio de detecção de tipo de conteúdo e política de referência restrita. A página
+  inicial NÃO DEVE ser armazenada em cache; recursos versionados PODEM ter cache longo.
+  A interface NÃO DEVE usar service worker ou cache offline. A operação pública de
+  identidade do tenant DEVE informar um identificador opaco do build publicado, sem
+  número de versão, commit, data ou ambiente; a interface o consulta somente em eventos
+  (carga, retorno de foco, navegação), sem polling curto. Quando esse identificador
+  diferir do embutido na interface carregada, ela DEVE avisar que há nova
+  versão e oferecer recarregar; falha ao carregar um arquivo da interface DEVE causar
+  uma única recarga automática, sem laço. Nenhum procedimento DEVE exigir que o
+  usuário limpe o cache do navegador para receber uma atualização.
+  Toda resposta da API, inclusive erros e a identidade pública do tenant, DEVE proibir
+  armazenamento em cache por navegador e intermediários. A interface PODE manter cache
+  em memória da aba, mas NÃO DEVE persistir dados de conta, contexto ou empresa no
+  armazenamento do navegador e DEVE descartá-lo no logout, ao concluir a saída após
+  negação do pedido de sair, na troca de conta ou ao sair pelo diálogo de nova entrada;
+  em negação por sessão inválida de uma aba autenticada, ele é preservado em memória,
+  oculto e inerte, conforme a nova entrada no próprio local (FR-004). Testes automatizados DEVEM verificar essas regras e proteções.
+  HSTS pertence à publicação (L4).
+- **NFR-013 — Orçamento de tamanho da interface**: o JavaScript do carregamento inicial
+  da interface (entrada e contexto) DEVE somar no máximo 200 KB comprimidos (gzip),
+  verificado de forma bloqueante no CI; código carregado sob demanda não entra nessa
+  soma. Produtos derivados PODEM ajustar o limite com justificativa documentada.
+  Não há meta de tempo de carga na L3.
 
 ### Restrições vinculantes
 
@@ -685,11 +964,14 @@ publicação e restauração usando duas empresas e informações sintéticas.
 - **Vínculo com empresa**: associação da conta com sua empresa de origem, com estado
   ativo ou revogado e permissões aplicáveis; não é uma concessão de acesso da mesma
   identidade a várias empresas independentes.
-- **Permissão**: autorização para uma operação protegida em um contexto definido;
+- **Permissão**: autorização para uma operação protegida em um contexto definido,
+  identificada por código e com descrição pt-BR declarada em código no catálogo;
   ausência de concessão implica acesso negado. Dados de concessão e de sessão
   pertencem à mesma fonte de dados da conta e não são compartilhados entre tenants.
-- **Definição de módulo**: responsabilidade, contratos e dependências de componente
-  opcional acrescentado por um produto, sem representar módulo de negócio entregue.
+- **Definição de módulo**: id, responsabilidade, contratos (com versão maior),
+  dependências (id do contrato e versão maior exigida) e permissões
+  próprias (código prefixado pelo id e descrição pt-BR) de componente opcional acrescentado por um
+  produto, sem representar módulo de negócio entregue.
 - **Configuração de ambiente**: parâmetros necessários à execução, com distinção
   entre informação pública e sensível e sem credenciais reais em exemplos.
 - **Metadados de auditoria**: base comum dos registros de conta, permissão e sessão,
@@ -705,14 +987,17 @@ publicação e restauração usando duas empresas e informações sintéticas.
 
 Os critérios abaixo serão demonstrados na entrega da fundação, não nesta etapa
 documental. SC-009 define o aceite do primeiro incremento de backend; SC-001 a SC-008
-permanecem metas da evolução da fundação completa. As metas de tempo e volume não são
+permanecem metas da evolução da fundação completa, com o recorte de aceite de cada
+incremento definido no cabeçalho "Recorte vigente" (na L3, SC-001 e SC-004). As metas de tempo e volume não são
 promessas de capacidade para todos os produtos derivados.
 
 ### Measurable Outcomes
 
-- **SC-001**: dois desenvolvedores que não escreveram o guia conseguem, cada um,
-  executar a fundação e abrir a interface de acesso em até 45 minutos a partir de
-  um clone limpo, com pré-requisitos instalados, sem assistência do autor.
+- **SC-001**: um desenvolvedor que não escreveu o guia consegue executar a fundação
+  e chegar à interface de acesso autenticada em até 45 minutos a partir de um clone
+  limpo, com pré-requisitos instalados, sem assistência do autor, registrando tempo,
+  revisão e dúvidas encontradas. Além disso, o mesmo roteiro, automatizado em ambiente
+  limpo no CI (stack local e teste ponta a ponta), conclui em até 45 minutos.
 - **SC-002**: 100% dos casos da matriz de acesso são aprovados: entrada válida,
   identificação inválida, ausência de permissão, vínculo revogado, acesso expirado,
   empresa inativa, tentativa de usar sessão de A em B e encerramento de acesso,
@@ -723,10 +1008,14 @@ promessas de capacidade para todos os produtos derivados.
   revogar a sessão sem liberar consultas ou dados dessa empresa.
   Após bloqueio da conta por tentativas inválidas e término desse bloqueio, zero
   sessões anteriores voltam a autorizar operações; somente novo login permite acesso.
-  Com o prazo padrão, sessão usada continuamente é negada a partir de 30 minutos
-  após sua criação; uso durante o prazo não o estende. Prazos configurados de 5 e
-  480 minutos são aceitos; configuração ausente usa 30 minutos; 4, 481 ou valor
-  não inteiro impedem a inicialização sem expor secrets.
+  Com os padrões, sessão sem requisição autenticada aceita por 30 minutos é negada;
+  sessão usada a intervalos de no máximo 29 minutos continua válida até 600 minutos
+  após sua criação e é negada a partir daí, mesmo em uso (tolerância de até 60 segundos
+  antecipando a negação por inatividade, FR-006). Requisições negadas não
+  renovam a inatividade. Inatividade de 5 e 240 e teto de 30 e 720 minutos são aceitos;
+  configuração ausente usa 30/600; inatividade 4 ou 241, teto 29 ou 721, valor não
+  inteiro, inatividade maior que o teto ou a configuração anterior de prazo único
+  preenchida impedem a inicialização sem expor secrets.
   Com duas sessões simultâneas da mesma conta, logout em uma DEVE preservar a outra;
   reset, desativação, bloqueio ou revogação operacional DEVEM invalidar ambas.
   Falha na troca de sessão em novo login DEVE confirmar zero novas sessões e
@@ -735,8 +1024,9 @@ promessas de capacidade para todos os produtos derivados.
   Dois logins válidos concorrentes com a mesma sessão anterior DEVEM confirmar
   exatamente uma substituição e zero sessões adicionais pela tentativa perdedora,
   que recebe erro explícito; outras sessões independentes permanecem válidas.
-  Inativação/reativação da instalação DEVE preservar o prazo original: sessão ainda
-  válida e não revogada pode retomar; sessão expirada ou revogada permanece negada.
+  Inativação/reativação da instalação DEVE preservar o teto original e não pausar a
+  inatividade: sessão ainda válida e não revogada pode retomar; sessão expirada por
+  inatividade ou teto, ou revogada, permanece negada.
   Criação/alteração de conta, permissão e sessão DEVE preservar os metadados de
   auditoria e distinguir dois operadores individuais autenticados. Falha ao gravar
   auditoria NÃO DEVE confirmar a alteração; nenhuma autoria é fictícia.
@@ -752,6 +1042,13 @@ promessas de capacidade para todos os produtos derivados.
 - **SC-004**: duas variantes de produto são executadas, uma sem módulos de negócio
   e outra com componente opcional exclusivamente de teste, sem alterar controles
   comuns de identidade, permissão e isolamento nem manter referências quebradas.
+  O componente de teste é um módulo de backend com uma única operação sintética
+  protegida por permissão própria e dependência declarada de um contrato, carregado
+  somente pelos testes. Na variante com o componente, a operação responde conforme
+  a permissão (concedida → sucesso; ausente → negada); na variante sem módulos, ela
+  não existe e a interface não a anuncia. O documento de contrato servido pela instância
+  DEVE ser idêntico nas duas variantes. Solução e imagem distribuídas DEVEM ter
+  zero referências ao componente, verificado automaticamente no CI.
 - **SC-005**: um consumidor independente consulta seu contexto autorizado e reconhece
   corretamente as categorias de entrada inválida e acesso negado usando somente
   os contratos publicados, sem consultar implementação ou interface web.
