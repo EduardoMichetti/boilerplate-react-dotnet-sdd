@@ -116,7 +116,7 @@ Lacunas encontradas durante a geração. Valem como requisito das tasks abaixo; 
 
 **Checkpoint (R3 — fim da L2.1)**: FR-006/SC-002 aceitos, regressão SC-003/SC-005/SC-009 verde, ADR 0002 revisada. **Só então a Phase 23 (Q0) pode começar.**
 
-**Registro do aceite L2.1 (T169) — execução local de 2026-11-24, sem segredos.** Revisão testada: `b9ee250` + mudanças da Phase 22 na árvore de trabalho (branch `feat/l2.1-sessao`, ainda sem commit). Status: **aceite local concluído; pendente o Backend CI verde no push** (T169 fica aberta até lá).
+**Registro do aceite L2.1 (T169) — execução local de 2026-11-24 (verificação manual com sessão em 2026-11-25), sem segredos.** Revisão testada: `b9ee250` + mudanças da Phase 22 na árvore de trabalho (branch `feat/l2.1-sessao`, ainda sem commit). Status: **aceite local concluído; pendente o Backend CI verde no push** (T169 fica aberta até lá).
 
 | Item | Resultado |
 |---|---|
@@ -131,7 +131,12 @@ Lacunas encontradas durante a geração. Valem como requisito das tasks abaixo; 
 | Compose | `config --quiet` OK com env sintético (perfis `migrations`/`operations` e depuração); `.env.example` sozinho falha (esperado); só o serviço `api` recebe `Sessao__InatividadeMinutos`/`Sessao__TetoAbsolutoMinutos`; a chave obsoleta não é repassada. `backend-ci.yml` não referencia a chave antiga (sem alteração) |
 | §7 vulnerabilidades | `dotnet package list --project backend/Boilerplate.slnx --vulnerable --include-transitive`: 0 pacotes vulneráveis nos 8 projetos |
 | §7 Gitleaks | `zricethezav/gitleaks:v8.24.3`: `git` (38 commits) e `dir` (árvore de trabalho) sem vazamentos |
-| §4/§5 e §7.1 com sessão (conta, login, `expiresAt`/`idleTimeoutMinutes`, `/me` com `sessionIdleTimeoutMinutes` = 30, sem `Set-Cookie` em `/me`/`/context`, reinício com 5 sem afetar a sessão emitida) | **Pendente — mantenedor** (prompt de senha sem eco exige TTY; G32 é da L3). Cobertos automaticamente por T149–T153 com relógio controlado |
+| §4 contas/permissões (A e B) | Executado pelo mantenedor em 2026-11-25: `conta criar` e `permissao conceder foundation.context.read` em A e B com operador individual de cada instalação; senhas por prompt sem eco |
+| §5/§7.1 com sessão (A) | Login 201 com `expiresAt` = login + 10 h e `idleTimeoutMinutes` 30; `/me` com `sessionExpiresAt` igual ao teto e `sessionIdleTimeoutMinutes` 30; `/me` e `/context` 200 **sem** `Set-Cookie` |
+| §7.1 fixação na emissão (A) | Reinício com `Sessao__InatividadeMinutos=5`: sessão já emitida continua com 30; login novo emite 5; padrão restaurado (chaves vazias no container) |
+| §7.1 chave obsoleta (A) | `run --rm --no-deps -e Sessao__PrazoAbsolutoMinutos=30 api` → `OptionsValidationException` citando `Sessao:InatividadeMinutos` e `Sessao:TetoAbsolutoMinutos`, exit ≠ 0; API em execução continua ready |
+| Isolamento A/B | Login em B com `tenantId` `bbbb…` e janela 30; cookie de A em A → 200, em B → 401 |
+| Logout e reuso de cookie (A) | `DELETE /sessions/current` → 204; `/me` seguinte → 401 (`Motivo: Ausente`, cookie apagado do jar); cookie antigo reenviado após logout → 401 com log `EventId 1002` `Motivo: Revogada` + `TraceId`/`IdOperacao`, sem cookie, ticket, e-mail ou senha |
 | **Backend CI verde no push** | **Pendente — mantenedor** |
 
 ---
